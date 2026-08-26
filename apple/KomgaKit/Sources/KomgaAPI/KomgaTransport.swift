@@ -52,6 +52,30 @@ public struct KomgaTransport: Sendable {
         return try await fetch(SeriesPageDTO.self, url: url)
     }
 
+    /// `GET /api/v1/series/{seriesId}/books` — one series' book page.
+    public func fetchBooksPage(seriesID: String, request: PageRequest) async throws -> BookPageDTO {
+        let url = try Self.booksPageURL(baseURL: baseURL, seriesID: seriesID, request: request)
+        return try await fetch(BookPageDTO.self, url: url)
+    }
+
+    /// `GET /api/v1/books/ondeck` — continue-reading shelf.
+    public func fetchOnDeckPage(request: PageRequest) async throws -> BookPageDTO {
+        let url = try Self.onDeckPageURL(baseURL: baseURL, request: request)
+        return try await fetch(BookPageDTO.self, url: url)
+    }
+
+    /// `GET /api/v1/collections` — collections page.
+    public func fetchCollectionsPage(request: PageRequest) async throws -> CollectionPageDTO {
+        let url = try Self.collectionsPageURL(baseURL: baseURL, request: request)
+        return try await fetch(CollectionPageDTO.self, url: url)
+    }
+
+    /// `GET /api/v1/readlists` — readlists page.
+    public func fetchReadlistsPage(request: PageRequest) async throws -> ReadListPageDTO {
+        let url = try Self.readlistsPageURL(baseURL: baseURL, request: request)
+        return try await fetch(ReadListPageDTO.self, url: url)
+    }
+
     /// `GET /actuator/info` — server identity + version (connection probe).
     public func fetchServerInfo() async throws -> ServerInfoDTO {
         let url = try Self.serverInfoURL(baseURL: baseURL)
@@ -83,6 +107,68 @@ public struct KomgaTransport: Sendable {
     public static func seriesPageURL(baseURL: String, request: PageRequest) throws -> URL {
         let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         guard var components = URLComponents(string: "\(base)/api/v1/series") else {
+            throw KomgaAPIError.network
+        }
+        components.queryItems = request.queryItems()
+        guard let url = components.url else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// Books list URL for one series (stable query order: page, size, sort —
+    /// parity with Rust `books_page_url`).
+    public static func booksPageURL(baseURL: String, seriesID: String, request: PageRequest) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard var components = URLComponents(string: "\(base)/api/v1/series/\(seriesID)/books") else {
+            throw KomgaAPIError.network
+        }
+        components.queryItems = request.queryItems()
+        guard let url = components.url else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// On-deck (continue reading) URL.
+    public static func onDeckPageURL(baseURL: String, request: PageRequest) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard var components = URLComponents(string: "\(base)/api/v1/books/ondeck") else {
+            throw KomgaAPIError.network
+        }
+        components.queryItems = request.queryItems()
+        guard let url = components.url else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// Komga book thumbnail endpoint (used by the cover cache).
+    public static func bookThumbnailURL(baseURL: String, bookID: String) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/api/v1/books/\(bookID)/thumbnail") else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// Collections list URL.
+    public static func collectionsPageURL(baseURL: String, request: PageRequest) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard var components = URLComponents(string: "\(base)/api/v1/collections") else {
+            throw KomgaAPIError.network
+        }
+        components.queryItems = request.queryItems()
+        guard let url = components.url else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// Readlists list URL.
+    public static func readlistsPageURL(baseURL: String, request: PageRequest) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard var components = URLComponents(string: "\(base)/api/v1/readlists") else {
             throw KomgaAPIError.network
         }
         components.queryItems = request.queryItems()

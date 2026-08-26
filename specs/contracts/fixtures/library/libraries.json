@@ -1,0 +1,12 @@
+[
+  {
+    "id": "lib-1",
+    "name": "Manga Main",
+    "root": "/manga"
+  },
+  {
+    "id": "lib-2",
+    "name": "Webtoons",
+    "root": "/webtoons"
+  }
+]

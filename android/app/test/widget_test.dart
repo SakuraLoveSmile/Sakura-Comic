@@ -12,6 +12,7 @@ import 'package:comic_app/src/rust/sync/bootstrap.dart';
 import 'package:comic_app/src/server_form_screen.dart';
 import 'package:comic_app/src/server_manager.dart';
 import 'package:comic_app/src/servers_screen.dart';
+import 'package:comic_app/src/models.dart';
 import 'package:comic_app/src/series.dart';
 import 'package:comic_app/src/series_grid.dart';
 
@@ -166,12 +167,29 @@ void main() {
   });
 }
 
-class _FakeRepository implements LibraryRepository {
-  @override
-  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => const [
+class _FakeRepository extends LibraryRepository {
+  List<Series> get seeded =>
+      const [
         Series(remoteId: 's1', libraryId: 'lib-1', name: 'One Piece'),
         Series(remoteId: 's2', libraryId: 'lib-1', name: 'Berserk'),
       ];
+
+  @override
+  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => seeded;
+
+  @override
+  Future<PagedSeries> querySeries({
+    String? search,
+    String? libraryId,
+    String? status,
+    String? tag,
+    String? genre,
+    String sort = 'name',
+    bool ascending = true,
+    int limit = 50,
+    int offset = 0,
+  }) async =>
+      PagedSeries(items: seeded, total: seeded.length);
 
   @override
   Future<Map<String, String>> fetchCoverPaths() async => const {};
@@ -214,6 +232,9 @@ class _DemoFakeRepository extends _FakeRepository {
     Series(remoteId: 's-onepiece', libraryId: 'lib-1', name: 'One Piece'),
     Series(remoteId: 's-solo', libraryId: 'lib-1', name: 'Solo Leveling'),
   ];
+
+  @override
+  List<Series> get seeded => _demoSeries;
 
   @override
   Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => _demoSeries;

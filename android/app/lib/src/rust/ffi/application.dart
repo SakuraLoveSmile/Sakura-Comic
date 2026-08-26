@@ -5,7 +5,193 @@
 
 import '../frb_generated.dart';
 import '../model/server.dart';
+import '../store.dart';
+import '../store/books.dart';
+import '../store/collections.dart';
+import '../store/query.dart';
+import '../store/readlists.dart';
+import '../store/series.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+
+/// Full book detail (row + metadata + tags + authors + read progress).
+class BookDetailRow {
+  final String serverId;
+  final String remoteId;
+  final String seriesId;
+  final String? seriesTitle;
+  final String title;
+  final String? number;
+  final double? numberSort;
+  final String? summary;
+  final String? isbn;
+  final String? releaseDate;
+  final String? mediaType;
+  final PlatformInt64? pagesCount;
+  final PlatformInt64? fileSize;
+  final String? createdAt;
+  final String? lastModified;
+  final List<String> tags;
+  final List<AuthorRow> authors;
+  final PlatformInt64? progressPage;
+  final bool progressCompleted;
+
+  const BookDetailRow({
+    required this.serverId,
+    required this.remoteId,
+    required this.seriesId,
+    this.seriesTitle,
+    required this.title,
+    this.number,
+    this.numberSort,
+    this.summary,
+    this.isbn,
+    this.releaseDate,
+    this.mediaType,
+    this.pagesCount,
+    this.fileSize,
+    this.createdAt,
+    this.lastModified,
+    required this.tags,
+    required this.authors,
+    this.progressPage,
+    required this.progressCompleted,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      remoteId.hashCode ^
+      seriesId.hashCode ^
+      seriesTitle.hashCode ^
+      title.hashCode ^
+      number.hashCode ^
+      numberSort.hashCode ^
+      summary.hashCode ^
+      isbn.hashCode ^
+      releaseDate.hashCode ^
+      mediaType.hashCode ^
+      pagesCount.hashCode ^
+      fileSize.hashCode ^
+      createdAt.hashCode ^
+      lastModified.hashCode ^
+      tags.hashCode ^
+      authors.hashCode ^
+      progressPage.hashCode ^
+      progressCompleted.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BookDetailRow &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          remoteId == other.remoteId &&
+          seriesId == other.seriesId &&
+          seriesTitle == other.seriesTitle &&
+          title == other.title &&
+          number == other.number &&
+          numberSort == other.numberSort &&
+          summary == other.summary &&
+          isbn == other.isbn &&
+          releaseDate == other.releaseDate &&
+          mediaType == other.mediaType &&
+          pagesCount == other.pagesCount &&
+          fileSize == other.fileSize &&
+          createdAt == other.createdAt &&
+          lastModified == other.lastModified &&
+          tags == other.tags &&
+          authors == other.authors &&
+          progressPage == other.progressPage &&
+          progressCompleted == other.progressCompleted;
+}
+
+/// Collection detail: row + its member series (paged).
+class CollectionDetailRow {
+  final String remoteId;
+  final String name;
+  final bool ordered;
+  final bool filtered;
+  final String? createdDate;
+  final String? lastModifiedDate;
+  final SeriesPageResult members;
+
+  const CollectionDetailRow({
+    required this.remoteId,
+    required this.name,
+    required this.ordered,
+    required this.filtered,
+    this.createdDate,
+    this.lastModifiedDate,
+    required this.members,
+  });
+
+  @override
+  int get hashCode =>
+      remoteId.hashCode ^
+      name.hashCode ^
+      ordered.hashCode ^
+      filtered.hashCode ^
+      createdDate.hashCode ^
+      lastModifiedDate.hashCode ^
+      members.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CollectionDetailRow &&
+          runtimeType == other.runtimeType &&
+          remoteId == other.remoteId &&
+          name == other.name &&
+          ordered == other.ordered &&
+          filtered == other.filtered &&
+          createdDate == other.createdDate &&
+          lastModifiedDate == other.lastModifiedDate &&
+          members == other.members;
+}
+
+/// Paged collection rows + total.
+class CollectionPageResult {
+  final List<CollectionRow> items;
+  final PlatformInt64 total;
+
+  const CollectionPageResult({
+    required this.items,
+    required this.total,
+  });
+
+  @override
+  int get hashCode => items.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CollectionPageResult &&
+          runtimeType == other.runtimeType &&
+          items == other.items &&
+          total == other.total;
+}
+
+/// A collection that contains a series (detail screen membership chips).
+class CollectionRef {
+  final String remoteId;
+  final String name;
+
+  const CollectionRef({
+    required this.remoteId,
+    required this.name,
+  });
+
+  @override
+  int get hashCode => remoteId.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CollectionRef &&
+          runtimeType == other.runtimeType &&
+          remoteId == other.remoteId &&
+          name == other.name;
+}
 
 /// Outcome of the connection probe: server identity/version, remote
 /// entities (libraries) and policy-derived capabilities.
@@ -42,4 +228,204 @@ class ConnectionResult {
           serverVersion == other.serverVersion &&
           libraries == other.libraries &&
           capabilities == other.capabilities;
+}
+
+/// Distinct filter-chip options derived from the local mirror.
+class FilterOptions {
+  final List<String> tags;
+  final List<String> genres;
+  final List<String> statuses;
+
+  const FilterOptions({
+    required this.tags,
+    required this.genres,
+    required this.statuses,
+  });
+
+  @override
+  int get hashCode => tags.hashCode ^ genres.hashCode ^ statuses.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FilterOptions &&
+          runtimeType == other.runtimeType &&
+          tags == other.tags &&
+          genres == other.genres &&
+          statuses == other.statuses;
+}
+
+/// Readlist detail: row + its ordered books (paged).
+class ReadlistDetailRow {
+  final String remoteId;
+  final String name;
+  final String? summary;
+  final bool ordered;
+  final bool filtered;
+  final String? createdDate;
+  final String? lastModifiedDate;
+  final BookPageResult books;
+
+  const ReadlistDetailRow({
+    required this.remoteId,
+    required this.name,
+    this.summary,
+    required this.ordered,
+    required this.filtered,
+    this.createdDate,
+    this.lastModifiedDate,
+    required this.books,
+  });
+
+  @override
+  int get hashCode =>
+      remoteId.hashCode ^
+      name.hashCode ^
+      summary.hashCode ^
+      ordered.hashCode ^
+      filtered.hashCode ^
+      createdDate.hashCode ^
+      lastModifiedDate.hashCode ^
+      books.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReadlistDetailRow &&
+          runtimeType == other.runtimeType &&
+          remoteId == other.remoteId &&
+          name == other.name &&
+          summary == other.summary &&
+          ordered == other.ordered &&
+          filtered == other.filtered &&
+          createdDate == other.createdDate &&
+          lastModifiedDate == other.lastModifiedDate &&
+          books == other.books;
+}
+
+/// Paged readlist rows + total.
+class ReadlistPageResult {
+  final List<ReadlistRow> items;
+  final PlatformInt64 total;
+
+  const ReadlistPageResult({
+    required this.items,
+    required this.total,
+  });
+
+  @override
+  int get hashCode => items.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReadlistPageResult &&
+          runtimeType == other.runtimeType &&
+          items == other.items &&
+          total == other.total;
+}
+
+/// Full series detail (row + metadata + normalized tags/genres/authors +
+/// collection memberships).
+class SeriesDetailRow {
+  final String serverId;
+  final String remoteId;
+  final String libraryId;
+  final String name;
+  final String? sortName;
+  final String? status;
+  final String? createdAt;
+  final String? lastModified;
+  final PlatformInt64? booksCount;
+  final PlatformInt64? booksReadCount;
+  final PlatformInt64? booksUnreadCount;
+  final PlatformInt64? booksInProgressCount;
+  final String? summary;
+  final String? publisher;
+  final String? readingDirection;
+  final String? language;
+  final PlatformInt64? ageRating;
+  final PlatformInt64? totalBookCount;
+  final List<String> genres;
+  final List<String> tags;
+  final List<AuthorRow> authors;
+  final List<CollectionRef> collections;
+
+  const SeriesDetailRow({
+    required this.serverId,
+    required this.remoteId,
+    required this.libraryId,
+    required this.name,
+    this.sortName,
+    this.status,
+    this.createdAt,
+    this.lastModified,
+    this.booksCount,
+    this.booksReadCount,
+    this.booksUnreadCount,
+    this.booksInProgressCount,
+    this.summary,
+    this.publisher,
+    this.readingDirection,
+    this.language,
+    this.ageRating,
+    this.totalBookCount,
+    required this.genres,
+    required this.tags,
+    required this.authors,
+    required this.collections,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      remoteId.hashCode ^
+      libraryId.hashCode ^
+      name.hashCode ^
+      sortName.hashCode ^
+      status.hashCode ^
+      createdAt.hashCode ^
+      lastModified.hashCode ^
+      booksCount.hashCode ^
+      booksReadCount.hashCode ^
+      booksUnreadCount.hashCode ^
+      booksInProgressCount.hashCode ^
+      summary.hashCode ^
+      publisher.hashCode ^
+      readingDirection.hashCode ^
+      language.hashCode ^
+      ageRating.hashCode ^
+      totalBookCount.hashCode ^
+      genres.hashCode ^
+      tags.hashCode ^
+      authors.hashCode ^
+      collections.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SeriesDetailRow &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          remoteId == other.remoteId &&
+          libraryId == other.libraryId &&
+          name == other.name &&
+          sortName == other.sortName &&
+          status == other.status &&
+          createdAt == other.createdAt &&
+          lastModified == other.lastModified &&
+          booksCount == other.booksCount &&
+          booksReadCount == other.booksReadCount &&
+          booksUnreadCount == other.booksUnreadCount &&
+          booksInProgressCount == other.booksInProgressCount &&
+          summary == other.summary &&
+          publisher == other.publisher &&
+          readingDirection == other.readingDirection &&
+          language == other.language &&
+          ageRating == other.ageRating &&
+          totalBookCount == other.totalBookCount &&
+          genres == other.genres &&
+          tags == other.tags &&
+          authors == other.authors &&
+          collections == other.collections;
 }

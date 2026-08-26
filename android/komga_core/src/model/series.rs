@@ -1,7 +1,10 @@
-//! Series DTO — subset of the Komga SeriesDto (contract: specs/openapi,
-//! shared fixture: specs/contracts/fixtures/initial-sync/series-page.json).
+//! Series DTO — Komga SeriesDto (contract: specs/openapi, shared fixtures:
+//! specs/contracts/fixtures/initial-sync/series-page.json and
+//! specs/contracts/fixtures/library/series-page.json).
 
 use serde::{Deserialize, Serialize};
+
+use crate::model::author::Author;
 
 /// Page response of the Komga series list endpoint (Spring Data Page shape).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,7 +19,7 @@ pub struct SeriesPage {
     pub last: bool,
 }
 
-/// Minimal SeriesDto (unknown fields are ignored by serde).
+/// SeriesDto (unknown fields are ignored by serde).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Series {
@@ -30,10 +33,31 @@ pub struct Series {
     #[serde(default)]
     pub books_count: Option<i64>,
     #[serde(default)]
+    pub books_read_count: Option<i64>,
+    #[serde(default)]
+    pub books_unread_count: Option<i64>,
+    #[serde(default)]
+    pub books_in_progress_count: Option<i64>,
+    /// `booksMetadata` aggregation — series-level authors/tags (the list
+    /// endpoint carries series authors here, not inside `metadata`).
+    #[serde(default)]
+    pub books_metadata: Option<BookMetadataAggregation>,
+    #[serde(default)]
     pub metadata: Option<SeriesMetadata>,
 }
 
-/// Minimal SeriesMetadataDto.
+/// BookMetadataAggregationDto (subset: series authors/tags aggregation).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookMetadataAggregation {
+    #[serde(default)]
+    pub authors: Vec<Author>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// SeriesMetadataDto — the fields the media library needs; unknown fields
+/// (links, alternateTitles, sharingLabels, ...) are ignored by serde.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesMetadata {
@@ -43,5 +67,21 @@ pub struct SeriesMetadata {
     #[serde(default)]
     pub summary: Option<String>,
     #[serde(default)]
-    pub publishers: Vec<String>,
+    pub publisher: Option<String>,
+    #[serde(default)]
+    pub genres: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub authors: Vec<Author>,
+    #[serde(default)]
+    pub reading_direction: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub age_rating: Option<String>,
+    #[serde(default)]
+    pub title_sort: Option<String>,
+    #[serde(default)]
+    pub total_book_count: Option<i64>,
 }

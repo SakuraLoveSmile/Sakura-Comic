@@ -1,0 +1,63 @@
+{
+  "content": [
+    {
+      "id": "book-1-2",
+      "seriesId": "series-1",
+      "seriesTitle": "One Piece",
+      "libraryId": "lib-1",
+      "name": "One Piece #2",
+      "number": 2,
+      "oneshot": false,
+      "size": "11.9 MB",
+      "sizeBytes": 12478073,
+      "media": { "mediaType": "application/pdf", "pagesCount": 20, "status": "READY" },
+      "metadata": {
+        "title": "One Piece #2",
+        "titleLock": false,
+        "number": "2",
+        "numberLock": false,
+        "numberSort": 2.0,
+        "numberSortLock": false,
+        "releaseDate": "1997-09-04",
+        "releaseDateLock": false,
+        "summary": "Buggy the Clown appears.",
+        "summaryLock": false,
+        "authors": [{ "name": "Eiichiro Oda", "role": "STORY_ART" }],
+        "authorsLock": false,
+        "tags": ["Manga", "Pirate"],
+        "tagsLock": false,
+        "isbn": null,
+        "isbnLock": false,
+        "links": [],
+        "linksLock": false,
+        "created": "2025-01-01T00:00:00Z",
+        "lastModified": "2025-01-02T00:00:00Z"
+      },
+      "readProgress": {
+        "page": 12,
+        "completed": false,
+        "created": "2025-01-11T00:00:00Z",
+        "lastModified": "2025-01-11T00:00:00Z",
+        "deviceId": "fixture",
+        "deviceName": "Fixture",
+        "readDate": "2025-01-11T00:00:00Z"
+      },
+      "created": "2025-01-01T00:00:00Z",
+      "lastModified": "2025-01-02T00:00:00Z",
+      "fileLastModified": "2025-01-02T00:00:00Z",
+      "fileHash": "hash-1-2",
+      "url": "http://komga.local/api/v1/books/book-1-2",
+      "deleted": false
+    }
+  ],
+  "empty": false,
+  "first": true,
+  "last": true,
+  "number": 0,
+  "numberOfElements": 1,
+  "pageable": { "page": 0, "size": 100, "sort": ["lastModified,desc"], "offset": 0, "paged": true, "unpaged": false },
+  "size": 100,
+  "sort": { "sorted": true, "unsorted": false, "empty": false },
+  "totalElements": 1,
+  "totalPages": 1
+}

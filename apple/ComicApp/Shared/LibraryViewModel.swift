@@ -39,6 +39,35 @@ final class LibraryViewModel: ObservableObject {
     @Published var isRefreshing = false
     @Published var banner: String?
 
+    // MARK: Stage 4 — media library browsing state (全部来自 SQLite)
+
+    @Published var libraries: [LibraryCountRecord] = []
+    @Published var filterOptions = FilterOptions(tags: [], genres: [], statuses: [])
+    @Published var continueReading: [ContinueReadingRecord] = []
+    @Published var collections: [CollectionRecord] = []
+    @Published var collectionsTotal = 0
+    @Published var readlists: [ReadlistRecord] = []
+    @Published var readlistsTotal = 0
+
+    /// Series shelf query state (all local).
+    @Published var searchText = ""
+    @Published var selectedLibraryID: String?
+    @Published var selectedStatus: String?
+    @Published var selectedTag: String?
+    @Published var selectedGenre: String?
+    @Published var seriesSort = "name"
+    @Published var seriesAscending = true
+    @Published var seriesTotal = 0
+    @Published var isLoadingSeries = false
+
+    /// Series/Book drill-down state (one detail at a time).
+    @Published var seriesDetail: SeriesDetailRecord?
+    @Published var books: [BookRecord] = []
+    @Published var booksTotal = 0
+    @Published var bookReadFilter: String? // "read" | "in_progress" | "unread" | nil
+    @Published var bookSort = "number"
+    @Published var bookCovers: [String: Data] = [:]
+
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let dbURL = documents.appendingPathComponent("comic.sqlite")
@@ -347,6 +376,233 @@ final class LibraryViewModel: ObservableObject {
             banner = "演示数据：\(summary.syncedSeries) 个 Series"
         } catch {
             banner = "演示失败：\(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Stage 4 media library (全部本地查询)
+
+    /// Full demo: seeds the whole media library from the shared fixtures
+    /// (libraries / series / books / collections / readlists / progress).
+    func loadFullDemo() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let profile = ServerProfile(id: "demo", displayName: "Demo", baseURL: "https://demo.local", authType: .apiKey)
+            try store.upsertServer(profile)
+            try store.setActiveServer(id: profile.id)
+            self.server = profile
+            self.servers = try store.fetchServers()
+            reloadCoverLoader()
+            let fetcher = DemoLibraryFetcher()
+            let libraries = try await fetcher.fetchLibraries()
+            _ = try store.upsertLibraries(serverID: "demo", libraries: libraries)
+            let summary = try await FullSync.run(fetcher: fetcher, store: store, serverID: "demo")
+            try loadSeries()
+            await refreshAllCovers()
+            try syncMediaState()
+            banner = "演示数据：\(summary.series) Series / \(summary.books) Books"
+        } catch {
+            banner = "演示失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// FullSync (Series → Books → Collections → Readlists → Progress),
+    /// then reload every shelf from the local store.
+    func fullSync() async {
+        guard let transport, let server else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let summary = try await FullSync.run(fetcher: transport, store: store, serverID: server.id)
+            try loadSeries()
+            await refreshAllCovers()
+            try syncMediaState()
+            banner = "已同步 \(summary.series) Series / \(summary.books) Books"
+        } catch {
+            banner = "同步失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Shelf entry points: libraries, filter options, continue reading,
+    /// collections, readlists — all SQLite (断网可用).
+    func syncMediaState() throws {
+        guard let server else { return }
+        libraries = try store.libraryCounts(serverID: server.id)
+        filterOptions = try store.filterOptions(serverID: server.id)
+        continueReading = try store.continueReading(serverID: server.id, limit: 10)
+        let collectionsPage = try store.listCollections(serverID: server.id, limit: 200, offset: 0)
+        collections = collectionsPage.items
+        collectionsTotal = collectionsPage.total
+        let readlistsPage = try store.listReadlists(serverID: server.id, limit: 200, offset: 0)
+        readlists = readlistsPage.items
+        readlistsTotal = readlistsPage.total
+    }
+
+    /// (Re)load the series wall honoring search/filters/sort (SQLite FTS).
+    func loadSeriesWall(reset: Bool = true) {
+        guard let server else { return }
+        let pageSize = 50
+        let offset = reset ? 0 : series.count
+        do {
+            let result = try store.querySeries(
+                serverID: server.id,
+                search: searchText.isEmpty ? nil : searchText,
+                libraryID: selectedLibraryID,
+                status: selectedStatus,
+                tag: selectedTag,
+                genre: selectedGenre,
+                sort: storeSeriesSort(),
+                ascending: seriesAscending,
+                limit: Int64(pageSize),
+                offset: Int64(offset)
+            )
+            series = reset ? result.items : series + result.items
+            seriesTotal = result.total
+        } catch {
+            banner = "查询失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Load the next wall page (infinite scroll).
+    func loadMoreSeries() {
+        isLoadingSeries = true
+        loadSeriesWall(reset: false)
+        isLoadingSeries = false
+    }
+
+    private func storeSeriesSort() -> KomgaStore.SeriesSort {
+        switch seriesSort {
+        case "sortName": return .sortName
+        case "dateAdded": return .dateAdded
+        case "dateUpdated": return .dateUpdated
+        case "booksCount": return .booksCount
+        default: return .name
+        }
+    }
+
+    /// Open a series detail: metadata + first book page + book-cover backfill.
+    func openSeries(_ record: SeriesRecord) {
+        guard let server else { return }
+        do {
+            seriesDetail = try store.seriesDetail(serverID: server.id, seriesID: record.remoteID)
+            loadBooks(seriesID: record.remoteID, reset: true)
+            if covers[record.remoteID] == nil {
+                Task { await refreshCover(record) }
+            }
+        } catch {
+            banner = "读取详情失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Open a series detail from a shelf entry (no wall record in memory).
+    func openSeries(seriesID: String) {
+        guard let server else { return }
+        do {
+            guard let detail = try store.seriesDetail(serverID: server.id, seriesID: seriesID) else { return }
+            seriesDetail = detail
+            loadBooks(seriesID: seriesID, reset: true)
+            let record = SeriesRecord(
+                serverID: server.id, remoteID: detail.remoteID, libraryID: detail.libraryID,
+                name: detail.name, sortName: detail.sortName, status: detail.status,
+                createdAt: detail.createdAt, lastModified: detail.lastModified,
+                booksCount: detail.booksCount, booksReadCount: detail.booksReadCount,
+                booksUnreadCount: detail.booksUnreadCount, booksInProgressCount: detail.booksInProgressCount
+            )
+            if covers[detail.remoteID] == nil {
+                Task { await refreshCover(record) }
+            }
+        } catch {
+            banner = "读取详情失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Book detail metadata (SQLite only).
+    func bookDetail(for book: BookRecord) throws -> BookDetailRecord? {
+        guard let server else { return nil }
+        return try store.bookDetail(serverID: server.id, bookID: book.remoteID)
+    }
+
+    func loadBooks(seriesID: String, reset: Bool = true) {
+        guard let server else { return }
+        let pageSize = 100
+        let offset = reset ? 0 : books.count
+        do {
+            let result = try store.queryBooks(
+                serverID: server.id,
+                seriesID: seriesID,
+                readStatus: bookReadFilter.flatMap(KomgaStore.ReadStatus.init(rawValue:)),
+                sort: bookSort == "title" ? .title : .number,
+                ascending: true,
+                limit: Int64(pageSize),
+                offset: Int64(offset)
+            )
+            books = reset ? result.items : books + result.items
+            booksTotal = result.total
+        } catch {
+            banner = "读取书籍失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// Book cover bytes (variant "book"), resolved SQLite-first — same
+    /// cache discipline as series covers.
+    func bookCoverData(for book: BookRecord) async -> Data? {
+        guard let server else { return nil }
+        let loader: CoverLoader = server.id == "demo" ? demoCoverLoader : realCoverLoader
+        do {
+            // Resolve the cover path from SQLite (`variant = 'book'`).
+            if let record = try store.thumbnail(serverID: server.id, remoteID: book.remoteID, variant: "book") {
+                let path = record.localPath
+                let fileURL = URL(fileURLWithPath: path)
+                if FileManager.default.fileExists(atPath: path), let cached = try? cache.load(fileURL) {
+                    bookCovers[book.remoteID] = cached
+                    return cached
+                }
+            }
+            let url = try KomgaTransport.bookThumbnailURL(baseURL: server.baseURL, bookID: book.remoteID)
+            let data = try await loader.thumbnailData(serverID: server.id, seriesID: book.remoteID, coverURL: url)
+            let key = DiskImageCache.coverKey(serverID: server.id, seriesID: book.remoteID)
+            let fileURL = cache.thumbnailURL(for: key)
+            try store.upsertThumbnail(ThumbnailRecord(
+                serverID: server.id, remoteID: book.remoteID, variant: "book",
+                localPath: fileURL.path, sizeBytes: Int64(data.count)
+            ))
+            bookCovers[book.remoteID] = data
+            return data
+        } catch {
+            return nil
+        }
+    }
+
+    func refreshBookCover(_ book: BookRecord) async {
+        bookCovers[book.remoteID] = await bookCoverData(for: book)
+    }
+
+    /// Local read-status mutations (本地优先 + Outbox), then reload.
+    func markRead(_ book: BookRecord) {
+        guard let server else { return }
+        do {
+            try store.markRead(serverID: server.id, bookID: book.remoteID)
+            if let seriesDetail {
+                loadBooks(seriesID: seriesDetail.remoteID, reset: true)
+            }
+            try syncMediaState()
+            loadSeriesWall(reset: true)
+        } catch {
+            banner = "标记已读失败：\(error.localizedDescription)"
+        }
+    }
+
+    func markUnread(_ book: BookRecord) {
+        guard let server else { return }
+        do {
+            try store.markUnread(serverID: server.id, bookID: book.remoteID)
+            if let seriesDetail {
+                loadBooks(seriesID: seriesDetail.remoteID, reset: true)
+            }
+            try syncMediaState()
+            loadSeriesWall(reset: true)
+        } catch {
+            banner = "标记未读失败：\(error.localizedDescription)"
         }
     }
 }

@@ -16,7 +16,7 @@ class ServerManager {
     required this.dbPath,
     RustCoreApi? api,
     SecretStore? secrets,
-  })  : _api = api ?? const FrbRustCoreApi(),
+  })  : _api = api ?? FrbRustCoreApi(),
         _secrets = secrets ?? const KeystoreSecretStore();
 
   final String dbPath;

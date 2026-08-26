@@ -8,7 +8,7 @@ import KomgaAPI
 /// so observers see consistent snapshots. Credentials are never stored here —
 /// only `credentialRef` references into Keychain.
 public final class KomgaStore: @unchecked Sendable {
-    private let dbQueue: DatabaseQueue
+    let dbQueue: DatabaseQueue
 
     /// Opens (or creates) the database at `path` and applies migrations.
     public init(path: String) throws {
@@ -25,10 +25,7 @@ public final class KomgaStore: @unchecked Sendable {
     public func migrate() throws {
         try dbQueue.write { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
-            for statement in Schema.createStatements {
-                try db.execute(sql: statement)
-            }
-            try db.execute(sql: "PRAGMA user_version = \(Schema.currentVersion)")
+            try Schema.migrate(db)
         }
     }
 
@@ -85,9 +82,22 @@ public final class KomgaStore: @unchecked Sendable {
             if try activeServerID(db: db) == id {
                 try db.execute(sql: "DELETE FROM app_state WHERE key = ?", arguments: [Self.activeServerKey])
             }
-            // Cascade: this server's cover records go away with the profile
-            // (files are removed by the caller through DiskImageCache).
-            try db.execute(sql: "DELETE FROM thumbnails WHERE server_id = ?", arguments: [id])
+            // Cascade: the full mirrored rows for this server go away
+            // (cover files are removed by the caller through DiskImageCache).
+            let tables = [
+                "series", "books", "series_metadata", "book_metadata",
+                "series_tags", "series_genres", "series_authors",
+                "book_tags", "book_authors",
+                "collections", "collection_series",
+                "readlists", "readlist_books",
+                "read_progress", "libraries", "sync_state", "pending_mutations",
+                "thumbnails", "downloads", "download_pages",
+            ]
+            for table in tables {
+                try db.execute(sql: "DELETE FROM \(table) WHERE server_id = ?", arguments: [id])
+            }
+            try db.execute(sql: "DELETE FROM series_fts WHERE server_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM book_fts WHERE server_id = ?", arguments: [id])
             // The servers delete runs last so changesCount reflects it.
             try db.execute(sql: "DELETE FROM servers WHERE id = ?", arguments: [id])
             return db.changesCount > 0

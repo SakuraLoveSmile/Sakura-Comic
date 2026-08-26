@@ -1,107 +1,16 @@
 import 'rust/ffi/application.dart';
 import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
+import 'rust/store/query.dart';
+import 'rust/store/read_progress.dart';
 import 'rust/store/series.dart';
 import 'rust/store/thumbnails.dart';
 import 'rust/sync/bootstrap.dart';
-
-/// Contract for the FFI layer mirroring
-/// android/komga_core/src/ffi/bridge.rs (Phase 0 step 02).
-///
-/// The generated bindings in lib/src/rust/ implement this contract natively;
-/// [StubRustCoreApi] exists so widget tests and host tooling can run without
-/// the native library.
-abstract interface class RustCoreApi {
-  /// Application Facade `bootstrap` — API-key auth, mirrors the first page.
-  Future<BootstrapSummary> bootstrap({
-    required String dbPath,
-    required String serverId,
-    required String baseUrl,
-    required String apiKey,
-  });
-
-  /// Connection probe (acceptance chain): authenticate + verify Komga +
-  /// fetch server info + libraries + version policy check.
-  Future<ConnectionResult> testConnection({
-    required String baseUrl,
-    required String apiKey,
-  });
-
-  Future<List<SeriesRow>> fetchSeries({
-    required String dbPath,
-    required String serverId,
-    int limit = 50,
-    int offset = 0,
-  });
-
-  Future<List<ServerProfile>> listServers({required String dbPath});
-
-  Future<void> saveServer({required String dbPath, required ServerProfile profile});
-
-  Future<ServerProfile?> getServer({
-    required String dbPath,
-    required String serverId,
-  });
-
-  /// Deletes a server profile (clears the active-server state when needed).
-  Future<bool> deleteServer({required String dbPath, required String serverId});
-
-  /// Persist libraries discovered during a successful connection.
-  Future<void> saveLibraries({
-    required String dbPath,
-    required String serverId,
-    required List<Library> libraries,
-  });
-
-  Future<void> setActiveServer({required String dbPath, required String serverId});
-
-  Future<String?> getActiveServer({required String dbPath});
-
-  /// Cover file path for one series, resolved from SQLite only (null = cache
-  /// miss; the UI shows a placeholder and triggers ensureCovers).
-  Future<String?> coverPath({
-    required String dbPath,
-    required String serverId,
-    required String seriesId,
-  });
-
-  /// All cover records for one server (dead files filtered out), so the
-  /// grid maps remote_id → local path with a single call.
-  Future<List<ThumbnailRow>> listThumbnails({
-    required String dbPath,
-    required String serverId,
-  });
-
-  /// Backfill one series cover (cache miss → download → disk → SQLite row),
-  /// returning the local file path.
-  Future<String> ensureCover({
-    required String dbPath,
-    required String serverId,
-    required String seriesId,
-    required String baseUrl,
-    required String apiKey,
-  });
-
-  /// Backfill every series cover without a usable record (缓存缺失自动补齐).
-  /// Returns the number of covers written.
-  Future<int> ensureCovers({
-    required String dbPath,
-    required String serverId,
-    required String baseUrl,
-    required String apiKey,
-  });
-
-  /// Offline demo: seeds the store with the shared fixture series and
-  /// generated covers — a demonstrable cover wall without a server.
-  Future<BootstrapSummary> bootstrapDemo({
-    required String dbPath,
-    required String serverId,
-  });
-}
+import 'rust/sync/full.dart';
 
 /// In-memory stub so tests and the fallback UI path can run without FFI.
-class StubRustCoreApi implements RustCoreApi {
-  const StubRustCoreApi();
+class StubRustCoreApi extends RustCoreApi {
+  StubRustCoreApi();
 
   @override
   Future<BootstrapSummary> bootstrap({
@@ -212,4 +121,275 @@ class StubRustCoreApi implements RustCoreApi {
         totalElements: 0,
         hasMorePages: false,
       );
+}
+
+/// Contract for the FFI layer mirroring
+/// android/komga_core/src/ffi/bridge.rs (Phase 0 step 02).
+///
+/// The generated bindings in lib/src/rust/ implement this contract natively;
+/// [StubRustCoreApi] exists so widget tests and host tooling can run without
+/// the native library.
+///
+/// Abstract class (not `interface`): the Stage 4 media-library surface ships
+/// with flat/empty default bodies so test doubles stay small, while the
+/// transport methods remain abstract.
+abstract class RustCoreApi {
+  /// Application Facade `bootstrap` — API-key auth, mirrors the first page.
+  Future<BootstrapSummary> bootstrap({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  });
+
+  /// Connection probe (acceptance chain): authenticate + verify Komga +
+  /// fetch server info + libraries + version policy check.
+  Future<ConnectionResult> testConnection({
+    required String baseUrl,
+    required String apiKey,
+  });
+
+  Future<List<SeriesRow>> fetchSeries({
+    required String dbPath,
+    required String serverId,
+    int limit = 50,
+    int offset = 0,
+  });
+
+  Future<List<ServerProfile>> listServers({required String dbPath});
+
+  Future<void> saveServer({required String dbPath, required ServerProfile profile});
+
+  Future<ServerProfile?> getServer({
+    required String dbPath,
+    required String serverId,
+  });
+
+  /// Deletes a server profile (clears the active-server state when needed).
+  Future<bool> deleteServer({required String dbPath, required String serverId});
+
+  /// Persist libraries discovered during a successful connection.
+  Future<void> saveLibraries({
+    required String dbPath,
+    required String serverId,
+    required List<Library> libraries,
+  });
+
+  Future<void> setActiveServer({required String dbPath, required String serverId});
+
+  Future<String?> getActiveServer({required String dbPath});
+
+  /// Cover file path for one series, resolved from SQLite only (null = cache
+  /// miss; the UI shows a placeholder and triggers ensureCovers).
+  Future<String?> coverPath({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  });
+
+  /// All cover records for one server (dead files filtered out), so the
+  /// grid maps remote_id → local path with a single call.
+  Future<List<ThumbnailRow>> listThumbnails({
+    required String dbPath,
+    required String serverId,
+  });
+
+  /// Backfill one series cover (cache miss → download → disk → SQLite row),
+  /// returning the local file path.
+  Future<String> ensureCover({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  });
+
+  /// Backfill every series cover without a usable record (缓存缺失自动补齐).
+  /// Returns the number of covers written.
+  Future<int> ensureCovers({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  });
+
+  /// Offline demo: seeds the store with the shared fixture series and
+  /// generated covers — a demonstrable cover wall without a server.
+  Future<BootstrapSummary> bootstrapDemo({
+    required String dbPath,
+    required String serverId,
+  });
+
+  // MARK: Stage 4 — media library (全部本地：SQLite)
+  // These carry flat/empty default bodies: subclasses that extend get them
+  // for free; the FRB-backed implementation overrides every one.
+
+  /// FullSync against a live server: series → books → collections →
+  /// readlists → on-deck progress.
+  Future<FullSyncSummary> fullSync({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      FullSyncSummary(
+        serverId: serverId,
+        series: BigInt.zero,
+        books: BigInt.zero,
+        collections: BigInt.zero,
+        readlists: BigInt.zero,
+        readProgress: BigInt.zero,
+        seriesPages: 0,
+        bookPages: 0,
+      );
+
+  /// Paged series wall with search / filters / sort (本地查询).
+  Future<SeriesPageResult> querySeries({
+    required String dbPath,
+    required String serverId,
+    String? search,
+    String? libraryId,
+    String? status,
+    String? tag,
+    String? genre,
+    String sort = 'name',
+    bool ascending = true,
+    int limit = 50,
+    int offset = 0,
+  }) async =>
+      const SeriesPageResult(items: [], total: 0);
+
+  /// Paged book list of one series with read-status / tag filters (本地查询).
+  Future<BookPageResult> queryBooks({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    String? search,
+    String? readStatus,
+    String? tag,
+    String sort = 'number',
+    bool ascending = true,
+    int limit = 100,
+    int offset = 0,
+  }) async =>
+      const BookPageResult(items: [], total: 0);
+
+  /// Full series detail (all local).
+  Future<SeriesDetailRow?> seriesDetail({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) async =>
+      null;
+
+  /// Full book detail (all local).
+  Future<BookDetailRow?> bookDetail({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) async =>
+      null;
+
+  /// Collections searchable list (paged, local).
+  Future<CollectionPageResult> listCollections({
+    required String dbPath,
+    required String serverId,
+    String? search,
+    int limit = 100,
+    int offset = 0,
+  }) async =>
+      const CollectionPageResult(items: [], total: 0);
+
+  /// Collection detail: row + member series (paged, local).
+  Future<CollectionDetailRow?> collectionDetail({
+    required String dbPath,
+    required String serverId,
+    required String collectionId,
+    int limit = 200,
+    int offset = 0,
+  }) async =>
+      null;
+
+  /// Readlists searchable list (paged, local).
+  Future<ReadlistPageResult> listReadlists({
+    required String dbPath,
+    required String serverId,
+    String? search,
+    int limit = 100,
+    int offset = 0,
+  }) async =>
+      const ReadlistPageResult(items: [], total: 0);
+
+  /// Readlist detail: row + ordered books (paged, local).
+  Future<ReadlistDetailRow?> readlistDetail({
+    required String dbPath,
+    required String serverId,
+    required String readlistId,
+    int limit = 500,
+    int offset = 0,
+  }) async =>
+      null;
+
+  /// Continue-reading shelf (books read partially, local only).
+  Future<List<ContinueReadingRow>> continueReading({
+    required String dbPath,
+    required String serverId,
+    int limit = 10,
+  }) async =>
+      const [];
+
+  /// Filter-chip options derived from the local mirror.
+  Future<FilterOptions> filterOptions({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      const FilterOptions(tags: [], genres: [], statuses: []);
+
+  /// Library rows with their local series counts (Library 列表/切换).
+  Future<List<LibraryCountRow>> libraryCounts({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      const [];
+
+  /// Local page update + outbox row (READ_PROGRESS).
+  Future<void> setReadProgress({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+    required int page,
+    required bool completed,
+  }) async {}
+
+  /// Explicit mark-read + outbox row (MARK_READ).
+  Future<void> markRead({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) async {}
+
+  /// Explicit mark-unread + outbox row (MARK_UNREAD).
+  Future<void> markUnread({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) async {}
+
+  /// Book cover file path resolved from SQLite only (null = cache miss).
+  Future<String?> bookCoverPath({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) async =>
+      null;
+
+  /// Backfill every book cover of one series (缓存缺失自动补齐, book variant).
+  Future<int> ensureBookCovers({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      0;
 }

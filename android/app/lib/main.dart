@@ -28,7 +28,7 @@ Future<(LibraryRepository, ServerManager?, String?)> createServices() async {
     final docs = await getApplicationDocumentsDirectory();
     final dbPath = '${docs.path}/comic.sqlite';
     debugPrint('[RustCore] FFI connected (libkomga_core loaded), db=$dbPath');
-    const api = FrbRustCoreApi();
+    final api = FrbRustCoreApi();
     final manager = ServerManager(dbPath: dbPath, api: api);
     return (
       RustLibraryRepository(dbPath: dbPath, api: api, serverManager: manager),

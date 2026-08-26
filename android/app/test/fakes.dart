@@ -8,7 +8,7 @@ import 'package:comic_app/src/rust_core_api.dart';
 
 /// In-memory fake of the FFI surface, recording probe calls like the real
 /// core would (fixture-shaped probe result).
-class MemoryRustCoreApi implements RustCoreApi {
+class MemoryRustCoreApi extends RustCoreApi {
   final Map<String, ServerProfile> servers = {};
   final Map<String, List<Library>> librariesByServer = {};
   String? activeId;

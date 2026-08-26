@@ -17,6 +17,7 @@ pub enum ApiError {
     Database { message: String },
     Storage { message: String },
     Decode { message: String },
+    InvalidInput { message: String },
 }
 
 impl fmt::Display for ApiError {
@@ -32,6 +33,7 @@ impl fmt::Display for ApiError {
             ApiError::Database { message } => write!(f, "database error: {message}"),
             ApiError::Storage { message } => write!(f, "storage error: {message}"),
             ApiError::Decode { message } => write!(f, "decode error: {message}"),
+            ApiError::InvalidInput { message } => write!(f, "invalid input: {message}"),
         }
     }
 }

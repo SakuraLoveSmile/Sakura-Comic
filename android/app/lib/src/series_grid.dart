@@ -1,15 +1,23 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'collections_screen.dart';
 import 'library_repository.dart';
+import 'models.dart';
+import 'readlists_screen.dart';
+import 'series_detail.dart';
 import 'server_manager.dart';
 import 'servers_screen.dart';
 import 'series.dart';
 
-/// Library cover wall — reads series + cover paths from the local store
-/// ([LibraryRepository]); network is confined to sync/demo actions (Local
-/// First: 本地数据库负责展示). Server management is one tap away.
+/// The media library browser — reading series/books/collections/readlists/
+/// progress from the local store ([LibraryRepository]); network is confined
+/// to sync/demo/cover actions (Local First: 本地数据库负责展示). Everything
+/// renders with the network disconnected.
+///
+/// Tabs: 书架 (wall + continue reading + search/filters/sort) / 合集 / 书单.
 class SeriesGridScreen extends StatefulWidget {
   const SeriesGridScreen({
     super.key,
@@ -38,26 +46,109 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
   bool _syncing = false;
   bool _autoSynced = false;
 
+  // Stage 4 query state (全部本地：SQLite).
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  String? _selectedLibraryId;
+  String? _selectedStatus;
+  String? _selectedTag;
+  String? _selectedGenre;
+  String _sortKey = 'name';
+  bool _ascending = true;
+  int _seriesTotal = 0;
+  bool _loadingMore = false;
+
+  List<ContinueReadingItem> _continueReading = const [];
+  List<LibraryCount> _libraries = const [];
+  FilterOptions _filterOptions = const FilterOptions();
+  List<CollectionItem> _collections = const [];
+  List<ReadlistItem> _readlists = const [];
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     try {
-      final rows = await widget.repository.fetchSeries();
-      final covers = await widget.repository.fetchCoverPaths();
-      if (!mounted) return;
-      setState(() {
-        _series = rows;
-        _coverPaths = covers;
-      });
+      await Future.wait([
+        _loadWall(reset: true),
+        _loadSyncState(),
+        _loadCovers(),
+      ]);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
     }
     _maybeAutoSync();
+  }
+
+  Future<void> _loadCovers() async {
+    final covers = await widget.repository.fetchCoverPaths();
+    if (!mounted) return;
+    setState(() => _coverPaths = covers);
+  }
+
+  Future<void> _loadWall({required bool reset}) async {
+    final offset = reset ? 0 : _series.length;
+    final page = await widget.repository.querySeries(
+      search: _searchController.text.isEmpty ? null : _searchController.text,
+      libraryId: _selectedLibraryId,
+      status: _selectedStatus,
+      tag: _selectedTag,
+      genre: _selectedGenre,
+      sort: _sortKey,
+      ascending: _ascending,
+      limit: 50,
+      offset: offset,
+    );
+    if (!mounted) return;
+    setState(() {
+      _series = reset ? page.items : [..._series, ...page.items];
+      _seriesTotal = page.total;
+      _error = null;
+    });
+  }
+
+  /// Shelves that are NOT the series wall: libraries, filter options,
+  /// continue reading, collections, readlists — all SQLite.
+  Future<void> _loadSyncState() async {
+    final results = await Future.wait([
+      widget.repository.fetchLibraryCounts(),
+      widget.repository.fetchFilterOptions(),
+      widget.repository.continueReading(limit: 10),
+      widget.repository.listCollections(limit: 200),
+      widget.repository.listReadlists(limit: 200),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _libraries = results[0] as List<LibraryCount>;
+      _filterOptions = results[1] as FilterOptions;
+      _continueReading = results[2] as List<ContinueReadingItem>;
+      _collections = (results[3] as PagedCollections).items;
+      _readlists = (results[4] as PagedReadlists).items;
+    });
+  }
+
+  void _loadMore() {
+    if (_loadingMore || _series.length >= _seriesTotal) return;
+    _loadingMore = true;
+    _loadWall(reset: false).whenComplete(() => _loadingMore = false);
+  }
+
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      _loadWall(reset: true);
+    });
   }
 
   /// First load with an FFI-backed repository triggers one sync (mirrors
@@ -93,7 +184,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
     }
   }
 
-  /// Offline demo: fixture series + generated covers (no server needed).
+  /// Offline demo: fixture full media library + generated covers.
   Future<void> _loadDemo() async {
     setState(() => _syncing = true);
     try {
@@ -148,49 +239,74 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
   @override
   Widget build(BuildContext context) {
     final manager = widget.manager;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_activeServerName ?? 'Library'),
-        actions: [
-          if (manager != null)
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_activeServerName ?? 'Library'),
+          actions: [
+            if (manager != null)
+              IconButton(
+                onPressed: _openServers,
+                tooltip: '服务器',
+                icon: const Icon(Icons.dns_outlined),
+              ),
+            if (widget.repository.demoSupported)
+              IconButton(
+                onPressed: _syncing ? null : _loadDemo,
+                tooltip: '演示（本地媒体库）',
+                icon: const Icon(Icons.auto_awesome_outlined),
+              ),
             IconButton(
-              onPressed: _openServers,
-              tooltip: '服务器',
-              icon: const Icon(Icons.dns_outlined),
+              onPressed: _syncing ? null : _sync,
+              tooltip: '同步',
+              icon: _syncing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
             ),
-          if (widget.repository.demoSupported)
-            IconButton(
-              onPressed: _syncing ? null : _loadDemo,
-              tooltip: '演示（本地封面墙）',
-              icon: const Icon(Icons.auto_awesome_outlined),
-            ),
-          IconButton(
-            onPressed: _syncing ? null : _sync,
-            tooltip: '同步',
-            icon: _syncing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh),
+          ],
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: '书架'),
+              Tab(text: '合集'),
+              Tab(text: '书单'),
+            ],
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (widget.rustStatus != null)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Text(
-                widget.rustStatus!,
-                style: Theme.of(context).textTheme.bodySmall,
+        ),
+        body: Column(
+          children: [
+            if (widget.rustStatus != null)
+              Container(
+                width: double.infinity,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text(
+                  widget.rustStatus!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _buildBody(),
+                  CollectionsScreen(
+                    repository: widget.repository,
+                    collections: _collections,
+                    coverPaths: _coverPaths,
+                  ),
+                  ReadlistsScreen(
+                    repository: widget.repository,
+                    readlists: _readlists,
+                  ),
+                ],
               ),
             ),
-          Expanded(child: _buildBody()),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -199,7 +315,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
     if (_error != null) {
       return Center(child: Text('加载失败: $_error'));
     }
-    if (_series.isEmpty) {
+    if (_series.isEmpty && _seriesTotal == 0 && _libraries.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -217,7 +333,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
                 if (widget.repository.demoSupported)
                   FilledButton(
                     onPressed: _syncing ? null : _loadDemo,
-                    child: const Text('加载演示封面墙'),
+                    child: const Text('加载演示媒体库'),
                   ),
               ],
             ),
@@ -225,8 +341,234 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         ),
       );
     }
-    return GridView.builder(
+    return ListView(
       padding: const EdgeInsets.all(12),
+      children: [
+        _searchField(),
+        const SizedBox(height: 8),
+        _libraryChips(),
+        const SizedBox(height: 8),
+        _shelfControls(),
+        if (_continueReading.isNotEmpty && _searchController.text.isEmpty) ...[
+          const SizedBox(height: 12),
+          _continueReadingShelf(),
+        ],
+        const SizedBox(height: 12),
+        Text(
+          '共 $_seriesTotal 个 Series',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 4),
+        _seriesGrid(),
+      ],
+    );
+  }
+
+  Widget _searchField() {
+    return TextField(
+      controller: _searchController,
+      onChanged: _onSearchChanged,
+      decoration: const InputDecoration(
+        hintText: '搜索 Series（本地 FTS）…',
+        prefixIcon: Icon(Icons.search),
+        isDense: true,
+        border: OutlineInputBorder(),
+      ),
+    );
+  }
+
+  Widget _libraryChips() {
+    return SizedBox(
+      height: 32,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          _chip('全部', _selectedLibraryId == null, () {
+            setState(() => _selectedLibraryId = null);
+            _loadWall(reset: true);
+          }),
+          for (final lib in _libraries)
+            _chip('${lib.name} ${lib.seriesCount}', _selectedLibraryId == lib.remoteId, () {
+              setState(() => _selectedLibraryId = lib.remoteId);
+              _loadWall(reset: true);
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(String label, bool selected, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: selected,
+        onSelected: (_) => onTap(),
+      ),
+    );
+  }
+
+  Widget _shelfControls() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        PopupMenuButton<String>(
+          initialValue: _selectedStatus,
+          onSelected: (value) {
+            setState(() => _selectedStatus = value);
+            _loadWall(reset: true);
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(value: '全部', child: Text('全部状态')),
+            for (final s in _filterOptions.statuses)
+              PopupMenuItem(value: s, child: Text(s)),
+          ],
+          child: Chip(
+            avatar: const Icon(Icons.filter_alt_outlined, size: 16),
+            label: Text(_selectedStatus ?? '状态', style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+        PopupMenuButton<String>(
+          initialValue: _selectedTag,
+          onSelected: (value) {
+            setState(() => _selectedTag = value);
+            _loadWall(reset: true);
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(value: '全部', child: Text('全部标签')),
+            for (final t in _filterOptions.tags)
+              PopupMenuItem(value: t, child: Text(t)),
+          ],
+          child: Chip(
+            avatar: const Icon(Icons.tag, size: 16),
+            label: Text(_selectedTag ?? '标签', style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+        PopupMenuButton<String>(
+          initialValue: _selectedGenre,
+          onSelected: (value) {
+            setState(() => _selectedGenre = value);
+            _loadWall(reset: true);
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(value: '全部', child: Text('全部题材')),
+            for (final g in _filterOptions.genres)
+              PopupMenuItem(value: g, child: Text(g)),
+          ],
+          child: Chip(
+            avatar: const Icon(Icons.theaters_outlined, size: 16),
+            label: Text(_selectedGenre ?? '题材', style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+        PopupMenuButton<String>(
+          initialValue: _sortKey,
+          onSelected: (value) {
+            setState(() => _sortKey = value);
+            _loadWall(reset: true);
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: 'name', child: Text('按名称')),
+            PopupMenuItem(value: 'sortName', child: Text('按排序名')),
+            PopupMenuItem(value: 'dateAdded', child: Text('按加入日期')),
+            PopupMenuItem(value: 'dateUpdated', child: Text('按最近更新')),
+            PopupMenuItem(value: 'booksCount', child: Text('按册数')),
+          ],
+          child: Chip(
+            avatar: const Icon(Icons.sort, size: 16),
+            label: Text(_sortLabel(), style: const TextStyle(fontSize: 12)),
+          ),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: _ascending ? '升序' : '降序',
+          icon: Icon(_ascending ? Icons.arrow_upward : Icons.arrow_downward, size: 18),
+          onPressed: () {
+            setState(() => _ascending = !_ascending);
+            _loadWall(reset: true);
+          },
+        ),
+      ],
+    );
+  }
+
+  String _sortLabel() {
+    switch (_sortKey) {
+      case 'sortName':
+        return '排序名';
+      case 'dateAdded':
+        return '加入日期';
+      case 'dateUpdated':
+        return '最近更新';
+      case 'booksCount':
+        return '册数';
+      default:
+        return '名称';
+    }
+  }
+
+  Widget _continueReadingShelf() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('继续阅读', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 96,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _continueReading.length,
+            itemBuilder: (context, index) {
+              final row = _continueReading[index];
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: InkWell(
+                  onTap: () => _openSeries(row.seriesId),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    width: 200,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(row.seriesName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall),
+                        Text(row.bookTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium),
+                        const SizedBox(height: 4),
+                        LinearProgressIndicator(
+                          value: (row.progressPercent ?? 0) / 100.0,
+                          minHeight: 4,
+                        ),
+                        const SizedBox(height: 2),
+                        Text('第 ${row.page ?? '?'} / ${row.totalPages ?? '?'} 页',
+                            style: Theme.of(context).textTheme.bodySmall),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _seriesGrid() {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 140,
         mainAxisSpacing: 12,
@@ -236,20 +578,41 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
       itemCount: _series.length,
       itemBuilder: (context, index) {
         final item = _series[index];
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: _coverFor(item)),
-            const SizedBox(height: 4),
-            Text(
-              item.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
+        if (index >= _series.length - 5) {
+          _loadMore();
+        }
+        return InkWell(
+          onTap: () => _openSeries(item.remoteId),
+          borderRadius: BorderRadius.circular(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _coverFor(item)),
+              const SizedBox(height: 4),
+              Text(
+                item.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
         );
       },
+    );
+  }
+
+  void _openSeries(String seriesId) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SeriesDetailScreen(
+          repository: widget.repository,
+          seriesId: seriesId,
+          onChanged: () {
+            _load();
+          },
+        ),
+      ),
     );
   }
 
@@ -280,3 +643,4 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
     );
   }
 }
+

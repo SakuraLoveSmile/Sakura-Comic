@@ -94,7 +94,7 @@ void main() {
 
 /// In-memory fake of the FFI surface, recording probe calls like the real
 /// core would (fixture-shaped probe result).
-class _MemoryRustCoreApi implements RustCoreApi {
+class _MemoryRustCoreApi extends RustCoreApi {
   final Map<String, ServerProfile> servers = {};
   final Map<String, List<Library>> librariesByServer = {};
   String? activeId;

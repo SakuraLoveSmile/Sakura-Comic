@@ -13,9 +13,16 @@ import 'frb_generated.io.dart'
 import 'model/server.dart';
 import 'model/server_profile.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'store.dart';
+import 'store/books.dart';
+import 'store/collections.dart';
+import 'store/query.dart';
+import 'store/read_progress.dart';
+import 'store/readlists.dart';
 import 'store/series.dart';
 import 'store/thumbnails.dart';
 import 'sync/bootstrap.dart';
+import 'sync/full.dart';
 
 /// Main entrypoint of the Rust API
 class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
@@ -74,7 +81,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1884355175;
+  int get rustContentHash => -1803043420;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -86,6 +93,16 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<String?> crateFfiBridgeBookCoverPath(
+      {required String dbPath,
+      required String serverId,
+      required String bookId});
+
+  Future<BookDetailRow?> crateFfiBridgeBookDetail(
+      {required String dbPath,
+      required String serverId,
+      required String bookId});
+
   Future<BootstrapSummary> crateFfiBridgeBootstrap(
       {required String dbPath,
       required String serverId,
@@ -95,6 +112,18 @@ abstract class RustLibApi extends BaseApi {
   Future<BootstrapSummary> crateFfiBridgeBootstrapDemo(
       {required String dbPath, required String serverId});
 
+  Future<CollectionDetailRow?> crateFfiBridgeCollectionDetail(
+      {required String dbPath,
+      required String serverId,
+      required String collectionId,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset});
+
+  Future<List<ContinueReadingRow>> crateFfiBridgeContinueReading(
+      {required String dbPath,
+      required String serverId,
+      required PlatformInt64 limit});
+
   Future<String?> crateFfiBridgeCoverPath(
       {required String dbPath,
       required String serverId,
@@ -102,6 +131,20 @@ abstract class RustLibApi extends BaseApi {
 
   Future<bool> crateFfiBridgeDeleteServer(
       {required String dbPath, required String serverId});
+
+  Future<String> crateFfiBridgeEnsureBookCover(
+      {required String dbPath,
+      required String serverId,
+      required String bookId,
+      required String baseUrl,
+      required String apiKey});
+
+  Future<PlatformInt64> crateFfiBridgeEnsureBookCovers(
+      {required String dbPath,
+      required String serverId,
+      required String seriesId,
+      required String baseUrl,
+      required String apiKey});
 
   Future<String> crateFfiBridgeEnsureCover(
       {required String dbPath,
@@ -122,16 +165,84 @@ abstract class RustLibApi extends BaseApi {
       required PlatformInt64 limit,
       required PlatformInt64 offset});
 
+  Future<FilterOptions> crateFfiBridgeFilterOptions(
+      {required String dbPath, required String serverId});
+
+  Future<FullSyncSummary> crateFfiBridgeFullSync(
+      {required String dbPath,
+      required String serverId,
+      required String baseUrl,
+      required String apiKey});
+
   Future<String?> crateFfiBridgeGetActiveServer({required String dbPath});
 
   Future<ServerProfile?> crateFfiBridgeGetServer(
       {required String dbPath, required String serverId});
+
+  Future<List<LibraryCountRow>> crateFfiBridgeLibraryCounts(
+      {required String dbPath, required String serverId});
+
+  Future<CollectionPageResult> crateFfiBridgeListCollections(
+      {required String dbPath,
+      required String serverId,
+      String? search,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset});
+
+  Future<ReadlistPageResult> crateFfiBridgeListReadlists(
+      {required String dbPath,
+      required String serverId,
+      String? search,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset});
 
   Future<List<ServerProfile>> crateFfiBridgeListServers(
       {required String dbPath});
 
   Future<List<ThumbnailRow>> crateFfiBridgeListThumbnails(
       {required String dbPath, required String serverId});
+
+  Future<void> crateFfiBridgeMarkRead(
+      {required String dbPath,
+      required String serverId,
+      required String bookId});
+
+  Future<void> crateFfiBridgeMarkUnread(
+      {required String dbPath,
+      required String serverId,
+      required String bookId});
+
+  Future<BookPageResult> crateFfiBridgeQueryBooks(
+      {required String dbPath,
+      required String serverId,
+      required String seriesId,
+      String? search,
+      String? readStatus,
+      String? tag,
+      required String sort,
+      required bool ascending,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset});
+
+  Future<SeriesPageResult> crateFfiBridgeQuerySeries(
+      {required String dbPath,
+      required String serverId,
+      String? search,
+      String? libraryId,
+      String? status,
+      String? tag,
+      String? genre,
+      required String sort,
+      required bool ascending,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset});
+
+  Future<ReadlistDetailRow?> crateFfiBridgeReadlistDetail(
+      {required String dbPath,
+      required String serverId,
+      required String readlistId,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset});
 
   Future<void> crateFfiBridgeSaveLibraries(
       {required String dbPath,
@@ -141,8 +252,20 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateFfiBridgeSaveServer(
       {required String dbPath, required ServerProfile profile});
 
+  Future<SeriesDetailRow?> crateFfiBridgeSeriesDetail(
+      {required String dbPath,
+      required String serverId,
+      required String seriesId});
+
   Future<void> crateFfiBridgeSetActiveServer(
       {required String dbPath, required String serverId});
+
+  Future<void> crateFfiBridgeSetReadProgress(
+      {required String dbPath,
+      required String serverId,
+      required String bookId,
+      required PlatformInt64 page,
+      required bool completed});
 
   Future<ConnectionResult> crateFfiBridgeTestConnection(
       {required String baseUrl, required String apiKey});
@@ -155,6 +278,65 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required super.generalizedFrbRustBinding,
     required super.portManager,
   });
+
+  @override
+  Future<String?> crateFfiBridgeBookCoverPath(
+      {required String dbPath,
+      required String serverId,
+      required String bookId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(bookId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 1, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeBookCoverPathConstMeta,
+      argValues: [dbPath, serverId, bookId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeBookCoverPathConstMeta =>
+      const TaskConstMeta(
+        debugName: "book_cover_path",
+        argNames: ["dbPath", "serverId", "bookId"],
+      );
+
+  @override
+  Future<BookDetailRow?> crateFfiBridgeBookDetail(
+      {required String dbPath,
+      required String serverId,
+      required String bookId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(bookId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 2, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_box_autoadd_book_detail_row,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeBookDetailConstMeta,
+      argValues: [dbPath, serverId, bookId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeBookDetailConstMeta => const TaskConstMeta(
+        debugName: "book_detail",
+        argNames: ["dbPath", "serverId", "bookId"],
+      );
 
   @override
   Future<BootstrapSummary> crateFfiBridgeBootstrap(
@@ -170,7 +352,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(baseUrl, serializer);
         sse_encode_String(apiKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 1, port: port_);
+            funcId: 3, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bootstrap_summary,
@@ -196,7 +378,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_String(serverId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
+            funcId: 4, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bootstrap_summary,
@@ -215,6 +397,70 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<CollectionDetailRow?> crateFfiBridgeCollectionDetail(
+      {required String dbPath,
+      required String serverId,
+      required String collectionId,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(collectionId, serializer);
+        sse_encode_i_64(limit, serializer);
+        sse_encode_i_64(offset, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 5, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_box_autoadd_collection_detail_row,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeCollectionDetailConstMeta,
+      argValues: [dbPath, serverId, collectionId, limit, offset],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeCollectionDetailConstMeta =>
+      const TaskConstMeta(
+        debugName: "collection_detail",
+        argNames: ["dbPath", "serverId", "collectionId", "limit", "offset"],
+      );
+
+  @override
+  Future<List<ContinueReadingRow>> crateFfiBridgeContinueReading(
+      {required String dbPath,
+      required String serverId,
+      required PlatformInt64 limit}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_i_64(limit, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 6, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_continue_reading_row,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeContinueReadingConstMeta,
+      argValues: [dbPath, serverId, limit],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeContinueReadingConstMeta =>
+      const TaskConstMeta(
+        debugName: "continue_reading",
+        argNames: ["dbPath", "serverId", "limit"],
+      );
+
+  @override
   Future<String?> crateFfiBridgeCoverPath(
       {required String dbPath,
       required String serverId,
@@ -226,7 +472,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(serverId, serializer);
         sse_encode_String(seriesId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 3, port: port_);
+            funcId: 7, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -252,7 +498,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_String(serverId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 4, port: port_);
+            funcId: 8, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -267,6 +513,74 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFfiBridgeDeleteServerConstMeta => const TaskConstMeta(
         debugName: "delete_server",
         argNames: ["dbPath", "serverId"],
+      );
+
+  @override
+  Future<String> crateFfiBridgeEnsureBookCover(
+      {required String dbPath,
+      required String serverId,
+      required String bookId,
+      required String baseUrl,
+      required String apiKey}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(bookId, serializer);
+        sse_encode_String(baseUrl, serializer);
+        sse_encode_String(apiKey, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 9, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeEnsureBookCoverConstMeta,
+      argValues: [dbPath, serverId, bookId, baseUrl, apiKey],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeEnsureBookCoverConstMeta =>
+      const TaskConstMeta(
+        debugName: "ensure_book_cover",
+        argNames: ["dbPath", "serverId", "bookId", "baseUrl", "apiKey"],
+      );
+
+  @override
+  Future<PlatformInt64> crateFfiBridgeEnsureBookCovers(
+      {required String dbPath,
+      required String serverId,
+      required String seriesId,
+      required String baseUrl,
+      required String apiKey}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(seriesId, serializer);
+        sse_encode_String(baseUrl, serializer);
+        sse_encode_String(apiKey, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 10, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_i_64,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeEnsureBookCoversConstMeta,
+      argValues: [dbPath, serverId, seriesId, baseUrl, apiKey],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeEnsureBookCoversConstMeta =>
+      const TaskConstMeta(
+        debugName: "ensure_book_covers",
+        argNames: ["dbPath", "serverId", "seriesId", "baseUrl", "apiKey"],
       );
 
   @override
@@ -285,7 +599,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(baseUrl, serializer);
         sse_encode_String(apiKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 5, port: port_);
+            funcId: 11, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -316,7 +630,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(baseUrl, serializer);
         sse_encode_String(apiKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 6, port: port_);
+            funcId: 12, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_i_64,
@@ -347,7 +661,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_i_64(limit, serializer);
         sse_encode_i_64(offset, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
+            funcId: 13, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_series_row,
@@ -365,13 +679,71 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<FilterOptions> crateFfiBridgeFilterOptions(
+      {required String dbPath, required String serverId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 14, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_filter_options,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeFilterOptionsConstMeta,
+      argValues: [dbPath, serverId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeFilterOptionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "filter_options",
+        argNames: ["dbPath", "serverId"],
+      );
+
+  @override
+  Future<FullSyncSummary> crateFfiBridgeFullSync(
+      {required String dbPath,
+      required String serverId,
+      required String baseUrl,
+      required String apiKey}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(baseUrl, serializer);
+        sse_encode_String(apiKey, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 15, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_full_sync_summary,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeFullSyncConstMeta,
+      argValues: [dbPath, serverId, baseUrl, apiKey],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeFullSyncConstMeta => const TaskConstMeta(
+        debugName: "full_sync",
+        argNames: ["dbPath", "serverId", "baseUrl", "apiKey"],
+      );
+
+  @override
   Future<String?> crateFfiBridgeGetActiveServer({required String dbPath}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(dbPath, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
+            funcId: 16, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -398,7 +770,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_String(serverId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 9, port: port_);
+            funcId: 17, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_box_autoadd_server_profile,
@@ -416,6 +788,101 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<LibraryCountRow>> crateFfiBridgeLibraryCounts(
+      {required String dbPath, required String serverId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 18, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_library_count_row,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeLibraryCountsConstMeta,
+      argValues: [dbPath, serverId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeLibraryCountsConstMeta =>
+      const TaskConstMeta(
+        debugName: "library_counts",
+        argNames: ["dbPath", "serverId"],
+      );
+
+  @override
+  Future<CollectionPageResult> crateFfiBridgeListCollections(
+      {required String dbPath,
+      required String serverId,
+      String? search,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_opt_String(search, serializer);
+        sse_encode_i_64(limit, serializer);
+        sse_encode_i_64(offset, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 19, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_collection_page_result,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeListCollectionsConstMeta,
+      argValues: [dbPath, serverId, search, limit, offset],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeListCollectionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_collections",
+        argNames: ["dbPath", "serverId", "search", "limit", "offset"],
+      );
+
+  @override
+  Future<ReadlistPageResult> crateFfiBridgeListReadlists(
+      {required String dbPath,
+      required String serverId,
+      String? search,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_opt_String(search, serializer);
+        sse_encode_i_64(limit, serializer);
+        sse_encode_i_64(offset, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 20, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_readlist_page_result,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeListReadlistsConstMeta,
+      argValues: [dbPath, serverId, search, limit, offset],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeListReadlistsConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_readlists",
+        argNames: ["dbPath", "serverId", "search", "limit", "offset"],
+      );
+
+  @override
   Future<List<ServerProfile>> crateFfiBridgeListServers(
       {required String dbPath}) {
     return handler.executeNormal(NormalTask(
@@ -423,7 +890,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(dbPath, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 10, port: port_);
+            funcId: 21, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_server_profile,
@@ -449,7 +916,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_String(serverId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 11, port: port_);
+            funcId: 22, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_thumbnail_row,
@@ -468,6 +935,232 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFfiBridgeMarkRead(
+      {required String dbPath,
+      required String serverId,
+      required String bookId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(bookId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 23, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeMarkReadConstMeta,
+      argValues: [dbPath, serverId, bookId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeMarkReadConstMeta => const TaskConstMeta(
+        debugName: "mark_read",
+        argNames: ["dbPath", "serverId", "bookId"],
+      );
+
+  @override
+  Future<void> crateFfiBridgeMarkUnread(
+      {required String dbPath,
+      required String serverId,
+      required String bookId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(bookId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 24, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeMarkUnreadConstMeta,
+      argValues: [dbPath, serverId, bookId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeMarkUnreadConstMeta => const TaskConstMeta(
+        debugName: "mark_unread",
+        argNames: ["dbPath", "serverId", "bookId"],
+      );
+
+  @override
+  Future<BookPageResult> crateFfiBridgeQueryBooks(
+      {required String dbPath,
+      required String serverId,
+      required String seriesId,
+      String? search,
+      String? readStatus,
+      String? tag,
+      required String sort,
+      required bool ascending,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(seriesId, serializer);
+        sse_encode_opt_String(search, serializer);
+        sse_encode_opt_String(readStatus, serializer);
+        sse_encode_opt_String(tag, serializer);
+        sse_encode_String(sort, serializer);
+        sse_encode_bool(ascending, serializer);
+        sse_encode_i_64(limit, serializer);
+        sse_encode_i_64(offset, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 25, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_book_page_result,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeQueryBooksConstMeta,
+      argValues: [
+        dbPath,
+        serverId,
+        seriesId,
+        search,
+        readStatus,
+        tag,
+        sort,
+        ascending,
+        limit,
+        offset
+      ],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeQueryBooksConstMeta => const TaskConstMeta(
+        debugName: "query_books",
+        argNames: [
+          "dbPath",
+          "serverId",
+          "seriesId",
+          "search",
+          "readStatus",
+          "tag",
+          "sort",
+          "ascending",
+          "limit",
+          "offset"
+        ],
+      );
+
+  @override
+  Future<SeriesPageResult> crateFfiBridgeQuerySeries(
+      {required String dbPath,
+      required String serverId,
+      String? search,
+      String? libraryId,
+      String? status,
+      String? tag,
+      String? genre,
+      required String sort,
+      required bool ascending,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_opt_String(search, serializer);
+        sse_encode_opt_String(libraryId, serializer);
+        sse_encode_opt_String(status, serializer);
+        sse_encode_opt_String(tag, serializer);
+        sse_encode_opt_String(genre, serializer);
+        sse_encode_String(sort, serializer);
+        sse_encode_bool(ascending, serializer);
+        sse_encode_i_64(limit, serializer);
+        sse_encode_i_64(offset, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 26, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_series_page_result,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeQuerySeriesConstMeta,
+      argValues: [
+        dbPath,
+        serverId,
+        search,
+        libraryId,
+        status,
+        tag,
+        genre,
+        sort,
+        ascending,
+        limit,
+        offset
+      ],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeQuerySeriesConstMeta => const TaskConstMeta(
+        debugName: "query_series",
+        argNames: [
+          "dbPath",
+          "serverId",
+          "search",
+          "libraryId",
+          "status",
+          "tag",
+          "genre",
+          "sort",
+          "ascending",
+          "limit",
+          "offset"
+        ],
+      );
+
+  @override
+  Future<ReadlistDetailRow?> crateFfiBridgeReadlistDetail(
+      {required String dbPath,
+      required String serverId,
+      required String readlistId,
+      required PlatformInt64 limit,
+      required PlatformInt64 offset}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(readlistId, serializer);
+        sse_encode_i_64(limit, serializer);
+        sse_encode_i_64(offset, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 27, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_box_autoadd_readlist_detail_row,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeReadlistDetailConstMeta,
+      argValues: [dbPath, serverId, readlistId, limit, offset],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeReadlistDetailConstMeta =>
+      const TaskConstMeta(
+        debugName: "readlist_detail",
+        argNames: ["dbPath", "serverId", "readlistId", "limit", "offset"],
+      );
+
+  @override
   Future<void> crateFfiBridgeSaveLibraries(
       {required String dbPath,
       required String serverId,
@@ -479,7 +1172,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(serverId, serializer);
         sse_encode_list_library(libraries, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 12, port: port_);
+            funcId: 28, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -506,7 +1199,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_box_autoadd_server_profile(profile, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 13, port: port_);
+            funcId: 29, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -524,6 +1217,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<SeriesDetailRow?> crateFfiBridgeSeriesDetail(
+      {required String dbPath,
+      required String serverId,
+      required String seriesId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(seriesId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 30, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_box_autoadd_series_detail_row,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeSeriesDetailConstMeta,
+      argValues: [dbPath, serverId, seriesId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeSeriesDetailConstMeta => const TaskConstMeta(
+        debugName: "series_detail",
+        argNames: ["dbPath", "serverId", "seriesId"],
+      );
+
+  @override
   Future<void> crateFfiBridgeSetActiveServer(
       {required String dbPath, required String serverId}) {
     return handler.executeNormal(NormalTask(
@@ -532,7 +1254,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_String(serverId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 14, port: port_);
+            funcId: 31, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -551,6 +1273,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFfiBridgeSetReadProgress(
+      {required String dbPath,
+      required String serverId,
+      required String bookId,
+      required PlatformInt64 page,
+      required bool completed}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_String(bookId, serializer);
+        sse_encode_i_64(page, serializer);
+        sse_encode_bool(completed, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 32, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeSetReadProgressConstMeta,
+      argValues: [dbPath, serverId, bookId, page, completed],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeSetReadProgressConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_read_progress",
+        argNames: ["dbPath", "serverId", "bookId", "page", "completed"],
+      );
+
+  @override
   Future<ConnectionResult> crateFfiBridgeTestConnection(
       {required String baseUrl, required String apiKey}) {
     return handler.executeNormal(NormalTask(
@@ -559,7 +1315,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(baseUrl, serializer);
         sse_encode_String(apiKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 15, port: port_);
+            funcId: 33, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_connection_result,
@@ -590,6 +1346,84 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AuthorRow dco_decode_author_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return AuthorRow(
+      name: dco_decode_String(arr[0]),
+      role: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  BookDetailRow dco_decode_book_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 19)
+      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
+    return BookDetailRow(
+      serverId: dco_decode_String(arr[0]),
+      remoteId: dco_decode_String(arr[1]),
+      seriesId: dco_decode_String(arr[2]),
+      seriesTitle: dco_decode_opt_String(arr[3]),
+      title: dco_decode_String(arr[4]),
+      number: dco_decode_opt_String(arr[5]),
+      numberSort: dco_decode_opt_box_autoadd_f_64(arr[6]),
+      summary: dco_decode_opt_String(arr[7]),
+      isbn: dco_decode_opt_String(arr[8]),
+      releaseDate: dco_decode_opt_String(arr[9]),
+      mediaType: dco_decode_opt_String(arr[10]),
+      pagesCount: dco_decode_opt_box_autoadd_i_64(arr[11]),
+      fileSize: dco_decode_opt_box_autoadd_i_64(arr[12]),
+      createdAt: dco_decode_opt_String(arr[13]),
+      lastModified: dco_decode_opt_String(arr[14]),
+      tags: dco_decode_list_String(arr[15]),
+      authors: dco_decode_list_author_row(arr[16]),
+      progressPage: dco_decode_opt_box_autoadd_i_64(arr[17]),
+      progressCompleted: dco_decode_bool(arr[18]),
+    );
+  }
+
+  @protected
+  BookPageResult dco_decode_book_page_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BookPageResult(
+      items: dco_decode_list_book_row(arr[0]),
+      total: dco_decode_i_64(arr[1]),
+    );
+  }
+
+  @protected
+  BookRow dco_decode_book_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
+    return BookRow(
+      serverId: dco_decode_String(arr[0]),
+      remoteId: dco_decode_String(arr[1]),
+      seriesId: dco_decode_String(arr[2]),
+      seriesTitle: dco_decode_opt_String(arr[3]),
+      title: dco_decode_String(arr[4]),
+      number: dco_decode_opt_String(arr[5]),
+      numberSort: dco_decode_opt_box_autoadd_f_64(arr[6]),
+      fileSize: dco_decode_opt_box_autoadd_i_64(arr[7]),
+      mediaType: dco_decode_opt_String(arr[8]),
+      pagesCount: dco_decode_opt_box_autoadd_i_64(arr[9]),
+      createdAt: dco_decode_opt_String(arr[10]),
+      lastModified: dco_decode_opt_String(arr[11]),
+      progressPage: dco_decode_opt_box_autoadd_i_64(arr[12]),
+      progressCompleted: dco_decode_bool(arr[13]),
+      ftsRowid: dco_decode_opt_box_autoadd_i_64(arr[14]),
+    );
+  }
+
+  @protected
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
@@ -610,6 +1444,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BookDetailRow dco_decode_box_autoadd_book_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_book_detail_row(raw);
+  }
+
+  @protected
   bool dco_decode_box_autoadd_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
@@ -622,6 +1462,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CollectionDetailRow dco_decode_box_autoadd_collection_detail_row(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_collection_detail_row(raw);
+  }
+
+  @protected
+  double dco_decode_box_autoadd_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
   GitCommit dco_decode_box_autoadd_git_commit(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_git_commit(raw);
@@ -631,6 +1484,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   GitInfo dco_decode_box_autoadd_git_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_git_info(raw);
+  }
+
+  @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_i_64(raw);
+  }
+
+  @protected
+  ReadlistDetailRow dco_decode_box_autoadd_readlist_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_readlist_detail_row(raw);
+  }
+
+  @protected
+  SeriesDetailRow dco_decode_box_autoadd_series_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_series_detail_row(raw);
   }
 
   @protected
@@ -655,6 +1526,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CollectionDetailRow dco_decode_collection_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return CollectionDetailRow(
+      remoteId: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      ordered: dco_decode_bool(arr[2]),
+      filtered: dco_decode_bool(arr[3]),
+      createdDate: dco_decode_opt_String(arr[4]),
+      lastModifiedDate: dco_decode_opt_String(arr[5]),
+      members: dco_decode_series_page_result(arr[6]),
+    );
+  }
+
+  @protected
+  CollectionPageResult dco_decode_collection_page_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return CollectionPageResult(
+      items: dco_decode_list_collection_row(arr[0]),
+      total: dco_decode_i_64(arr[1]),
+    );
+  }
+
+  @protected
+  CollectionRef dco_decode_collection_ref(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return CollectionRef(
+      remoteId: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  CollectionRow dco_decode_collection_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return CollectionRow(
+      serverId: dco_decode_String(arr[0]),
+      remoteId: dco_decode_String(arr[1]),
+      name: dco_decode_String(arr[2]),
+      ordered: dco_decode_bool(arr[3]),
+      filtered: dco_decode_bool(arr[4]),
+      createdDate: dco_decode_opt_String(arr[5]),
+      lastModifiedDate: dco_decode_opt_String(arr[6]),
+    );
+  }
+
+  @protected
   ConnectionResult dco_decode_connection_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -665,6 +1594,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serverVersion: dco_decode_opt_String(arr[1]),
       libraries: dco_decode_list_library(arr[2]),
       capabilities: dco_decode_list_String(arr[3]),
+    );
+  }
+
+  @protected
+  ContinueReadingRow dco_decode_continue_reading_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return ContinueReadingRow(
+      bookId: dco_decode_String(arr[0]),
+      bookTitle: dco_decode_String(arr[1]),
+      number: dco_decode_opt_String(arr[2]),
+      seriesId: dco_decode_String(arr[3]),
+      seriesName: dco_decode_String(arr[4]),
+      page: dco_decode_opt_box_autoadd_i_64(arr[5]),
+      totalPages: dco_decode_opt_box_autoadd_i_64(arr[6]),
+      progressPct: dco_decode_opt_box_autoadd_i_64(arr[7]),
+      localUpdatedAt: dco_decode_opt_String(arr[8]),
+    );
+  }
+
+  @protected
+  double dco_decode_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
+  FilterOptions dco_decode_filter_options(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FilterOptions(
+      tags: dco_decode_list_String(arr[0]),
+      genres: dco_decode_list_String(arr[1]),
+      statuses: dco_decode_list_String(arr[2]),
+    );
+  }
+
+  @protected
+  FullSyncSummary dco_decode_full_sync_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return FullSyncSummary(
+      serverId: dco_decode_String(arr[0]),
+      series: dco_decode_usize(arr[1]),
+      books: dco_decode_usize(arr[2]),
+      collections: dco_decode_usize(arr[3]),
+      readlists: dco_decode_usize(arr[4]),
+      readProgress: dco_decode_usize(arr[5]),
+      seriesPages: dco_decode_u_32(arr[6]),
+      bookPages: dco_decode_u_32(arr[7]),
     );
   }
 
@@ -719,9 +1704,52 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  LibraryCountRow dco_decode_library_count_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return LibraryCountRow(
+      remoteId: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      seriesCount: dco_decode_i_64(arr[2]),
+    );
+  }
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
+  List<AuthorRow> dco_decode_list_author_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_author_row).toList();
+  }
+
+  @protected
+  List<BookRow> dco_decode_list_book_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_book_row).toList();
+  }
+
+  @protected
+  List<CollectionRef> dco_decode_list_collection_ref(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_collection_ref).toList();
+  }
+
+  @protected
+  List<CollectionRow> dco_decode_list_collection_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_collection_row).toList();
+  }
+
+  @protected
+  List<ContinueReadingRow> dco_decode_list_continue_reading_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_continue_reading_row).toList();
   }
 
   @protected
@@ -731,9 +1759,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<LibraryCountRow> dco_decode_list_library_count_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_library_count_row).toList();
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  List<ReadlistRow> dco_decode_list_readlist_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_readlist_row).toList();
   }
 
   @protected
@@ -761,6 +1801,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BookDetailRow? dco_decode_opt_box_autoadd_book_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_book_detail_row(raw);
+  }
+
+  @protected
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bool(raw);
@@ -770,6 +1816,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BuildInfo? dco_decode_opt_box_autoadd_build_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_build_info(raw);
+  }
+
+  @protected
+  CollectionDetailRow? dco_decode_opt_box_autoadd_collection_detail_row(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_collection_detail_row(raw);
+  }
+
+  @protected
+  double? dco_decode_opt_box_autoadd_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_f_64(raw);
   }
 
   @protected
@@ -785,17 +1846,128 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_i_64(raw);
+  }
+
+  @protected
+  ReadlistDetailRow? dco_decode_opt_box_autoadd_readlist_detail_row(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_readlist_detail_row(raw);
+  }
+
+  @protected
+  SeriesDetailRow? dco_decode_opt_box_autoadd_series_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_series_detail_row(raw);
+  }
+
+  @protected
   ServerProfile? dco_decode_opt_box_autoadd_server_profile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_server_profile(raw);
   }
 
   @protected
-  SeriesRow dco_decode_series_row(dynamic raw) {
+  ReadlistDetailRow dco_decode_readlist_detail_row(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 8)
       throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return ReadlistDetailRow(
+      remoteId: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      summary: dco_decode_opt_String(arr[2]),
+      ordered: dco_decode_bool(arr[3]),
+      filtered: dco_decode_bool(arr[4]),
+      createdDate: dco_decode_opt_String(arr[5]),
+      lastModifiedDate: dco_decode_opt_String(arr[6]),
+      books: dco_decode_book_page_result(arr[7]),
+    );
+  }
+
+  @protected
+  ReadlistPageResult dco_decode_readlist_page_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return ReadlistPageResult(
+      items: dco_decode_list_readlist_row(arr[0]),
+      total: dco_decode_i_64(arr[1]),
+    );
+  }
+
+  @protected
+  ReadlistRow dco_decode_readlist_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return ReadlistRow(
+      serverId: dco_decode_String(arr[0]),
+      remoteId: dco_decode_String(arr[1]),
+      name: dco_decode_String(arr[2]),
+      summary: dco_decode_opt_String(arr[3]),
+      ordered: dco_decode_bool(arr[4]),
+      filtered: dco_decode_bool(arr[5]),
+      createdDate: dco_decode_opt_String(arr[6]),
+      lastModifiedDate: dco_decode_opt_String(arr[7]),
+    );
+  }
+
+  @protected
+  SeriesDetailRow dco_decode_series_detail_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 22)
+      throw Exception('unexpected arr length: expect 22 but see ${arr.length}');
+    return SeriesDetailRow(
+      serverId: dco_decode_String(arr[0]),
+      remoteId: dco_decode_String(arr[1]),
+      libraryId: dco_decode_String(arr[2]),
+      name: dco_decode_String(arr[3]),
+      sortName: dco_decode_opt_String(arr[4]),
+      status: dco_decode_opt_String(arr[5]),
+      createdAt: dco_decode_opt_String(arr[6]),
+      lastModified: dco_decode_opt_String(arr[7]),
+      booksCount: dco_decode_opt_box_autoadd_i_64(arr[8]),
+      booksReadCount: dco_decode_opt_box_autoadd_i_64(arr[9]),
+      booksUnreadCount: dco_decode_opt_box_autoadd_i_64(arr[10]),
+      booksInProgressCount: dco_decode_opt_box_autoadd_i_64(arr[11]),
+      summary: dco_decode_opt_String(arr[12]),
+      publisher: dco_decode_opt_String(arr[13]),
+      readingDirection: dco_decode_opt_String(arr[14]),
+      language: dco_decode_opt_String(arr[15]),
+      ageRating: dco_decode_opt_box_autoadd_i_64(arr[16]),
+      totalBookCount: dco_decode_opt_box_autoadd_i_64(arr[17]),
+      genres: dco_decode_list_String(arr[18]),
+      tags: dco_decode_list_String(arr[19]),
+      authors: dco_decode_list_author_row(arr[20]),
+      collections: dco_decode_list_collection_ref(arr[21]),
+    );
+  }
+
+  @protected
+  SeriesPageResult dco_decode_series_page_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return SeriesPageResult(
+      items: dco_decode_list_series_row(arr[0]),
+      total: dco_decode_i_64(arr[1]),
+    );
+  }
+
+  @protected
+  SeriesRow dco_decode_series_row(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return SeriesRow(
       serverId: dco_decode_String(arr[0]),
       remoteId: dco_decode_String(arr[1]),
@@ -805,6 +1977,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       status: dco_decode_opt_String(arr[5]),
       createdAt: dco_decode_opt_String(arr[6]),
       lastModified: dco_decode_opt_String(arr[7]),
+      booksCount: dco_decode_opt_box_autoadd_i_64(arr[8]),
+      booksReadCount: dco_decode_opt_box_autoadd_i_64(arr[9]),
+      booksUnreadCount: dco_decode_opt_box_autoadd_i_64(arr[10]),
+      booksInProgressCount: dco_decode_opt_box_autoadd_i_64(arr[11]),
+      ftsRowid: dco_decode_opt_box_autoadd_i_64(arr[12]),
     );
   }
 
@@ -854,6 +2031,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
   int dco_decode_u_8(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
@@ -886,6 +2069,102 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AuthorRow sse_decode_author_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_name = sse_decode_String(deserializer);
+    var var_role = sse_decode_String(deserializer);
+    return AuthorRow(name: var_name, role: var_role);
+  }
+
+  @protected
+  BookDetailRow sse_decode_book_detail_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_seriesId = sse_decode_String(deserializer);
+    var var_seriesTitle = sse_decode_opt_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_number = sse_decode_opt_String(deserializer);
+    var var_numberSort = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_summary = sse_decode_opt_String(deserializer);
+    var var_isbn = sse_decode_opt_String(deserializer);
+    var var_releaseDate = sse_decode_opt_String(deserializer);
+    var var_mediaType = sse_decode_opt_String(deserializer);
+    var var_pagesCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_fileSize = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_createdAt = sse_decode_opt_String(deserializer);
+    var var_lastModified = sse_decode_opt_String(deserializer);
+    var var_tags = sse_decode_list_String(deserializer);
+    var var_authors = sse_decode_list_author_row(deserializer);
+    var var_progressPage = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_progressCompleted = sse_decode_bool(deserializer);
+    return BookDetailRow(
+        serverId: var_serverId,
+        remoteId: var_remoteId,
+        seriesId: var_seriesId,
+        seriesTitle: var_seriesTitle,
+        title: var_title,
+        number: var_number,
+        numberSort: var_numberSort,
+        summary: var_summary,
+        isbn: var_isbn,
+        releaseDate: var_releaseDate,
+        mediaType: var_mediaType,
+        pagesCount: var_pagesCount,
+        fileSize: var_fileSize,
+        createdAt: var_createdAt,
+        lastModified: var_lastModified,
+        tags: var_tags,
+        authors: var_authors,
+        progressPage: var_progressPage,
+        progressCompleted: var_progressCompleted);
+  }
+
+  @protected
+  BookPageResult sse_decode_book_page_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_items = sse_decode_list_book_row(deserializer);
+    var var_total = sse_decode_i_64(deserializer);
+    return BookPageResult(items: var_items, total: var_total);
+  }
+
+  @protected
+  BookRow sse_decode_book_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_seriesId = sse_decode_String(deserializer);
+    var var_seriesTitle = sse_decode_opt_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_number = sse_decode_opt_String(deserializer);
+    var var_numberSort = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_fileSize = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_mediaType = sse_decode_opt_String(deserializer);
+    var var_pagesCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_createdAt = sse_decode_opt_String(deserializer);
+    var var_lastModified = sse_decode_opt_String(deserializer);
+    var var_progressPage = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_progressCompleted = sse_decode_bool(deserializer);
+    var var_ftsRowid = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return BookRow(
+        serverId: var_serverId,
+        remoteId: var_remoteId,
+        seriesId: var_seriesId,
+        seriesTitle: var_seriesTitle,
+        title: var_title,
+        number: var_number,
+        numberSort: var_numberSort,
+        fileSize: var_fileSize,
+        mediaType: var_mediaType,
+        pagesCount: var_pagesCount,
+        createdAt: var_createdAt,
+        lastModified: var_lastModified,
+        progressPage: var_progressPage,
+        progressCompleted: var_progressCompleted,
+        ftsRowid: var_ftsRowid);
+  }
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
@@ -906,6 +2185,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BookDetailRow sse_decode_box_autoadd_book_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_book_detail_row(deserializer));
+  }
+
+  @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bool(deserializer));
@@ -918,6 +2204,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CollectionDetailRow sse_decode_box_autoadd_collection_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_collection_detail_row(deserializer));
+  }
+
+  @protected
+  double sse_decode_box_autoadd_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_f_64(deserializer));
+  }
+
+  @protected
   GitCommit sse_decode_box_autoadd_git_commit(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_git_commit(deserializer));
@@ -927,6 +2226,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   GitInfo sse_decode_box_autoadd_git_info(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_git_info(deserializer));
+  }
+
+  @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
+  ReadlistDetailRow sse_decode_box_autoadd_readlist_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_readlist_detail_row(deserializer));
+  }
+
+  @protected
+  SeriesDetailRow sse_decode_box_autoadd_series_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_series_detail_row(deserializer));
   }
 
   @protected
@@ -953,6 +2272,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CollectionDetailRow sse_decode_collection_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_ordered = sse_decode_bool(deserializer);
+    var var_filtered = sse_decode_bool(deserializer);
+    var var_createdDate = sse_decode_opt_String(deserializer);
+    var var_lastModifiedDate = sse_decode_opt_String(deserializer);
+    var var_members = sse_decode_series_page_result(deserializer);
+    return CollectionDetailRow(
+        remoteId: var_remoteId,
+        name: var_name,
+        ordered: var_ordered,
+        filtered: var_filtered,
+        createdDate: var_createdDate,
+        lastModifiedDate: var_lastModifiedDate,
+        members: var_members);
+  }
+
+  @protected
+  CollectionPageResult sse_decode_collection_page_result(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_items = sse_decode_list_collection_row(deserializer);
+    var var_total = sse_decode_i_64(deserializer);
+    return CollectionPageResult(items: var_items, total: var_total);
+  }
+
+  @protected
+  CollectionRef sse_decode_collection_ref(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    return CollectionRef(remoteId: var_remoteId, name: var_name);
+  }
+
+  @protected
+  CollectionRow sse_decode_collection_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_ordered = sse_decode_bool(deserializer);
+    var var_filtered = sse_decode_bool(deserializer);
+    var var_createdDate = sse_decode_opt_String(deserializer);
+    var var_lastModifiedDate = sse_decode_opt_String(deserializer);
+    return CollectionRow(
+        serverId: var_serverId,
+        remoteId: var_remoteId,
+        name: var_name,
+        ordered: var_ordered,
+        filtered: var_filtered,
+        createdDate: var_createdDate,
+        lastModifiedDate: var_lastModifiedDate);
+  }
+
+  @protected
   ConnectionResult sse_decode_connection_result(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_serverInfo = sse_decode_server_info(deserializer);
@@ -964,6 +2341,69 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         serverVersion: var_serverVersion,
         libraries: var_libraries,
         capabilities: var_capabilities);
+  }
+
+  @protected
+  ContinueReadingRow sse_decode_continue_reading_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_bookId = sse_decode_String(deserializer);
+    var var_bookTitle = sse_decode_String(deserializer);
+    var var_number = sse_decode_opt_String(deserializer);
+    var var_seriesId = sse_decode_String(deserializer);
+    var var_seriesName = sse_decode_String(deserializer);
+    var var_page = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_totalPages = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_progressPct = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_localUpdatedAt = sse_decode_opt_String(deserializer);
+    return ContinueReadingRow(
+        bookId: var_bookId,
+        bookTitle: var_bookTitle,
+        number: var_number,
+        seriesId: var_seriesId,
+        seriesName: var_seriesName,
+        page: var_page,
+        totalPages: var_totalPages,
+        progressPct: var_progressPct,
+        localUpdatedAt: var_localUpdatedAt);
+  }
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat64();
+  }
+
+  @protected
+  FilterOptions sse_decode_filter_options(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_tags = sse_decode_list_String(deserializer);
+    var var_genres = sse_decode_list_String(deserializer);
+    var var_statuses = sse_decode_list_String(deserializer);
+    return FilterOptions(
+        tags: var_tags, genres: var_genres, statuses: var_statuses);
+  }
+
+  @protected
+  FullSyncSummary sse_decode_full_sync_summary(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_series = sse_decode_usize(deserializer);
+    var var_books = sse_decode_usize(deserializer);
+    var var_collections = sse_decode_usize(deserializer);
+    var var_readlists = sse_decode_usize(deserializer);
+    var var_readProgress = sse_decode_usize(deserializer);
+    var var_seriesPages = sse_decode_u_32(deserializer);
+    var var_bookPages = sse_decode_u_32(deserializer);
+    return FullSyncSummary(
+        serverId: var_serverId,
+        series: var_series,
+        books: var_books,
+        collections: var_collections,
+        readlists: var_readlists,
+        readProgress: var_readProgress,
+        seriesPages: var_seriesPages,
+        bookPages: var_bookPages);
   }
 
   @protected
@@ -1009,6 +2449,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  LibraryCountRow sse_decode_library_count_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_seriesCount = sse_decode_i_64(deserializer);
+    return LibraryCountRow(
+        remoteId: var_remoteId, name: var_name, seriesCount: var_seriesCount);
+  }
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1016,6 +2466,69 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<AuthorRow> sse_decode_list_author_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <AuthorRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_author_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BookRow> sse_decode_list_book_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BookRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_book_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<CollectionRef> sse_decode_list_collection_ref(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <CollectionRef>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_collection_ref(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<CollectionRow> sse_decode_list_collection_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <CollectionRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_collection_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<ContinueReadingRow> sse_decode_list_continue_reading_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ContinueReadingRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_continue_reading_row(deserializer));
     }
     return ans_;
   }
@@ -1033,10 +2546,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<LibraryCountRow> sse_decode_list_library_count_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <LibraryCountRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_library_count_row(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  List<ReadlistRow> sse_decode_list_readlist_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ReadlistRow>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_readlist_row(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -1089,6 +2627,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BookDetailRow? sse_decode_opt_box_autoadd_book_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_book_detail_row(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1106,6 +2656,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_build_info(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  CollectionDetailRow? sse_decode_opt_box_autoadd_collection_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_collection_detail_row(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_f_64(deserializer));
     } else {
       return null;
     }
@@ -1135,6 +2708,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_i_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  ReadlistDetailRow? sse_decode_opt_box_autoadd_readlist_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_readlist_detail_row(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  SeriesDetailRow? sse_decode_opt_box_autoadd_series_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_series_detail_row(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   ServerProfile? sse_decode_opt_box_autoadd_server_profile(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1144,6 +2752,119 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  ReadlistDetailRow sse_decode_readlist_detail_row(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_summary = sse_decode_opt_String(deserializer);
+    var var_ordered = sse_decode_bool(deserializer);
+    var var_filtered = sse_decode_bool(deserializer);
+    var var_createdDate = sse_decode_opt_String(deserializer);
+    var var_lastModifiedDate = sse_decode_opt_String(deserializer);
+    var var_books = sse_decode_book_page_result(deserializer);
+    return ReadlistDetailRow(
+        remoteId: var_remoteId,
+        name: var_name,
+        summary: var_summary,
+        ordered: var_ordered,
+        filtered: var_filtered,
+        createdDate: var_createdDate,
+        lastModifiedDate: var_lastModifiedDate,
+        books: var_books);
+  }
+
+  @protected
+  ReadlistPageResult sse_decode_readlist_page_result(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_items = sse_decode_list_readlist_row(deserializer);
+    var var_total = sse_decode_i_64(deserializer);
+    return ReadlistPageResult(items: var_items, total: var_total);
+  }
+
+  @protected
+  ReadlistRow sse_decode_readlist_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_summary = sse_decode_opt_String(deserializer);
+    var var_ordered = sse_decode_bool(deserializer);
+    var var_filtered = sse_decode_bool(deserializer);
+    var var_createdDate = sse_decode_opt_String(deserializer);
+    var var_lastModifiedDate = sse_decode_opt_String(deserializer);
+    return ReadlistRow(
+        serverId: var_serverId,
+        remoteId: var_remoteId,
+        name: var_name,
+        summary: var_summary,
+        ordered: var_ordered,
+        filtered: var_filtered,
+        createdDate: var_createdDate,
+        lastModifiedDate: var_lastModifiedDate);
+  }
+
+  @protected
+  SeriesDetailRow sse_decode_series_detail_row(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverId = sse_decode_String(deserializer);
+    var var_remoteId = sse_decode_String(deserializer);
+    var var_libraryId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_sortName = sse_decode_opt_String(deserializer);
+    var var_status = sse_decode_opt_String(deserializer);
+    var var_createdAt = sse_decode_opt_String(deserializer);
+    var var_lastModified = sse_decode_opt_String(deserializer);
+    var var_booksCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_booksReadCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_booksUnreadCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_booksInProgressCount =
+        sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_summary = sse_decode_opt_String(deserializer);
+    var var_publisher = sse_decode_opt_String(deserializer);
+    var var_readingDirection = sse_decode_opt_String(deserializer);
+    var var_language = sse_decode_opt_String(deserializer);
+    var var_ageRating = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_totalBookCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_genres = sse_decode_list_String(deserializer);
+    var var_tags = sse_decode_list_String(deserializer);
+    var var_authors = sse_decode_list_author_row(deserializer);
+    var var_collections = sse_decode_list_collection_ref(deserializer);
+    return SeriesDetailRow(
+        serverId: var_serverId,
+        remoteId: var_remoteId,
+        libraryId: var_libraryId,
+        name: var_name,
+        sortName: var_sortName,
+        status: var_status,
+        createdAt: var_createdAt,
+        lastModified: var_lastModified,
+        booksCount: var_booksCount,
+        booksReadCount: var_booksReadCount,
+        booksUnreadCount: var_booksUnreadCount,
+        booksInProgressCount: var_booksInProgressCount,
+        summary: var_summary,
+        publisher: var_publisher,
+        readingDirection: var_readingDirection,
+        language: var_language,
+        ageRating: var_ageRating,
+        totalBookCount: var_totalBookCount,
+        genres: var_genres,
+        tags: var_tags,
+        authors: var_authors,
+        collections: var_collections);
+  }
+
+  @protected
+  SeriesPageResult sse_decode_series_page_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_items = sse_decode_list_series_row(deserializer);
+    var var_total = sse_decode_i_64(deserializer);
+    return SeriesPageResult(items: var_items, total: var_total);
   }
 
   @protected
@@ -1157,6 +2878,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_status = sse_decode_opt_String(deserializer);
     var var_createdAt = sse_decode_opt_String(deserializer);
     var var_lastModified = sse_decode_opt_String(deserializer);
+    var var_booksCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_booksReadCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_booksUnreadCount = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_booksInProgressCount =
+        sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_ftsRowid = sse_decode_opt_box_autoadd_i_64(deserializer);
     return SeriesRow(
         serverId: var_serverId,
         remoteId: var_remoteId,
@@ -1165,7 +2892,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sortName: var_sortName,
         status: var_status,
         createdAt: var_createdAt,
-        lastModified: var_lastModified);
+        lastModified: var_lastModified,
+        booksCount: var_booksCount,
+        booksReadCount: var_booksReadCount,
+        booksUnreadCount: var_booksUnreadCount,
+        booksInProgressCount: var_booksInProgressCount,
+        ftsRowid: var_ftsRowid);
   }
 
   @protected
@@ -1215,6 +2947,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
+  }
+
+  @protected
   int sse_decode_u_8(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8();
@@ -1244,6 +2982,66 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_author_row(AuthorRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.role, serializer);
+  }
+
+  @protected
+  void sse_encode_book_detail_row(
+      BookDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.seriesId, serializer);
+    sse_encode_opt_String(self.seriesTitle, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_opt_String(self.number, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.numberSort, serializer);
+    sse_encode_opt_String(self.summary, serializer);
+    sse_encode_opt_String(self.isbn, serializer);
+    sse_encode_opt_String(self.releaseDate, serializer);
+    sse_encode_opt_String(self.mediaType, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.pagesCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.fileSize, serializer);
+    sse_encode_opt_String(self.createdAt, serializer);
+    sse_encode_opt_String(self.lastModified, serializer);
+    sse_encode_list_String(self.tags, serializer);
+    sse_encode_list_author_row(self.authors, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.progressPage, serializer);
+    sse_encode_bool(self.progressCompleted, serializer);
+  }
+
+  @protected
+  void sse_encode_book_page_result(
+      BookPageResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_book_row(self.items, serializer);
+    sse_encode_i_64(self.total, serializer);
+  }
+
+  @protected
+  void sse_encode_book_row(BookRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.seriesId, serializer);
+    sse_encode_opt_String(self.seriesTitle, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_opt_String(self.number, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.numberSort, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.fileSize, serializer);
+    sse_encode_opt_String(self.mediaType, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.pagesCount, serializer);
+    sse_encode_opt_String(self.createdAt, serializer);
+    sse_encode_opt_String(self.lastModified, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.progressPage, serializer);
+    sse_encode_bool(self.progressCompleted, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.ftsRowid, serializer);
+  }
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
@@ -1260,6 +3058,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_book_detail_row(
+      BookDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_book_detail_row(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self, serializer);
@@ -1273,6 +3078,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_collection_detail_row(
+      CollectionDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_collection_detail_row(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_f_64(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_git_commit(
       GitCommit self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1283,6 +3101,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_git_info(GitInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_git_info(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+      PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_readlist_detail_row(
+      ReadlistDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_readlist_detail_row(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_series_detail_row(
+      SeriesDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_series_detail_row(self, serializer);
   }
 
   @protected
@@ -1303,6 +3142,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_collection_detail_row(
+      CollectionDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_bool(self.ordered, serializer);
+    sse_encode_bool(self.filtered, serializer);
+    sse_encode_opt_String(self.createdDate, serializer);
+    sse_encode_opt_String(self.lastModifiedDate, serializer);
+    sse_encode_series_page_result(self.members, serializer);
+  }
+
+  @protected
+  void sse_encode_collection_page_result(
+      CollectionPageResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_collection_row(self.items, serializer);
+    sse_encode_i_64(self.total, serializer);
+  }
+
+  @protected
+  void sse_encode_collection_ref(CollectionRef self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.name, serializer);
+  }
+
+  @protected
+  void sse_encode_collection_row(CollectionRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_bool(self.ordered, serializer);
+    sse_encode_bool(self.filtered, serializer);
+    sse_encode_opt_String(self.createdDate, serializer);
+    sse_encode_opt_String(self.lastModifiedDate, serializer);
+  }
+
+  @protected
   void sse_encode_connection_result(
       ConnectionResult self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1310,6 +3189,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.serverVersion, serializer);
     sse_encode_list_library(self.libraries, serializer);
     sse_encode_list_String(self.capabilities, serializer);
+  }
+
+  @protected
+  void sse_encode_continue_reading_row(
+      ContinueReadingRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.bookId, serializer);
+    sse_encode_String(self.bookTitle, serializer);
+    sse_encode_opt_String(self.number, serializer);
+    sse_encode_String(self.seriesId, serializer);
+    sse_encode_String(self.seriesName, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.page, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.totalPages, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.progressPct, serializer);
+    sse_encode_opt_String(self.localUpdatedAt, serializer);
+  }
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat64(self);
+  }
+
+  @protected
+  void sse_encode_filter_options(FilterOptions self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_String(self.tags, serializer);
+    sse_encode_list_String(self.genres, serializer);
+    sse_encode_list_String(self.statuses, serializer);
+  }
+
+  @protected
+  void sse_encode_full_sync_summary(
+      FullSyncSummary self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_usize(self.series, serializer);
+    sse_encode_usize(self.books, serializer);
+    sse_encode_usize(self.collections, serializer);
+    sse_encode_usize(self.readlists, serializer);
+    sse_encode_usize(self.readProgress, serializer);
+    sse_encode_u_32(self.seriesPages, serializer);
+    sse_encode_u_32(self.bookPages, serializer);
   }
 
   @protected
@@ -1348,11 +3270,69 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_library_count_row(
+      LibraryCountRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_i_64(self.seriesCount, serializer);
+  }
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_author_row(
+      List<AuthorRow> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_author_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_book_row(List<BookRow> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_book_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_collection_ref(
+      List<CollectionRef> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_collection_ref(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_collection_row(
+      List<CollectionRow> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_collection_row(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_continue_reading_row(
+      List<ContinueReadingRow> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_continue_reading_row(item, serializer);
     }
   }
 
@@ -1366,11 +3346,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_library_count_row(
+      List<LibraryCountRow> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_library_count_row(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
       Uint8List self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
+  }
+
+  @protected
+  void sse_encode_list_readlist_row(
+      List<ReadlistRow> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_readlist_row(item, serializer);
+    }
   }
 
   @protected
@@ -1414,6 +3414,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_book_detail_row(
+      BookDetailRow? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_book_detail_row(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1431,6 +3442,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_build_info(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_collection_detail_row(
+      CollectionDetailRow? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_collection_detail_row(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_f_64(self, serializer);
     }
   }
 
@@ -1457,6 +3489,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+      PlatformInt64? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_i_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_readlist_detail_row(
+      ReadlistDetailRow? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_readlist_detail_row(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_series_detail_row(
+      SeriesDetailRow? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_series_detail_row(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_server_profile(
       ServerProfile? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -1465,6 +3530,77 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_box_autoadd_server_profile(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_readlist_detail_row(
+      ReadlistDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_String(self.summary, serializer);
+    sse_encode_bool(self.ordered, serializer);
+    sse_encode_bool(self.filtered, serializer);
+    sse_encode_opt_String(self.createdDate, serializer);
+    sse_encode_opt_String(self.lastModifiedDate, serializer);
+    sse_encode_book_page_result(self.books, serializer);
+  }
+
+  @protected
+  void sse_encode_readlist_page_result(
+      ReadlistPageResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_readlist_row(self.items, serializer);
+    sse_encode_i_64(self.total, serializer);
+  }
+
+  @protected
+  void sse_encode_readlist_row(ReadlistRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_String(self.summary, serializer);
+    sse_encode_bool(self.ordered, serializer);
+    sse_encode_bool(self.filtered, serializer);
+    sse_encode_opt_String(self.createdDate, serializer);
+    sse_encode_opt_String(self.lastModifiedDate, serializer);
+  }
+
+  @protected
+  void sse_encode_series_detail_row(
+      SeriesDetailRow self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.serverId, serializer);
+    sse_encode_String(self.remoteId, serializer);
+    sse_encode_String(self.libraryId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_String(self.sortName, serializer);
+    sse_encode_opt_String(self.status, serializer);
+    sse_encode_opt_String(self.createdAt, serializer);
+    sse_encode_opt_String(self.lastModified, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksReadCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksUnreadCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksInProgressCount, serializer);
+    sse_encode_opt_String(self.summary, serializer);
+    sse_encode_opt_String(self.publisher, serializer);
+    sse_encode_opt_String(self.readingDirection, serializer);
+    sse_encode_opt_String(self.language, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.ageRating, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.totalBookCount, serializer);
+    sse_encode_list_String(self.genres, serializer);
+    sse_encode_list_String(self.tags, serializer);
+    sse_encode_list_author_row(self.authors, serializer);
+    sse_encode_list_collection_ref(self.collections, serializer);
+  }
+
+  @protected
+  void sse_encode_series_page_result(
+      SeriesPageResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_series_row(self.items, serializer);
+    sse_encode_i_64(self.total, serializer);
   }
 
   @protected
@@ -1478,6 +3614,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.status, serializer);
     sse_encode_opt_String(self.createdAt, serializer);
     sse_encode_opt_String(self.lastModified, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksReadCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksUnreadCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.booksInProgressCount, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.ftsRowid, serializer);
   }
 
   @protected
@@ -1508,6 +3649,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.localPath, serializer);
     sse_encode_i_64(self.sizeBytes, serializer);
     sse_encode_String(self.lastAccess, serializer);
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
   }
 
   @protected

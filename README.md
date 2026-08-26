@@ -125,6 +125,36 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage3-checklist.md](docs/stage3-checklist.md)。
 
+## Stage 4 — 完整媒体库
+
+客户端扩展为可离线使用的完整 Komga 媒体库浏览器。核心原则不变：
+**网络负责同步，本地数据库负责展示** — 搜索、筛选、排序、分页全部基于 SQLite（FTS5 + 归一化表）。
+
+- **Library**：列表（含 Series 计数）/ 详情 / 切换（`library_counts` + 图书馆筛选）
+- **Series**：封面墙 / 详情（Metadata、Tags、Genres、Status、作者、出版社、阅读方向、
+  所属合集）/ 阅读计数器
+- **Books**：列表（封面缩略图 `variant='book'`、阅读状态）/ 详情 / 阅读状态本地变更
+  （写 `pending_mutations` Outbox：READ_PROGRESS / MARK_READ / MARK_UNREAD）
+- **Collections / Readlists / Continue Reading**：成员关系入 SQLite（`collection_series`、
+  `readlist_books` 保序），书架直接从本地 `read_progress` 派生
+- **本地查询**（`store/query.rs`，双端镜像）：FTS5 搜索、Library/Tag/Genre/Status 筛选、
+  5 种 Series 排序（名称/排序名/加入日期/最近更新/册数）、3 种 Book 排序（册数/标题/加入日期）、
+  LIMIT/OFFSET 分页 + 总数
+- **Schema v4**：归一化筛选表 + 成员关系表 + 完整元数据列 + 服务器作用域 FTS（双端 DDL 镜像）
+- **FullSync**：Series → Books → Collections → Readlists → On-Deck Progress 全量分页镜像
+- **离线验收**：
+  ```bash
+  bash scripts/verify.sh
+  bash scripts/e2e_stage4.sh          # fixture 电池 + 离线重放
+  ```
+- **真实服务器验收**（需 API Key：同步 → 断网重放同一数据库）：
+  ```bash
+  export KOMGA_BASE_URL=http://192.168.0.69:25600
+  export KOMGA_API_KEY=your-api-key
+  bash scripts/e2e_stage4.sh
+  ```
+  勾选状态与实现位置见 [docs/stage4-checklist.md](docs/stage4-checklist.md)。
+
 ## 文档入口
 
 - [架构](docs/architecture.md)

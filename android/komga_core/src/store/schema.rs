@@ -3,12 +3,14 @@
 //! DDL lives here once and is kept in sync with the Swift side
 //! (`apple/KomgaKit/Sources/KomgaStore/Schema.swift`).
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 /// Bump on every migration; stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
-/// Individual DDL statements, applied in order.
+/// Individual DDL statements, applied in order. `CREATE TABLE IF NOT EXISTS`
+/// keeps existing databases untouched, so older installs get their missing
+/// columns through `V4_ALTER_STATEMENTS` (guarded by column checks).
 pub const CREATE_STATEMENTS: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS servers (
       id TEXT PRIMARY KEY,
@@ -30,6 +32,7 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       name TEXT NOT NULL,
       PRIMARY KEY (server_id, remote_id)
     )",
+    // v4: per-series read counters + `fts_rowid` (incremental FTS5 updates).
     "CREATE TABLE IF NOT EXISTS series (
       server_id TEXT NOT NULL,
       remote_id TEXT NOT NULL,
@@ -39,30 +42,50 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       status TEXT,
       created_at TEXT,
       last_modified TEXT,
+      books_count INTEGER,
+      books_read_count INTEGER,
+      books_unread_count INTEGER,
+      books_in_progress_count INTEGER,
+      fts_rowid INTEGER,
       PRIMARY KEY (server_id, remote_id)
     )",
+    // v4: book display fields + page count + `fts_rowid`.
     "CREATE TABLE IF NOT EXISTS books (
       server_id TEXT NOT NULL,
       remote_id TEXT NOT NULL,
       series_id TEXT NOT NULL,
+      series_title TEXT,
       title TEXT NOT NULL,
       number TEXT,
+      number_sort REAL,
       file_size INTEGER,
       media_type TEXT,
+      pages_count INTEGER,
       created_at TEXT,
       last_modified TEXT,
+      oneshot INTEGER NOT NULL DEFAULT 0,
+      fts_rowid INTEGER,
       PRIMARY KEY (server_id, remote_id)
     )",
     "CREATE TABLE IF NOT EXISTS collections (
       server_id TEXT NOT NULL,
       remote_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      ordered INTEGER NOT NULL DEFAULT 0,
+      filtered INTEGER NOT NULL DEFAULT 0,
+      created_date TEXT,
+      last_modified_date TEXT,
       PRIMARY KEY (server_id, remote_id)
     )",
     "CREATE TABLE IF NOT EXISTS readlists (
       server_id TEXT NOT NULL,
       remote_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      summary TEXT,
+      ordered INTEGER NOT NULL DEFAULT 0,
+      filtered INTEGER NOT NULL DEFAULT 0,
+      created_date TEXT,
+      last_modified_date TEXT,
       PRIMARY KEY (server_id, remote_id)
     )",
     "CREATE TABLE IF NOT EXISTS read_progress (
@@ -75,11 +98,17 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       mutation_pending INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (server_id, book_id)
     )",
+    // v4: full series metadata (summary/publisher/etc. + FTS 搜索列).
     "CREATE TABLE IF NOT EXISTS series_metadata (
       server_id TEXT NOT NULL,
       series_id TEXT NOT NULL,
       summary TEXT,
       publisher TEXT,
+      reading_direction TEXT,
+      language TEXT,
+      age_rating TEXT,
+      title_sort TEXT,
+      total_book_count INTEGER,
       authors TEXT NOT NULL DEFAULT '[]',
       tags TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY (server_id, series_id)
@@ -88,6 +117,10 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       server_id TEXT NOT NULL,
       book_id TEXT NOT NULL,
       summary TEXT,
+      number TEXT,
+      number_sort REAL,
+      isbn TEXT,
+      release_date TEXT,
       authors TEXT NOT NULL DEFAULT '[]',
       tags TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY (server_id, book_id)
@@ -145,15 +178,146 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       size INTEGER NOT NULL,
       last_access TEXT NOT NULL
     )",
-    // Standalone FTS5 tables for local search; populated by the sync engine.
-    "CREATE VIRTUAL TABLE IF NOT EXISTS series_fts USING fts5(name, sort_name, authors, publisher, tags, summary)",
-    "CREATE VIRTUAL TABLE IF NOT EXISTS book_fts USING fts5(title, authors, publisher, tags, summary)",
+    // v4: normalized filter tables — tags / genres / authors are queryable
+    // (本地查询：筛选全部发生在 SQLite，避免 JSON 解析)。
+    "CREATE TABLE IF NOT EXISTS series_genres (
+      server_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      genre TEXT NOT NULL,
+      PRIMARY KEY (server_id, series_id, genre)
+    )",
+    "CREATE TABLE IF NOT EXISTS series_tags (
+      server_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (server_id, series_id, tag)
+    )",
+    "CREATE TABLE IF NOT EXISTS series_authors (
+      server_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (server_id, series_id, name, role)
+    )",
+    "CREATE TABLE IF NOT EXISTS book_tags (
+      server_id TEXT NOT NULL,
+      book_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (server_id, book_id, tag)
+    )",
+    "CREATE TABLE IF NOT EXISTS book_authors (
+      server_id TEXT NOT NULL,
+      book_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (server_id, book_id, name, role)
+    )",
+    "CREATE TABLE IF NOT EXISTS collection_series (
+      server_id TEXT NOT NULL,
+      collection_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      PRIMARY KEY (server_id, collection_id, series_id)
+    )",
+    "CREATE TABLE IF NOT EXISTS readlist_books (
+      server_id TEXT NOT NULL,
+      readlist_id TEXT NOT NULL,
+      book_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      PRIMARY KEY (server_id, readlist_id, book_id)
+    )",
+    // v4: FTS5 search indexes — `server_id` is UNINDEXED so a full rebuild
+    // stays server-scoped; `fts_rowid` on series/books keeps updates
+    // incremental. 搜索、筛选和排序全部基于 SQLite。
+    "CREATE VIRTUAL TABLE IF NOT EXISTS series_fts USING fts5(server_id UNINDEXED, name, sort_name, authors, publisher, tags, summary)",
+    "CREATE VIRTUAL TABLE IF NOT EXISTS book_fts USING fts5(server_id UNINDEXED, title, authors, publisher, tags, summary)",
 ];
+
+/// v3 → v4: columns added to tables that already exist on disk.
+/// Applied one by one, skipped when the column is already present.
+pub const V4_ALTER_STATEMENTS: &[&str] = &[
+    "ALTER TABLE series ADD COLUMN books_count INTEGER",
+    "ALTER TABLE series ADD COLUMN books_read_count INTEGER",
+    "ALTER TABLE series ADD COLUMN books_unread_count INTEGER",
+    "ALTER TABLE series ADD COLUMN books_in_progress_count INTEGER",
+    "ALTER TABLE series ADD COLUMN fts_rowid INTEGER",
+    "ALTER TABLE books ADD COLUMN series_title TEXT",
+    "ALTER TABLE books ADD COLUMN number TEXT",
+    "ALTER TABLE books ADD COLUMN number_sort REAL",
+    "ALTER TABLE books ADD COLUMN pages_count INTEGER",
+    "ALTER TABLE books ADD COLUMN oneshot INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE books ADD COLUMN fts_rowid INTEGER",
+    "ALTER TABLE collections ADD COLUMN ordered INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE collections ADD COLUMN filtered INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE collections ADD COLUMN created_date TEXT",
+    "ALTER TABLE collections ADD COLUMN last_modified_date TEXT",
+    "ALTER TABLE readlists ADD COLUMN summary TEXT",
+    "ALTER TABLE readlists ADD COLUMN ordered INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE readlists ADD COLUMN filtered INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE readlists ADD COLUMN created_date TEXT",
+    "ALTER TABLE readlists ADD COLUMN last_modified_date TEXT",
+    "ALTER TABLE series_metadata ADD COLUMN reading_direction TEXT",
+    "ALTER TABLE series_metadata ADD COLUMN language TEXT",
+    "ALTER TABLE series_metadata ADD COLUMN age_rating TEXT",
+    "ALTER TABLE series_metadata ADD COLUMN title_sort TEXT",
+    "ALTER TABLE series_metadata ADD COLUMN total_book_count INTEGER",
+    "ALTER TABLE book_metadata ADD COLUMN number TEXT",
+    "ALTER TABLE book_metadata ADD COLUMN number_sort REAL",
+    "ALTER TABLE book_metadata ADD COLUMN isbn TEXT",
+    "ALTER TABLE book_metadata ADD COLUMN release_date TEXT",
+];
+
+/// True when a table exists and has the given column.
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"
+    ))?;
+    let count: i64 = stmt.query_row([column], |row| row.get(0))?;
+    Ok(count > 0)
+}
+
+/// Rename the FTS tables' old column shape (pre-v4: no `server_id` column)
+/// so the new server-scoped index can be created. Derived data only — the
+/// next sync rebuilds it.
+fn migrate_fts_shape(conn: &Connection) -> rusqlite::Result<()> {
+    for table in ["series_fts", "book_fts"] {
+        let sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let needs_recreate = match sql {
+            Some(ddl) => !ddl.contains("server_id"),
+            None => false, // never existed → CREATE later builds the new shape
+        };
+        if needs_recreate {
+            conn.execute(&format!("DROP TABLE IF EXISTS {table}"), [])?;
+        }
+    }
+    Ok(())
+}
 
 /// Apply all statements and stamp the schema version.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    migrate_fts_shape(conn)?;
     for statement in CREATE_STATEMENTS {
         conn.execute(statement, [])?;
+    }
+    // v3 → v4 column additions (skip when already present).
+    for statement in V4_ALTER_STATEMENTS {
+        // "ALTER TABLE {t} ADD COLUMN {c} ..." → split off the column name.
+        let rest = statement
+            .strip_prefix("ALTER TABLE ")
+            .expect("v4 alter statements are ALTER TABLE");
+        let (table, col_part) = rest.split_once(" ADD COLUMN ").expect("alter shape");
+        let column = col_part
+            .split_whitespace()
+            .next()
+            .expect("column name present");
+        if !table_has_column(conn, table, column)? {
+            conn.execute(statement, [])?;
+        }
     }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())

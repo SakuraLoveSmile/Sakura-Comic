@@ -14,9 +14,16 @@ import 'frb_generated.dart';
 import 'model/server.dart';
 import 'model/server_profile.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
+import 'store.dart';
+import 'store/books.dart';
+import 'store/collections.dart';
+import 'store/query.dart';
+import 'store/read_progress.dart';
+import 'store/readlists.dart';
 import 'store/series.dart';
 import 'store/thumbnails.dart';
 import 'sync/bootstrap.dart';
+import 'sync/full.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RustLibApiImplPlatform({
@@ -33,10 +40,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AuthType dco_decode_auth_type(dynamic raw);
 
   @protected
+  AuthorRow dco_decode_author_row(dynamic raw);
+
+  @protected
+  BookDetailRow dco_decode_book_detail_row(dynamic raw);
+
+  @protected
+  BookPageResult dco_decode_book_page_result(dynamic raw);
+
+  @protected
+  BookRow dco_decode_book_row(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
   BootstrapSummary dco_decode_bootstrap_summary(dynamic raw);
+
+  @protected
+  BookDetailRow dco_decode_box_autoadd_book_detail_row(dynamic raw);
 
   @protected
   bool dco_decode_box_autoadd_bool(dynamic raw);
@@ -45,10 +67,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BuildInfo dco_decode_box_autoadd_build_info(dynamic raw);
 
   @protected
+  CollectionDetailRow dco_decode_box_autoadd_collection_detail_row(dynamic raw);
+
+  @protected
+  double dco_decode_box_autoadd_f_64(dynamic raw);
+
+  @protected
   GitCommit dco_decode_box_autoadd_git_commit(dynamic raw);
 
   @protected
   GitInfo dco_decode_box_autoadd_git_info(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  ReadlistDetailRow dco_decode_box_autoadd_readlist_detail_row(dynamic raw);
+
+  @protected
+  SeriesDetailRow dco_decode_box_autoadd_series_detail_row(dynamic raw);
 
   @protected
   ServerProfile dco_decode_box_autoadd_server_profile(dynamic raw);
@@ -57,7 +94,31 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BuildInfo dco_decode_build_info(dynamic raw);
 
   @protected
+  CollectionDetailRow dco_decode_collection_detail_row(dynamic raw);
+
+  @protected
+  CollectionPageResult dco_decode_collection_page_result(dynamic raw);
+
+  @protected
+  CollectionRef dco_decode_collection_ref(dynamic raw);
+
+  @protected
+  CollectionRow dco_decode_collection_row(dynamic raw);
+
+  @protected
   ConnectionResult dco_decode_connection_result(dynamic raw);
+
+  @protected
+  ContinueReadingRow dco_decode_continue_reading_row(dynamic raw);
+
+  @protected
+  double dco_decode_f_64(dynamic raw);
+
+  @protected
+  FilterOptions dco_decode_filter_options(dynamic raw);
+
+  @protected
+  FullSyncSummary dco_decode_full_sync_summary(dynamic raw);
 
   @protected
   GitCommit dco_decode_git_commit(dynamic raw);
@@ -75,13 +136,37 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Library dco_decode_library(dynamic raw);
 
   @protected
+  LibraryCountRow dco_decode_library_count_row(dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<AuthorRow> dco_decode_list_author_row(dynamic raw);
+
+  @protected
+  List<BookRow> dco_decode_list_book_row(dynamic raw);
+
+  @protected
+  List<CollectionRef> dco_decode_list_collection_ref(dynamic raw);
+
+  @protected
+  List<CollectionRow> dco_decode_list_collection_row(dynamic raw);
+
+  @protected
+  List<ContinueReadingRow> dco_decode_list_continue_reading_row(dynamic raw);
 
   @protected
   List<Library> dco_decode_list_library(dynamic raw);
 
   @protected
+  List<LibraryCountRow> dco_decode_list_library_count_row(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<ReadlistRow> dco_decode_list_readlist_row(dynamic raw);
 
   @protected
   List<SeriesRow> dco_decode_list_series_row(dynamic raw);
@@ -96,10 +181,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  BookDetailRow? dco_decode_opt_box_autoadd_book_detail_row(dynamic raw);
+
+  @protected
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
   BuildInfo? dco_decode_opt_box_autoadd_build_info(dynamic raw);
+
+  @protected
+  CollectionDetailRow? dco_decode_opt_box_autoadd_collection_detail_row(
+      dynamic raw);
+
+  @protected
+  double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
 
   @protected
   GitCommit? dco_decode_opt_box_autoadd_git_commit(dynamic raw);
@@ -108,7 +203,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GitInfo? dco_decode_opt_box_autoadd_git_info(dynamic raw);
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  ReadlistDetailRow? dco_decode_opt_box_autoadd_readlist_detail_row(
+      dynamic raw);
+
+  @protected
+  SeriesDetailRow? dco_decode_opt_box_autoadd_series_detail_row(dynamic raw);
+
+  @protected
   ServerProfile? dco_decode_opt_box_autoadd_server_profile(dynamic raw);
+
+  @protected
+  ReadlistDetailRow dco_decode_readlist_detail_row(dynamic raw);
+
+  @protected
+  ReadlistPageResult dco_decode_readlist_page_result(dynamic raw);
+
+  @protected
+  ReadlistRow dco_decode_readlist_row(dynamic raw);
+
+  @protected
+  SeriesDetailRow dco_decode_series_detail_row(dynamic raw);
+
+  @protected
+  SeriesPageResult dco_decode_series_page_result(dynamic raw);
 
   @protected
   SeriesRow dco_decode_series_row(dynamic raw);
@@ -121,6 +241,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ThumbnailRow dco_decode_thumbnail_row(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -138,10 +261,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AuthType sse_decode_auth_type(SseDeserializer deserializer);
 
   @protected
+  AuthorRow sse_decode_author_row(SseDeserializer deserializer);
+
+  @protected
+  BookDetailRow sse_decode_book_detail_row(SseDeserializer deserializer);
+
+  @protected
+  BookPageResult sse_decode_book_page_result(SseDeserializer deserializer);
+
+  @protected
+  BookRow sse_decode_book_row(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
   BootstrapSummary sse_decode_bootstrap_summary(SseDeserializer deserializer);
+
+  @protected
+  BookDetailRow sse_decode_box_autoadd_book_detail_row(
+      SseDeserializer deserializer);
 
   @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
@@ -150,10 +289,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BuildInfo sse_decode_box_autoadd_build_info(SseDeserializer deserializer);
 
   @protected
+  CollectionDetailRow sse_decode_box_autoadd_collection_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
   GitCommit sse_decode_box_autoadd_git_commit(SseDeserializer deserializer);
 
   @protected
   GitInfo sse_decode_box_autoadd_git_info(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  ReadlistDetailRow sse_decode_box_autoadd_readlist_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  SeriesDetailRow sse_decode_box_autoadd_series_detail_row(
+      SseDeserializer deserializer);
 
   @protected
   ServerProfile sse_decode_box_autoadd_server_profile(
@@ -163,7 +320,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BuildInfo sse_decode_build_info(SseDeserializer deserializer);
 
   @protected
+  CollectionDetailRow sse_decode_collection_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  CollectionPageResult sse_decode_collection_page_result(
+      SseDeserializer deserializer);
+
+  @protected
+  CollectionRef sse_decode_collection_ref(SseDeserializer deserializer);
+
+  @protected
+  CollectionRow sse_decode_collection_row(SseDeserializer deserializer);
+
+  @protected
   ConnectionResult sse_decode_connection_result(SseDeserializer deserializer);
+
+  @protected
+  ContinueReadingRow sse_decode_continue_reading_row(
+      SseDeserializer deserializer);
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer);
+
+  @protected
+  FilterOptions sse_decode_filter_options(SseDeserializer deserializer);
+
+  @protected
+  FullSyncSummary sse_decode_full_sync_summary(SseDeserializer deserializer);
 
   @protected
   GitCommit sse_decode_git_commit(SseDeserializer deserializer);
@@ -181,13 +365,41 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Library sse_decode_library(SseDeserializer deserializer);
 
   @protected
+  LibraryCountRow sse_decode_library_count_row(SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<AuthorRow> sse_decode_list_author_row(SseDeserializer deserializer);
+
+  @protected
+  List<BookRow> sse_decode_list_book_row(SseDeserializer deserializer);
+
+  @protected
+  List<CollectionRef> sse_decode_list_collection_ref(
+      SseDeserializer deserializer);
+
+  @protected
+  List<CollectionRow> sse_decode_list_collection_row(
+      SseDeserializer deserializer);
+
+  @protected
+  List<ContinueReadingRow> sse_decode_list_continue_reading_row(
+      SseDeserializer deserializer);
 
   @protected
   List<Library> sse_decode_list_library(SseDeserializer deserializer);
 
   @protected
+  List<LibraryCountRow> sse_decode_list_library_count_row(
+      SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<ReadlistRow> sse_decode_list_readlist_row(SseDeserializer deserializer);
 
   @protected
   List<SeriesRow> sse_decode_list_series_row(SseDeserializer deserializer);
@@ -204,11 +416,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  BookDetailRow? sse_decode_opt_box_autoadd_book_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   BuildInfo? sse_decode_opt_box_autoadd_build_info(
       SseDeserializer deserializer);
+
+  @protected
+  CollectionDetailRow? sse_decode_opt_box_autoadd_collection_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
   GitCommit? sse_decode_opt_box_autoadd_git_commit(
@@ -218,8 +441,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GitInfo? sse_decode_opt_box_autoadd_git_info(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  ReadlistDetailRow? sse_decode_opt_box_autoadd_readlist_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  SeriesDetailRow? sse_decode_opt_box_autoadd_series_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
   ServerProfile? sse_decode_opt_box_autoadd_server_profile(
       SseDeserializer deserializer);
+
+  @protected
+  ReadlistDetailRow sse_decode_readlist_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  ReadlistPageResult sse_decode_readlist_page_result(
+      SseDeserializer deserializer);
+
+  @protected
+  ReadlistRow sse_decode_readlist_row(SseDeserializer deserializer);
+
+  @protected
+  SeriesDetailRow sse_decode_series_detail_row(SseDeserializer deserializer);
+
+  @protected
+  SeriesPageResult sse_decode_series_page_result(SseDeserializer deserializer);
 
   @protected
   SeriesRow sse_decode_series_row(SseDeserializer deserializer);
@@ -232,6 +483,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ThumbnailRow sse_decode_thumbnail_row(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -249,11 +503,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_auth_type(AuthType self, SseSerializer serializer);
 
   @protected
+  void sse_encode_author_row(AuthorRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_book_detail_row(BookDetailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_book_page_result(
+      BookPageResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_book_row(BookRow self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
   void sse_encode_bootstrap_summary(
       BootstrapSummary self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_book_detail_row(
+      BookDetailRow self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
@@ -263,11 +534,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       BuildInfo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_collection_detail_row(
+      CollectionDetailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_git_commit(
       GitCommit self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_git_info(GitInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+      PlatformInt64 self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_readlist_detail_row(
+      ReadlistDetailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_series_detail_row(
+      SeriesDetailRow self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_server_profile(
@@ -277,8 +567,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_build_info(BuildInfo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_collection_detail_row(
+      CollectionDetailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_collection_page_result(
+      CollectionPageResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_collection_ref(CollectionRef self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_collection_row(CollectionRow self, SseSerializer serializer);
+
+  @protected
   void sse_encode_connection_result(
       ConnectionResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_continue_reading_row(
+      ContinueReadingRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_filter_options(FilterOptions self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_full_sync_summary(
+      FullSyncSummary self, SseSerializer serializer);
 
   @protected
   void sse_encode_git_commit(GitCommit self, SseSerializer serializer);
@@ -296,14 +614,45 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_library(Library self, SseSerializer serializer);
 
   @protected
+  void sse_encode_library_count_row(
+      LibraryCountRow self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_author_row(
+      List<AuthorRow> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_book_row(List<BookRow> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_collection_ref(
+      List<CollectionRef> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_collection_row(
+      List<CollectionRow> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_continue_reading_row(
+      List<ContinueReadingRow> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_library(List<Library> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_library_count_row(
+      List<LibraryCountRow> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
       Uint8List self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_readlist_row(
+      List<ReadlistRow> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_series_row(
@@ -321,11 +670,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_book_detail_row(
+      BookDetailRow? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_build_info(
       BuildInfo? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_collection_detail_row(
+      CollectionDetailRow? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_git_commit(
@@ -336,8 +696,39 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       GitInfo? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+      PlatformInt64? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_readlist_detail_row(
+      ReadlistDetailRow? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_series_detail_row(
+      SeriesDetailRow? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_server_profile(
       ServerProfile? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_readlist_detail_row(
+      ReadlistDetailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_readlist_page_result(
+      ReadlistPageResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_readlist_row(ReadlistRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_series_detail_row(
+      SeriesDetailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_series_page_result(
+      SeriesPageResult self, SseSerializer serializer);
 
   @protected
   void sse_encode_series_row(SeriesRow self, SseSerializer serializer);
@@ -350,6 +741,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_thumbnail_row(ThumbnailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);

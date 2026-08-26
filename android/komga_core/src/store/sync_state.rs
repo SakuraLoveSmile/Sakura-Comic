@@ -48,6 +48,21 @@ pub fn touch_successful_sync(conn: &Connection, server_id: &str) -> rusqlite::Re
     Ok(())
 }
 
+/// Record a completed full mirror sync: `last_full_sync` + success stamp.
+pub fn record_full_sync(conn: &Connection, server_id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO sync_state (server_id, last_full_sync, last_successful_sync, sync_status)
+         VALUES (?1, ?2, ?2, ?3)
+         ON CONFLICT(server_id) DO UPDATE SET
+           last_full_sync = excluded.last_full_sync,
+           last_successful_sync = excluded.last_successful_sync,
+           sync_status = excluded.sync_status,
+           last_error = NULL",
+        params![server_id, now_rfc3339(), STATUS_IDLE],
+    )?;
+    Ok(())
+}
+
 /// Record a failed sync: status + error message.
 pub fn touch_failed_sync(conn: &Connection, server_id: &str, error: &str) -> rusqlite::Result<()> {
     conn.execute(

@@ -82,6 +82,28 @@ impl CoverStore {
                 message: e.to_string(),
             })
     }
+
+    /// Book thumbnail variant (the book list reads cover paths from
+    /// `thumbnails` rows with `variant = 'book'`).
+    pub async fn ensure_book_thumbnail<F: BytesFetcher>(
+        &self,
+        fetcher: &F,
+        server_id: &str,
+        book_id: &str,
+    ) -> Result<PathBuf> {
+        let key = cover_key(server_id, book_id);
+        let path = self.cache.thumbnail_path(&key);
+        if self.cache.exists(&path) {
+            return Ok(path);
+        }
+        let url = crate::api::book::book_thumbnail_url(&self.base_url, book_id);
+        let bytes = fetcher.fetch_bytes(&url).await?;
+        self.cache
+            .store_thumbnail(&key, &bytes)
+            .map_err(|e| ApiError::Storage {
+                message: e.to_string(),
+            })
+    }
 }
 
 #[cfg(test)]
