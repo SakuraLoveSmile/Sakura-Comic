@@ -50,3 +50,9 @@ cargo run -p komga_core --bin stage2_smoke -- --db /tmp/comic-stage2.sqlite \
 ```
 
 Apple 侧 live 测试：`KomgaKitTests/LiveConnectionTests`（无环境变量时跳过）。
+
+## 真实服务器实测记录（192.168.0.69:25600，2026-08-26）
+
+- 无凭证 GET /actuator/info、GET /api/v1/libraries → 401（`authentication` 映射成立）
+- stage2_smoke live 携带无效 API Key → `connection probe failed: authentication failed`
+  （DNS/TCP/HTTP/认证头/错误映射全链路可用；成功路径待有效 Key 验收）
