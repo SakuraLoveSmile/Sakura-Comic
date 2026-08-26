@@ -37,6 +37,12 @@ final class LiveConnectionTests: XCTestCase {
         try keychain.save(secret: apiKey, for: ref)
         defer { try? keychain.delete(ref: ref) }
 
+        // RFC 3339 serialization is millisecond-precision; truncate so the
+        // stored value round-trips exactly (store contract, see store tests).
+        let now = Date()
+        let lastConnected = Date(
+            timeIntervalSince1970: (now.timeIntervalSince1970 * 1000).rounded() / 1000
+        )
         let profile = ServerProfile(
             id: profileID,
             displayName: "Live",
@@ -44,9 +50,10 @@ final class LiveConnectionTests: XCTestCase {
             authType: .apiKey,
             credentialRef: ref,
             capabilities: result.capabilities,
-            lastSuccessfulConnection: Date()
+            lastSuccessfulConnection: lastConnected
         )
         try store.upsertServer(profile)
+        defer { try? store.deleteServer(id: profileID) }
         _ = try store.upsertLibraries(serverID: profileID, libraries: result.libraries)
         try store.setActiveServer(id: profileID)
 

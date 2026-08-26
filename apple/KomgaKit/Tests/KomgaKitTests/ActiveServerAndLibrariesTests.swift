@@ -3,6 +3,24 @@ import XCTest
 import KomgaAPI
 
 final class ActiveServerAndLibrariesTests: XCTestCase {
+    func testServerProfileDateRoundtripIsMillisecondExact() throws {
+        let store = try KomgaStore()
+        // RFC 3339 serialization keeps millisecond precision; truncate like
+        // the app layer does so equality holds exactly.
+        let now = Date()
+        let lastConnected = Date(
+            timeIntervalSince1970: (now.timeIntervalSince1970 * 1000).rounded() / 1000
+        )
+        let profile = ServerProfile(
+            displayName: "Home",
+            baseURL: "http://a.local:25600",
+            authType: .apiKey,
+            lastSuccessfulConnection: lastConnected
+        )
+        try store.upsertServer(profile)
+        XCTAssertEqual(try store.server(id: profile.id)?.lastSuccessfulConnection, lastConnected)
+    }
+
     func testActiveServerRoundtrip() throws {
         let store = try KomgaStore()
         XCTAssertNil(try store.activeServerID())
