@@ -14,13 +14,18 @@
 
 ```text
 cache/
-├── thumbnails/
+├── thumbnails/   # 封面文件（本地路径记录在 SQLite `thumbnails` 表）
 └── pages/
 
 downloads/
 └── {serverId}/
     └── {bookId}/
 ```
+
+封面文件路径由 SQLite `thumbnails` 表管理（v3）：UI 从数据库解析本地路径后
+直接读盘渲染；`cache_entries` 表负责通用 LRU 记账（pages/prefetch，后续阶段）。
+命中 = 记录存在 + 文件存在；两者任一缺失即视为缓存 miss，由 `ensure_cover` /
+`ensure_covers` 自动补齐。
 
 LRU Cache 永远不能删除 Offline Download。
 

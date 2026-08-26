@@ -211,13 +211,18 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// 删除服务器 (secret + profile + active state).
+    /// 删除服务器 (secret + profile + active state + cover records/files).
     func deleteServer(_ profile: ServerProfile) async {
         do {
             if let ref = profile.credentialRef {
                 try keychain.delete(ref: ref)
             }
+            // Cover files are removed together with their SQLite records.
+            let coverFiles = (try? store.listThumbnails(serverID: profile.id)) ?? []
             _ = try store.deleteServer(id: profile.id)
+            for record in coverFiles {
+                try? cache.remove(URL(fileURLWithPath: record.localPath))
+            }
             servers = try store.fetchServers()
             if server?.id == profile.id {
                 self.server = nil
@@ -276,15 +281,34 @@ final class LibraryViewModel: ObservableObject {
         series = try store.fetchSeries(serverID: server.id, limit: 200, offset: 0)
     }
 
-    // MARK: - Covers (cache-first)
+    // MARK: - Covers (cache-first; cover paths resolved from SQLite)
 
     /// Returns cover bytes for a series, or nil if unavailable.
+    ///
+    /// Local-first: the file path comes from the `thumbnails` table; a cache
+    /// miss (no record or file gone) downloads, stores to disk and records
+    /// the path so the next read never touches the network.
     func coverData(for record: SeriesRecord) async -> Data? {
         guard let server else { return nil }
         let loader: CoverLoader = server.id == "demo" ? demoCoverLoader : realCoverLoader
         do {
             let url = try KomgaTransport.seriesThumbnailURL(baseURL: server.baseURL, seriesID: record.remoteID)
-            return try await loader.thumbnailData(serverID: server.id, seriesID: record.remoteID, coverURL: url)
+            if let path = try store.coverPath(serverID: server.id, remoteID: record.remoteID) {
+                let fileURL = URL(fileURLWithPath: path)
+                if FileManager.default.fileExists(atPath: path), let cached = try? cache.load(fileURL) {
+                    return cached
+                }
+            }
+            let data = try await loader.thumbnailData(serverID: server.id, seriesID: record.remoteID, coverURL: url)
+            let key = DiskImageCache.coverKey(serverID: server.id, seriesID: record.remoteID)
+            let fileURL = cache.thumbnailURL(for: key)
+            try store.upsertThumbnail(ThumbnailRecord(
+                serverID: server.id,
+                remoteID: record.remoteID,
+                localPath: fileURL.path,
+                sizeBytes: Int64(data.count)
+            ))
+            return data
         } catch {
             return nil
         }

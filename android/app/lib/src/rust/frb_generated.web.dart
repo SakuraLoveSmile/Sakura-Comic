@@ -15,6 +15,7 @@ import 'model/server.dart';
 import 'model/server_profile.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 import 'store/series.dart';
+import 'store/thumbnails.dart';
 import 'sync/bootstrap.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -89,6 +90,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ServerProfile> dco_decode_list_server_profile(dynamic raw);
 
   @protected
+  List<ThumbnailRow> dco_decode_list_thumbnail_row(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -114,6 +118,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ServerProfile dco_decode_server_profile(dynamic raw);
+
+  @protected
+  ThumbnailRow dco_decode_thumbnail_row(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -190,6 +197,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<ThumbnailRow> sse_decode_list_thumbnail_row(
+      SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -218,6 +229,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ServerProfile sse_decode_server_profile(SseDeserializer deserializer);
+
+  @protected
+  ThumbnailRow sse_decode_thumbnail_row(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_8(SseDeserializer deserializer);
@@ -300,6 +314,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<ServerProfile> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_thumbnail_row(
+      List<ThumbnailRow> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -329,6 +347,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_server_profile(ServerProfile self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_thumbnail_row(ThumbnailRow self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer);

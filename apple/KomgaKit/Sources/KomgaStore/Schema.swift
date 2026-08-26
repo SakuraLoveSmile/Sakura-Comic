@@ -2,7 +2,7 @@
 /// and the Rust side (`android/komga_core/src/store/schema.rs`).
 public enum Schema {
     /// Bump when migrations are added; stored in `PRAGMA user_version`.
-    public static let currentVersion: Int64 = 2
+    public static let currentVersion: Int64 = 3
 
     public static let createStatements: [String] = [
         """
@@ -147,6 +147,20 @@ public enum Schema {
           file_path TEXT,
           state TEXT NOT NULL,
           PRIMARY KEY (server_id, book_id, page_number)
+        )
+        """,
+        // v3: cover-cache bookkeeping — the UI resolves a cover's local file
+        // path from SQLite (local-first: 本地数据库负责展示). Kept separate from
+        // `cache_entries` (generic LRU cache for pages/prefetch, later phases).
+        """
+        CREATE TABLE IF NOT EXISTS thumbnails (
+          server_id TEXT NOT NULL,
+          remote_id TEXT NOT NULL,
+          variant TEXT NOT NULL DEFAULT 'series',
+          local_path TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          last_access TEXT NOT NULL,
+          PRIMARY KEY (server_id, remote_id, variant)
         )
         """,
         """

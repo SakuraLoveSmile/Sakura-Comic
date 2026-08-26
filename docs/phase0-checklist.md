@@ -36,6 +36,13 @@
 - [x] 封面服务层（Rust CoverStore / Swift CoverLoader：缓存命中优先，miss 下载后落盘，单测覆盖）
 - [x] 纵向切片离线测试（Rust Facade bootstrap_with fake-fetcher 全链路；Swift VerticalSliceTests：Bootstrap→SQLite→读回→封面缓存）
 - [x] 封面下载 → 磁盘缓存链路（**host 验证**：`phase0_smoke --fixture` 已把封面落盘到 `cache/thumbnails/`；真实服务器走同一代码路径）
+- [x] **Schema v3 `thumbnails` 表（双端 DDL 镜像）**：封面记录 `(server_id, remote_id, variant) → local_path`；
+      封面的本地文件路径由 SQLite 管理 —— UI 只读 SQLite 即可解析封面文件（本地数据库负责展示）
+- [x] **封面记账写入（双端）**：Rust facade `ensure_cover` / `ensure_covers`（缺失清单 LEFT JOIN +
+      文件存在性检查，幂等补齐）；Swift `KomgaStore.upsertThumbnail` + `LibraryViewModel.coverData`
+      先查 SQLite 路径再读盘，miss 才下载并记账
+- [x] **sync_state 写入**：Bootstrap 成功后 `touch_successful_sync` / `recordSuccessfulSync`（双端）
+- [x] **删除服务器级联清理封面**：Rust facade + Swift `deleteServer` 删记录 + 删磁盘文件（+ 单测）
 
 ## UI
 
@@ -48,8 +55,11 @@
 - [x] macOS 应用接通同一本地优先链路（`Shared/` 共享视图；`xcodegen generate` + `xcodebuild` **BUILD SUCCEEDED**；Demo 模式可离线展示封面墙）
 - [x] Flutter Grid 接通 Rust（`RustLibraryRepository` + FRB 绑定；Android 模拟器实测：
       `[RustCore] listServers -> 0 servers`，真实 rusqlite 查询经 FFI 返回）
-- [ ] 真实封面墙展示（模拟器 / 真机）：Android 端已启动（模拟器）+ Rust 调用实测，
-      封面墙数据待添加服务器后展示；iOS 端需 Simulator Runtime 或真机
+- [x] Android 封面墙渲染（SQLite 路径 → `Image.file`）：`RustLibraryRepository.fetchCoverPaths`
+      ← `list_thumbnails`；缺封面显示占位符；AppBar 刷新 = bootstrap + 补齐；离线「演示」模式
+      （facade `bootstrap_demo`：fixture Series + 生成 PNG 封面，无服务器）已 host/单测验证
+- [ ] 真实封面墙展示（模拟器 / 真机）：已具备完整数据链路与演示模式；连接真实服务器展示
+      待用户环境执行（`e2e_stage3.sh` + 模拟器 Demo + API Key 验证）
 
 ## 验收（vertical slice）
 
@@ -76,3 +86,8 @@
 - [x] 修复 komga_core 编译：reqwest 0.12 已移除 `sse` feature（SSE 留待 Phase 2）；`SeriesPage` 改为 `pub use`；`HeaderName::from_static` 非 fallible；`phase0_smoke` 的 `list_series` 错误映射
 - [x] `phase0_smoke` 新增 `--fixture` 离线模式（fake fetchers，无网络）
 - [x] iOS 应用接通本地优先纵向切片 + 离线 Demo 模式
+- [x] **Stage 3**：Schema v3 `thumbnails` 表 + 封面记账（双端）；sync_state 写入；
+      Rust demo PNG 生成器（纯 Rust stored-deflate，`file`/`sips` 实测 200×300 合法 PNG）；
+      facade `cover_path`/`ensure_cover`/`ensure_covers`/`bootstrap_demo` + FRB 重新 codegen
+      （coverPath/listThumbnails/ensureCover/ensureCovers/bootstrapDemo）；
+      Android 封面墙渲染 + 同步/演示动作 + widget 测试；`e2e_stage3.sh` + `docs/stage3-checklist.md

@@ -36,6 +36,8 @@ public enum BootstrapSync {
         let page = try await fetcher.fetchSeriesPage(PageRequest(page: 0, size: 10))
         let records = page.content.map { SeriesRecord(serverID: serverID, dto: $0) }
         let written = try store.upsertSeriesBatch(records)
+        // Stage 3: record the successful sync in `sync_state`.
+        try store.recordSuccessfulSync(serverID: serverID)
         return BootstrapSummary(
             serverID: serverID,
             syncedSeries: written,

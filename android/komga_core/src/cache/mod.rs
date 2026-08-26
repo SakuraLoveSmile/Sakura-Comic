@@ -9,6 +9,7 @@
 //! evict offline downloads.
 
 pub mod cover;
+pub mod demo_png;
 
 use std::fs;
 use std::path::{Path, PathBuf};

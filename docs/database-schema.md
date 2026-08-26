@@ -6,14 +6,15 @@
   app_state 为 `(key)` 单值状态表
 - Apple：GRDB；Android(Rust)：rusqlite（Flutter 不直接访问数据库）
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
-- 当前 Schema 版本：**v2**（v2 新增 `app_state`，用于 `active_server_id`；
-  两端用幂等 `CREATE TABLE IF NOT EXISTS` 应用迁移并写 `PRAGMA user_version`）
+- 当前 Schema 版本：**v3**（v2 新增 `app_state`，用于 `active_server_id`；
+  v3 新增 `thumbnails` 封面缓存记账表；两端用幂等 `CREATE TABLE IF NOT EXISTS`
+  应用迁移并写 `PRAGMA user_version`）
 
 ## 主要表
 
 servers / app_state / libraries / series / books / collections / readlists /
 read_progress / series_metadata / book_metadata / sync_state /
-pending_mutations / downloads / download_pages / cache_entries
+pending_mutations / downloads / download_pages / **thumbnails** / cache_entries
 
 ## DDL 草案
 
@@ -88,6 +89,14 @@ CREATE TABLE pending_mutations (
   last_error TEXT
 );
 
+CREATE TABLE sync_state (
+  server_id TEXT PRIMARY KEY,
+  last_full_sync TEXT,
+  last_successful_sync TEXT,
+  last_error TEXT,
+  sync_status TEXT NOT NULL DEFAULT 'idle'   -- idle | syncing | error
+);
+
 CREATE TABLE downloads (
   server_id TEXT NOT NULL,
   book_id TEXT NOT NULL,
@@ -104,6 +113,19 @@ CREATE TABLE cache_entries (
   path TEXT NOT NULL,
   size INTEGER NOT NULL,
   last_access TEXT NOT NULL
+);
+
+-- v3: 封面缓存记账 —— UI 从 SQLite 解析封面本地文件路径（本地数据库负责展示）。
+-- 与 cache_entries（通用 LRU 缓存，pages/prefetch 用）分离；
+-- 命中 = 记录存在 + 文件存在；记录缺失或文件丢失都视为 miss，走 ensure_cover 补齐。
+CREATE TABLE thumbnails (
+  server_id TEXT NOT NULL,
+  remote_id TEXT NOT NULL,
+  variant TEXT NOT NULL DEFAULT 'series',  -- series | book
+  local_path TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  last_access TEXT NOT NULL,
+  PRIMARY KEY (server_id, remote_id, variant)
 );
 
 CREATE VIRTUAL TABLE series_fts USING fts5(name, sort_name, authors, publisher, tags, summary, content='series');

@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 
 /// Bump on every migration; stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Individual DDL statements, applied in order.
 pub const CREATE_STATEMENTS: &[&str] = &[
@@ -125,6 +125,18 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       file_path TEXT,
       state TEXT NOT NULL,
       PRIMARY KEY (server_id, book_id, page_number)
+    )",
+    // v3: cover-cache bookkeeping — the UI resolves a cover's local file
+    // path from SQLite (local-first: 本地数据库负责展示). Kept separate from
+    // `cache_entries` (generic LRU cache for pages/prefetch, later phases).
+    "CREATE TABLE IF NOT EXISTS thumbnails (
+      server_id TEXT NOT NULL,
+      remote_id TEXT NOT NULL,
+      variant TEXT NOT NULL DEFAULT 'series',
+      local_path TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      last_access TEXT NOT NULL,
+      PRIMARY KEY (server_id, remote_id, variant)
     )",
     "CREATE TABLE IF NOT EXISTS cache_entries (
       key TEXT PRIMARY KEY,
