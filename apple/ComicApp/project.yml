@@ -1,0 +1,90 @@
+# XcodeGen project for the four ComicApp shells.
+# Generate with: cd apple/ComicApp && xcodegen generate
+name: ComicApp
+options:
+  bundleIdPrefix: com.example.comic
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+    tvOS: "17.0"
+    visionOS: "1.0"
+packages:
+  KomgaKit:
+    path: ../KomgaKit
+targets:
+  ComicApp_iOS:
+    type: application
+    platform: iOS
+    sources: [Shared, iOS]
+    dependencies:
+      - package: KomgaKit
+        product: KomgaAPI
+      - package: KomgaKit
+        product: KomgaStore
+      - package: KomgaKit
+        product: KomgaSync
+      - package: KomgaKit
+        product: KomgaReader
+      - package: KomgaKit
+        product: KomgaFeatures
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.comic.ios
+        GENERATE_INFOPLIST_FILE: YES
+  ComicApp_macOS:
+    type: application
+    platform: macOS
+    sources: [Shared, macOS]
+    dependencies:
+      - package: KomgaKit
+        product: KomgaAPI
+      - package: KomgaKit
+        product: KomgaStore
+      - package: KomgaKit
+        product: KomgaSync
+      - package: KomgaKit
+        product: KomgaReader
+      - package: KomgaKit
+        product: KomgaFeatures
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.comic.macos
+        GENERATE_INFOPLIST_FILE: YES
+  ComicApp_tvOS:
+    type: application
+    platform: tvOS
+    sources: [Shared, tvOS]
+    dependencies:
+      - package: KomgaKit
+        product: KomgaAPI
+      - package: KomgaKit
+        product: KomgaStore
+      - package: KomgaKit
+        product: KomgaSync
+      - package: KomgaKit
+        product: KomgaReader
+      - package: KomgaKit
+        product: KomgaFeatures
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.comic.tvos
+        GENERATE_INFOPLIST_FILE: YES
+  ComicApp_visionOS:
+    type: application
+    platform: visionOS
+    sources: [Shared, visionOS]
+    dependencies:
+      - package: KomgaKit
+        product: KomgaAPI
+      - package: KomgaKit
+        product: KomgaStore
+      - package: KomgaKit
+        product: KomgaSync
+      - package: KomgaKit
+        product: KomgaReader
+      - package: KomgaKit
+        product: KomgaFeatures
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.comic.visionos
+        GENERATE_INFOPLIST_FILE: YES

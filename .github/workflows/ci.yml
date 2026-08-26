@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust-core:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android/komga_core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  # Stage 1: proves the FFI cdylib cross-compiles for every Android ABI.
+  # The .so files are build artifacts (gitignored) — this job rebuilds them.
+  android-core-ndk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android/komga_core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - run: cargo install cargo-ndk
+      - name: Cross-compile komga_core (features frb) into jniLibs
+        run: |
+          NDK_ROOT="${ANDROID_NDK_HOME:-$(ls -d ${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/* | head -1)}"
+          echo "Using NDK: $NDK_ROOT"
+          export ANDROID_NDK_HOME="$NDK_ROOT"
+          mkdir -p ../app/android/app/src/main/jniLibs
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
+            -o ../app/android/app/src/main/jniLibs \
+            build --release --features frb
+      - name: Verify .so outputs
+        run: find ../app/android/app/src/main/jniLibs -name 'libkomga_core.so' -exec ls -la {} \;
+
+  flutter-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+  swift-package:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: apple/KomgaKit
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+      - run: swift test
+
+  # Stage 1: builds the iOS app (KomgaKit linked) and proves it launches on
+  # a simulator. The .xcodeproj is generated from project.yml (gitignored).
+  ios-app:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: apple/ComicApp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build for iOS Simulator
+        run: xcodebuild -project ComicApp.xcodeproj -scheme ComicApp_iOS \
+          -sdk iphonesimulator -configuration Debug \
+          -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
+      - name: Boot simulator, install, and launch the app
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime in sorted(devices):
+              for d in devices[runtime]:
+                  if d["isAvailable"]:
+                      print(d["udid"]); sys.exit()
+          ' )
+          echo "Booting simulator $DEVICE"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" build/Build/Products/Debug-iphonesimulator/ComicApp_iOS.app
+          xcrun simctl launch "$DEVICE" com.example.comic.ios
+          sleep 5
+          xcrun simctl spawn "$DEVICE" launchctl list | grep com.example.comic.ios && echo "iOS APP LAUNCHED OK"

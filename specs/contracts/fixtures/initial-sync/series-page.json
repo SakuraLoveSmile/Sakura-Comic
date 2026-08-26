@@ -1,0 +1,96 @@
+{
+  "content": [
+    {
+      "id": "series-1",
+      "libraryId": "lib-1",
+      "name": "One Piece",
+      "url": "http://komga.local/api/v1/series/series-1",
+      "created": "2025-01-01T00:00:00Z",
+      "lastModified": "2025-01-02T00:00:00Z",
+      "booksCount": 104,
+      "booksReadCount": 10,
+      "booksUnreadCount": 94,
+      "metadata": {
+        "title": "One Piece",
+        "titleLock": false,
+        "status": "ENDED",
+        "statusLock": true,
+        "created": "2025-01-01T00:00:00Z",
+        "lastModified": "2025-01-02T00:00:00Z",
+        "summary": "A pirate adventure.",
+        "publishers": ["Shueisha"],
+        "readingDirection": "LEFT_TO_RIGHT",
+        "ageRating": null,
+        "language": "ja",
+        "categories": [],
+        "totalBookCount": 104
+      }
+    },
+    {
+      "id": "series-2",
+      "libraryId": "lib-1",
+      "name": "Berserk",
+      "url": "http://komga.local/api/v1/series/series-2",
+      "created": "2025-01-03T00:00:00Z",
+      "lastModified": "2025-01-04T00:00:00Z",
+      "booksCount": 42,
+      "booksReadCount": 3,
+      "booksUnreadCount": 39,
+      "metadata": {
+        "title": "Berserk",
+        "titleLock": false,
+        "status": "ONGOING",
+        "statusLock": true,
+        "created": "2025-01-03T00:00:00Z",
+        "lastModified": "2025-01-04T00:00:00Z",
+        "summary": "Dark fantasy.",
+        "publishers": ["Hakusensha"],
+        "readingDirection": "RIGHT_TO_LEFT",
+        "ageRating": "ADULT",
+        "language": "ja",
+        "categories": [],
+        "totalBookCount": 42
+      }
+    },
+    {
+      "id": "series-3",
+      "libraryId": "lib-2",
+      "name": "Solo Leveling",
+      "url": "http://komga.local/api/v1/series/series-3",
+      "created": "2025-02-01T00:00:00Z",
+      "lastModified": "2025-02-02T00:00:00Z",
+      "booksCount": 15,
+      "booksReadCount": 0,
+      "booksUnreadCount": 15,
+      "metadata": {
+        "title": "Solo Leveling",
+        "titleLock": true,
+        "status": "COMPLETED",
+        "statusLock": false,
+        "created": "2025-02-01T00:00:00Z",
+        "lastModified": "2025-02-02T00:00:00Z",
+        "summary": "Hunter leveling story.",
+        "publishers": ["D&C Media"],
+        "readingDirection": "LEFT_TO_RIGHT",
+        "ageRating": null,
+        "language": "ko",
+        "categories": ["Action"],
+        "totalBookCount": 15
+      }
+    }
+  ],
+  "pageable": {
+    "page": 0,
+    "size": 10,
+    "sort": [],
+    "offset": 0,
+    "unpaged": false
+  },
+  "totalElements": 3,
+  "totalPages": 1,
+  "number": 0,
+  "size": 10,
+  "numberOfElements": 3,
+  "first": true,
+  "last": true
+}

@@ -1,0 +1,45 @@
+[package]
+name = "komga_core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Local-first Komga client core (Rust): API, sync, store, cache, downloads, reader."
+
+[lib]
+name = "komga_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+# NOTE: reqwest 0.12 removed the `sse` feature (SSE lands in Phase 2).
+# No TLS backend is enabled here on purpose — http:// works as-is for Phase 0;
+# the TLS decision (native-tls vs rustls) is deferred to Phase 0 step 02.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+# FRB codegen (Phase 0 step 02) enables the `frb` feature and runs
+# flutter_rust_bridge_codegen; only src/ffi/bridge.rs + generated code
+# depend on this crate while it is disabled.
+flutter_rust_bridge = { version = "=2.13.0", optional = true }
+
+[features]
+default = []
+# Enables the FRB adapter (ffi::bridge). Codegen wiring happens in step 02.
+frb = ["dep:flutter_rust_bridge"]
+
+# Generated flutter_rust_bridge FFI code triggers this deny-by-default lint in
+# recent rustc/clippy (its extern "C" functions take raw pointers by design).
+[lints.clippy]
+not_unsafe_ptr_arg_deref = "allow"
+
+[profile.release]
+lto = true
+strip = true
