@@ -3,9 +3,12 @@ import 'rust/ffi/bridge.dart' as frb;
 import 'rust/frb_generated.dart';
 import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
+import 'rust/store/query.dart';
+import 'rust/store/read_progress.dart';
 import 'rust/store/series.dart';
 import 'rust/store/thumbnails.dart';
 import 'rust/sync/bootstrap.dart';
+import 'rust/sync/full.dart';
 import 'rust_core_api.dart';
 
 /// Tries to load the native library (`libkomga_core.so`).
@@ -25,8 +28,8 @@ Future<bool> initRustCore() async {
 /// [RustCoreApi] backed by the generated flutter_rust_bridge bindings
 /// (lib/src/rust/). Keep signatures aligned with
 /// android/komga_core/src/ffi/bridge.rs.
-class FrbRustCoreApi implements RustCoreApi {
-  const FrbRustCoreApi();
+class FrbRustCoreApi extends RustCoreApi {
+  FrbRustCoreApi();
 
   @override
   Future<BootstrapSummary> bootstrap({
@@ -176,5 +179,258 @@ class FrbRustCoreApi implements RustCoreApi {
     required String serverId,
   }) {
     return frb.bootstrapDemo(dbPath: dbPath, serverId: serverId);
+  }
+
+  // MARK: Stage 4 — media library (FRB)
+
+  @override
+  Future<FullSyncSummary> fullSync({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    return frb.fullSync(
+      dbPath: dbPath,
+      serverId: serverId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+    );
+  }
+
+  @override
+  Future<SeriesPageResult> querySeries({
+    required String dbPath,
+    required String serverId,
+    String? search,
+    String? libraryId,
+    String? status,
+    String? tag,
+    String? genre,
+    String sort = 'name',
+    bool ascending = true,
+    int limit = 50,
+    int offset = 0,
+  }) {
+    return frb.querySeries(
+      dbPath: dbPath,
+      serverId: serverId,
+      search: search,
+      libraryId: libraryId,
+      status: status,
+      tag: tag,
+      genre: genre,
+      sort: sort,
+      ascending: ascending,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<BookPageResult> queryBooks({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    String? search,
+    String? readStatus,
+    String? tag,
+    String sort = 'number',
+    bool ascending = true,
+    int limit = 100,
+    int offset = 0,
+  }) {
+    return frb.queryBooks(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+      search: search,
+      readStatus: readStatus,
+      tag: tag,
+      sort: sort,
+      ascending: ascending,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<SeriesDetailRow?> seriesDetail({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) {
+    return frb.seriesDetail(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+    );
+  }
+
+  @override
+  Future<BookDetailRow?> bookDetail({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) {
+    return frb.bookDetail(dbPath: dbPath, serverId: serverId, bookId: bookId);
+  }
+
+  @override
+  Future<CollectionPageResult> listCollections({
+    required String dbPath,
+    required String serverId,
+    String? search,
+    int limit = 100,
+    int offset = 0,
+  }) {
+    return frb.listCollections(
+      dbPath: dbPath,
+      serverId: serverId,
+      search: search,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<CollectionDetailRow?> collectionDetail({
+    required String dbPath,
+    required String serverId,
+    required String collectionId,
+    int limit = 200,
+    int offset = 0,
+  }) {
+    return frb.collectionDetail(
+      dbPath: dbPath,
+      serverId: serverId,
+      collectionId: collectionId,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<ReadlistPageResult> listReadlists({
+    required String dbPath,
+    required String serverId,
+    String? search,
+    int limit = 100,
+    int offset = 0,
+  }) {
+    return frb.listReadlists(
+      dbPath: dbPath,
+      serverId: serverId,
+      search: search,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<ReadlistDetailRow?> readlistDetail({
+    required String dbPath,
+    required String serverId,
+    required String readlistId,
+    int limit = 500,
+    int offset = 0,
+  }) {
+    return frb.readlistDetail(
+      dbPath: dbPath,
+      serverId: serverId,
+      readlistId: readlistId,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<List<ContinueReadingRow>> continueReading({
+    required String dbPath,
+    required String serverId,
+    int limit = 10,
+  }) {
+    return frb.continueReading(
+      dbPath: dbPath,
+      serverId: serverId,
+      limit: limit,
+    );
+  }
+
+  @override
+  Future<FilterOptions> filterOptions({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.filterOptions(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<List<LibraryCountRow>> libraryCounts({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.libraryCounts(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<void> setReadProgress({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+    required int page,
+    required bool completed,
+  }) {
+    return frb.setReadProgress(
+      dbPath: dbPath,
+      serverId: serverId,
+      bookId: bookId,
+      page: page,
+      completed: completed,
+    );
+  }
+
+  @override
+  Future<void> markRead({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) {
+    return frb.markRead(dbPath: dbPath, serverId: serverId, bookId: bookId);
+  }
+
+  @override
+  Future<void> markUnread({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) {
+    return frb.markUnread(dbPath: dbPath, serverId: serverId, bookId: bookId);
+  }
+
+  @override
+  Future<String?> bookCoverPath({
+    required String dbPath,
+    required String serverId,
+    required String bookId,
+  }) {
+    return frb.bookCoverPath(dbPath: dbPath, serverId: serverId, bookId: bookId);
+  }
+
+  @override
+  Future<int> ensureBookCovers({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    return frb.ensureBookCovers(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+    );
   }
 }

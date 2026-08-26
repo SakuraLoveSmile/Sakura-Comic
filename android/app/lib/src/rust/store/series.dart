@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Locally stored series row (subset of the remote SeriesDto).
+/// Locally stored series row (mirrors the remote SeriesDto subset).
 class SeriesRow {
   final String serverId;
   final String remoteId;
@@ -16,6 +16,13 @@ class SeriesRow {
   final String? status;
   final String? createdAt;
   final String? lastModified;
+  final PlatformInt64? booksCount;
+  final PlatformInt64? booksReadCount;
+  final PlatformInt64? booksUnreadCount;
+  final PlatformInt64? booksInProgressCount;
+
+  /// FTS rowid (incremental search-index updates); internal.
+  final PlatformInt64? ftsRowid;
 
   const SeriesRow({
     required this.serverId,
@@ -26,6 +33,11 @@ class SeriesRow {
     this.status,
     this.createdAt,
     this.lastModified,
+    this.booksCount,
+    this.booksReadCount,
+    this.booksUnreadCount,
+    this.booksInProgressCount,
+    this.ftsRowid,
   });
 
   @override
@@ -37,7 +49,12 @@ class SeriesRow {
       sortName.hashCode ^
       status.hashCode ^
       createdAt.hashCode ^
-      lastModified.hashCode;
+      lastModified.hashCode ^
+      booksCount.hashCode ^
+      booksReadCount.hashCode ^
+      booksUnreadCount.hashCode ^
+      booksInProgressCount.hashCode ^
+      ftsRowid.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -51,5 +68,10 @@ class SeriesRow {
           sortName == other.sortName &&
           status == other.status &&
           createdAt == other.createdAt &&
-          lastModified == other.lastModified;
+          lastModified == other.lastModified &&
+          booksCount == other.booksCount &&
+          booksReadCount == other.booksReadCount &&
+          booksUnreadCount == other.booksUnreadCount &&
+          booksInProgressCount == other.booksInProgressCount &&
+          ftsRowid == other.ftsRowid;
 }

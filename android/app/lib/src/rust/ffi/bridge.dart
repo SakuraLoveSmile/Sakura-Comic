@@ -6,9 +6,16 @@
 import '../frb_generated.dart';
 import '../model/server.dart';
 import '../model/server_profile.dart';
+import '../store.dart';
+import '../store/books.dart';
+import '../store/collections.dart';
+import '../store/query.dart';
+import '../store/read_progress.dart';
+import '../store/readlists.dart';
 import '../store/series.dart';
 import '../store/thumbnails.dart';
 import '../sync/bootstrap.dart';
+import '../sync/full.dart';
 import 'application.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -116,3 +123,225 @@ Future<BootstrapSummary> bootstrapDemo(
         {required String dbPath, required String serverId}) =>
     RustLib.instance.api
         .crateFfiBridgeBootstrapDemo(dbPath: dbPath, serverId: serverId);
+
+/// FullSync against a live server: series → books → collections →
+/// readlists → on-deck progress.
+Future<FullSyncSummary> fullSync(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeFullSync(
+        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+
+/// Paged series wall with search / filters / sort (本地查询).
+Future<SeriesPageResult> querySeries(
+        {required String dbPath,
+        required String serverId,
+        String? search,
+        String? libraryId,
+        String? status,
+        String? tag,
+        String? genre,
+        required String sort,
+        required bool ascending,
+        required PlatformInt64 limit,
+        required PlatformInt64 offset}) =>
+    RustLib.instance.api.crateFfiBridgeQuerySeries(
+        dbPath: dbPath,
+        serverId: serverId,
+        search: search,
+        libraryId: libraryId,
+        status: status,
+        tag: tag,
+        genre: genre,
+        sort: sort,
+        ascending: ascending,
+        limit: limit,
+        offset: offset);
+
+/// Paged book list of one series with read-status / tag filters (本地查询).
+Future<BookPageResult> queryBooks(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId,
+        String? search,
+        String? readStatus,
+        String? tag,
+        required String sort,
+        required bool ascending,
+        required PlatformInt64 limit,
+        required PlatformInt64 offset}) =>
+    RustLib.instance.api.crateFfiBridgeQueryBooks(
+        dbPath: dbPath,
+        serverId: serverId,
+        seriesId: seriesId,
+        search: search,
+        readStatus: readStatus,
+        tag: tag,
+        sort: sort,
+        ascending: ascending,
+        limit: limit,
+        offset: offset);
+
+/// Full series detail: row + metadata + genres + tags + authors +
+/// collection memberships (all local).
+Future<SeriesDetailRow?> seriesDetail(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId}) =>
+    RustLib.instance.api.crateFfiBridgeSeriesDetail(
+        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+
+/// Full book detail: row + metadata + tags + authors + progress (local).
+Future<BookDetailRow?> bookDetail(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeBookDetail(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Collections searchable list (paged, local).
+Future<CollectionPageResult> listCollections(
+        {required String dbPath,
+        required String serverId,
+        String? search,
+        required PlatformInt64 limit,
+        required PlatformInt64 offset}) =>
+    RustLib.instance.api.crateFfiBridgeListCollections(
+        dbPath: dbPath,
+        serverId: serverId,
+        search: search,
+        limit: limit,
+        offset: offset);
+
+/// Collection detail: the row + its member series (paged, local).
+Future<CollectionDetailRow?> collectionDetail(
+        {required String dbPath,
+        required String serverId,
+        required String collectionId,
+        required PlatformInt64 limit,
+        required PlatformInt64 offset}) =>
+    RustLib.instance.api.crateFfiBridgeCollectionDetail(
+        dbPath: dbPath,
+        serverId: serverId,
+        collectionId: collectionId,
+        limit: limit,
+        offset: offset);
+
+/// Readlists searchable list (paged, local).
+Future<ReadlistPageResult> listReadlists(
+        {required String dbPath,
+        required String serverId,
+        String? search,
+        required PlatformInt64 limit,
+        required PlatformInt64 offset}) =>
+    RustLib.instance.api.crateFfiBridgeListReadlists(
+        dbPath: dbPath,
+        serverId: serverId,
+        search: search,
+        limit: limit,
+        offset: offset);
+
+/// Readlist detail: the row + its ordered books (paged, local).
+Future<ReadlistDetailRow?> readlistDetail(
+        {required String dbPath,
+        required String serverId,
+        required String readlistId,
+        required PlatformInt64 limit,
+        required PlatformInt64 offset}) =>
+    RustLib.instance.api.crateFfiBridgeReadlistDetail(
+        dbPath: dbPath,
+        serverId: serverId,
+        readlistId: readlistId,
+        limit: limit,
+        offset: offset);
+
+/// Continue-reading shelf (books read partially, local only).
+Future<List<ContinueReadingRow>> continueReading(
+        {required String dbPath,
+        required String serverId,
+        required PlatformInt64 limit}) =>
+    RustLib.instance.api.crateFfiBridgeContinueReading(
+        dbPath: dbPath, serverId: serverId, limit: limit);
+
+/// Filter-chip options derived from the local mirror (tags / genres /
+/// statuses), distinct + sorted.
+Future<FilterOptions> filterOptions(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeFilterOptions(dbPath: dbPath, serverId: serverId);
+
+/// Library rows with their local series counts (Library 列表/切换).
+Future<List<LibraryCountRow>> libraryCounts(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeLibraryCounts(dbPath: dbPath, serverId: serverId);
+
+/// Local page update + outbox row (READ_PROGRESS).
+Future<void> setReadProgress(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required PlatformInt64 page,
+        required bool completed}) =>
+    RustLib.instance.api.crateFfiBridgeSetReadProgress(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        page: page,
+        completed: completed);
+
+/// Explicit mark-read + outbox row (MARK_READ).
+Future<void> markRead(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeMarkRead(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Explicit mark-unread + outbox row (MARK_UNREAD).
+Future<void> markUnread(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeMarkUnread(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Book cover file path resolved from SQLite only (None = cache miss).
+Future<String?> bookCoverPath(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeBookCoverPath(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Backfill one book cover (cache miss → download → disk → SQLite row),
+/// returning the local file path.
+Future<String> ensureBookCover(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeEnsureBookCover(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        baseUrl: baseUrl,
+        apiKey: apiKey);
+
+/// Backfill every book cover of one series (缓存缺失自动补齐, book variant).
+/// Returns the number of covers written.
+Future<PlatformInt64> ensureBookCovers(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeEnsureBookCovers(
+        dbPath: dbPath,
+        serverId: serverId,
+        seriesId: seriesId,
+        baseUrl: baseUrl,
+        apiKey: apiKey);

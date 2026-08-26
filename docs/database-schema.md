@@ -6,136 +6,50 @@
   app_state 为 `(key)` 单值状态表
 - Apple：GRDB；Android(Rust)：rusqlite（Flutter 不直接访问数据库）
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
-- 当前 Schema 版本：**v3**（v2 新增 `app_state`，用于 `active_server_id`；
-  v3 新增 `thumbnails` 封面缓存记账表；两端用幂等 `CREATE TABLE IF NOT EXISTS`
+- 当前 Schema 版本：**v4**（v2 新增 `app_state`；v3 新增 `thumbnails`；
+  v4 新增归一化筛选表 / 成员关系表 / 完整元数据列 / 服务器作用域 FTS；
+  两端用幂等 `CREATE TABLE IF NOT EXISTS` + 受保护的 `ALTER TABLE ADD COLUMN`
   应用迁移并写 `PRAGMA user_version`）
 
 ## 主要表
 
 servers / app_state / libraries / series / books / collections / readlists /
 read_progress / series_metadata / book_metadata / sync_state /
-pending_mutations / downloads / download_pages / **thumbnails** / cache_entries
+pending_mutations / downloads / download_pages / **thumbnails** / cache_entries /
+**series_genres / series_tags / series_authors / book_tags / book_authors /
+collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服务器作用域）
 
-## DDL 草案
+## v4 变更
 
-```sql
-CREATE TABLE servers (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL,
-  base_url TEXT NOT NULL,
-  auth_type TEXT NOT NULL,
-  credential_ref TEXT,
-  capabilities TEXT,
-  last_successful_connection TEXT
-);
+- `series` 增加阅读计数器：`books_count / books_read_count / books_unread_count /
+  books_in_progress_count`，以及 `fts_rowid`（FTS 增量维护）
+- `books` 增加 `series_title / number / number_sort / pages_count / oneshot / fts_rowid`
+- `collections` 增加 `ordered / filtered / created_date / last_modified_date`
+- `readlists` 增加 `summary / ordered / filtered / created_date / last_modified_date`
+- `series_metadata` 增加 `reading_direction / language / age_rating(TEXT) /
+  title_sort / total_book_count`
+- `book_metadata` 增加 `number / number_sort / isbn / release_date`
+- **归一化筛选表**（本地筛选全部走 SQL，避免 JSON 解析）：
+  `series_genres / series_tags / series_authors / book_tags / book_authors`
+- **成员关系表**：`collection_series(collection_id, series_id)`、
+  `readlist_books(readlist_id, book_id, position)`（书单保序）
+- **FTS5 搜索索引**改为带 `server_id UNINDEXED` 的独立表：
+  `series_fts(server_id, name, sort_name, authors, publisher, tags, summary)`、
+  `book_fts(server_id, title, authors, publisher, tags, summary)`；
+  由 `series.fts_rowid` / `books.fts_rowid` 增量维护（旧 v3 表在迁移时重建）
 
--- v2: 单值应用状态（当前服务器等）
-CREATE TABLE app_state (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
+## DDL
 
-CREATE TABLE libraries (
-  server_id TEXT NOT NULL,
-  remote_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  PRIMARY KEY (server_id, remote_id)
-);
+实际 DDL 见实现（两端逐字镜像）：
+- Rust：`android/komga_core/src/store/schema.rs`（CREATE_STATEMENTS + V4_ALTER_STATEMENTS + FTS 形状迁移）
+- Swift：`apple/KomgaKit/Sources/KomgaStore/Schema.swift`
 
-CREATE TABLE series (
-  server_id TEXT NOT NULL,
-  remote_id TEXT NOT NULL,
-  library_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  sort_name TEXT,
-  status TEXT,
-  created_at TEXT,
-  last_modified TEXT,
-  PRIMARY KEY (server_id, remote_id)
-);
-
-CREATE TABLE books (
-  server_id TEXT NOT NULL,
-  remote_id TEXT NOT NULL,
-  series_id TEXT NOT NULL,
-  title TEXT NOT NULL,
-  number TEXT,
-  file_size INTEGER,
-  media_type TEXT,
-  created_at TEXT,
-  last_modified TEXT,
-  PRIMARY KEY (server_id, remote_id)
-);
-
-CREATE TABLE read_progress (
-  server_id TEXT NOT NULL,
-  book_id TEXT NOT NULL,
-  page INTEGER,
-  completed INTEGER NOT NULL DEFAULT 0,
-  local_updated_at TEXT,
-  server_updated_at TEXT,
-  mutation_pending INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (server_id, book_id)
-);
-
-CREATE TABLE pending_mutations (
-  id TEXT PRIMARY KEY,
-  server_id TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  mutation_type TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT
-);
-
-CREATE TABLE sync_state (
-  server_id TEXT PRIMARY KEY,
-  last_full_sync TEXT,
-  last_successful_sync TEXT,
-  last_error TEXT,
-  sync_status TEXT NOT NULL DEFAULT 'idle'   -- idle | syncing | error
-);
-
-CREATE TABLE downloads (
-  server_id TEXT NOT NULL,
-  book_id TEXT NOT NULL,
-  manifest_path TEXT,
-  pages_total INTEGER,
-  pages_done INTEGER,
-  state TEXT NOT NULL,
-  PRIMARY KEY (server_id, book_id)
-);
-
-CREATE TABLE cache_entries (
-  key TEXT PRIMARY KEY,
-  kind TEXT NOT NULL,          -- thumbnail | page | prefetch
-  path TEXT NOT NULL,
-  size INTEGER NOT NULL,
-  last_access TEXT NOT NULL
-);
-
--- v3: 封面缓存记账 —— UI 从 SQLite 解析封面本地文件路径（本地数据库负责展示）。
--- 与 cache_entries（通用 LRU 缓存，pages/prefetch 用）分离；
--- 命中 = 记录存在 + 文件存在；记录缺失或文件丢失都视为 miss，走 ensure_cover 补齐。
-CREATE TABLE thumbnails (
-  server_id TEXT NOT NULL,
-  remote_id TEXT NOT NULL,
-  variant TEXT NOT NULL DEFAULT 'series',  -- series | book
-  local_path TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  last_access TEXT NOT NULL,
-  PRIMARY KEY (server_id, remote_id, variant)
-);
-
-CREATE VIRTUAL TABLE series_fts USING fts5(name, sort_name, authors, publisher, tags, summary, content='series');
-CREATE VIRTUAL TABLE book_fts USING fts5(title, authors, publisher, tags, summary, content='books');
-```
-
-> FTS5 外部内容表/独立存储列的最终形态以实现阶段为准；此处为方向草案。
-
-搜索域：标题 / Sort Title / 作者 / 出版社 / 标签 / 简介。
-筛选：Library / Read Status / Tags / Authors / Publisher / Series Status。
-排序：Title / Sort Title / Date Added / Date Updated / Release Date / Last Read / Progress。
+搜索域：标题 / Sort Title / 作者 / 出版社 / 标签 / 简介（FTS5，前缀查询，
+用户输入被转义为 `"term"* AND ...`）。
+筛选：Library / Status / Tags / Genres（归一化表，EXISTS 子查询）。
+排序：Series：名称 / 排序名 / 加入日期 / 最近更新 / 册数；
+Books：册数（number_sort，NULL 排最后）/ 标题 / 加入日期。
+阅读状态：`read_progress.completed=1`（已读）、`page>0 && completed=0`（进行中）、
+其余为未读；本地变更写 `pending_mutations`（READ_PROGRESS / MARK_READ / MARK_UNREAD）。
 
 性能目标：10,000 Series、100,000 Books 下搜索与分页流畅；本地搜索 < 100ms。
