@@ -6,6 +6,8 @@ pub mod libraries;
 pub mod schema;
 pub mod series;
 pub mod servers;
+pub mod sync_state;
+pub mod thumbnails;
 
 use rusqlite::Connection;
 use std::path::Path;

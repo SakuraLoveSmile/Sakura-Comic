@@ -4,6 +4,7 @@ import 'rust/frb_generated.dart';
 import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
 import 'rust/store/series.dart';
+import 'rust/store/thumbnails.dart';
 import 'rust/sync/bootstrap.dart';
 import 'rust_core_api.dart';
 
@@ -118,5 +119,62 @@ class FrbRustCoreApi implements RustCoreApi {
   @override
   Future<String?> getActiveServer({required String dbPath}) {
     return frb.getActiveServer(dbPath: dbPath);
+  }
+
+  @override
+  Future<String?> coverPath({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) {
+    return frb.coverPath(dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+  }
+
+  @override
+  Future<List<ThumbnailRow>> listThumbnails({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.listThumbnails(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<String> ensureCover({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    return frb.ensureCover(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+    );
+  }
+
+  @override
+  Future<int> ensureCovers({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    return frb.ensureCovers(
+      dbPath: dbPath,
+      serverId: serverId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+    );
+  }
+
+  @override
+  Future<BootstrapSummary> bootstrapDemo({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.bootstrapDemo(dbPath: dbPath, serverId: serverId);
   }
 }

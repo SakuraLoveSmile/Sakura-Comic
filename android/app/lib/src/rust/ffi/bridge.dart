@@ -7,6 +7,7 @@ import '../frb_generated.dart';
 import '../model/server.dart';
 import '../model/server_profile.dart';
 import '../store/series.dart';
+import '../store/thumbnails.dart';
 import '../sync/bootstrap.dart';
 import 'application.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -67,3 +68,51 @@ Future<List<SeriesRow>> fetchSeries(
         required PlatformInt64 offset}) =>
     RustLib.instance.api.crateFfiBridgeFetchSeries(
         dbPath: dbPath, serverId: serverId, limit: limit, offset: offset);
+
+/// Cover file path for one series, resolved from SQLite only (None = cache
+/// miss; the UI shows a placeholder and triggers ensure_covers).
+Future<String?> coverPath(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId}) =>
+    RustLib.instance.api.crateFfiBridgeCoverPath(
+        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+
+/// All cover records for one server (dead files filtered out), so the grid
+/// maps remote_id → local path with a single call.
+Future<List<ThumbnailRow>> listThumbnails(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeListThumbnails(dbPath: dbPath, serverId: serverId);
+
+/// Backfill one series cover (cache miss → download → disk → SQLite row),
+/// returning the local file path.
+Future<String> ensureCover(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeEnsureCover(
+        dbPath: dbPath,
+        serverId: serverId,
+        seriesId: seriesId,
+        baseUrl: baseUrl,
+        apiKey: apiKey);
+
+/// Backfill every series cover without a usable record (缓存缺失自动补齐).
+/// Returns the number of covers written.
+Future<PlatformInt64> ensureCovers(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeEnsureCovers(
+        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+
+/// Offline demo: seeds the store with the shared fixture series and
+/// generated covers — a demonstrable cover wall without a server.
+Future<BootstrapSummary> bootstrapDemo(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeBootstrapDemo(dbPath: dbPath, serverId: serverId);

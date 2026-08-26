@@ -52,6 +52,10 @@ pub fn bootstrap_page_to_store(
                 message: e.to_string(),
             }
         })?;
+    // Stage 3: record the successful sync in `sync_state`.
+    store::sync_state::touch_successful_sync(conn, server_id).map_err(|e| ApiError::Database {
+        message: e.to_string(),
+    })?;
     Ok(BootstrapSummary {
         server_id: server_id.to_string(),
         synced_series: written,
@@ -101,5 +105,11 @@ mod tests {
         assert!(!summary.has_more_pages);
         assert_eq!(store::series::count_series(&conn, "server-1").unwrap(), 3);
         assert_eq!(store::series::count_series(&conn, "server-2").unwrap(), 0);
+        // Stage 3: successful bootstrap is recorded in sync_state.
+        let state = store::sync_state::get_sync_state(&conn, "server-1")
+            .unwrap()
+            .expect("sync_state row must exist");
+        assert!(state.last_successful_sync.is_some());
+        assert_eq!(state.sync_status, store::sync_state::STATUS_IDLE);
     }
 }

@@ -98,6 +98,33 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage2-checklist.md](docs/stage2-checklist.md)。
 
+## Stage 3 — Local Store 与 Vertical Slice
+
+首次打通完整核心链路 `Komga → API → SQLite → Cache → UI`，核心原则：
+**网络负责同步，本地数据库负责展示**（UI 只读 SQLite，禁止 View → Komga API）。
+
+- **SQLite Schema v3**：servers / libraries / series / books / collections / readlists /
+  sync_state / pending_mutations / **thumbnails**（封面缓存记账，v3 新增）——
+  双端 DDL 镜像（GRDB ↔ rusqlite），远端实体一律 `(serverId, remoteId)`。
+- **Series**：API → Local Model 转换 → 批量 upsert 入库 → 分页查询（双端 + 共享 fixture）。
+- **Cover Cache**：下载 → 磁盘缓存（`cache/thumbnails/`，多服务器安全 key）→
+  SQLite 记账；**缓存缺失自动补齐**（`ensure_cover` / `ensure_covers` 幂等回填）。
+- **封面墙**：列表与封面路径均来自 SQLite；Android 端 `Image.file` 渲染磁盘封面，
+  附离线「演示」模式（fixture Series + 生成 PNG，无服务器）。
+- **离线验收**：
+  ```bash
+  bash scripts/verify.sh
+  cd android/komga_core && cargo run --bin phase0_smoke -- --fixture \
+    --db /tmp/comic-stage3-fixture/comic.sqlite --server-id demo
+  ```
+- **真实服务器验收**（需 API Key）：
+  ```bash
+  export KOMGA_BASE_URL=http://192.168.0.69:25600
+  export KOMGA_API_KEY=your-api-key
+  bash scripts/e2e_stage3.sh
+  ```
+  勾选状态与实现位置见 [docs/stage3-checklist.md](docs/stage3-checklist.md)。
+
 ## 文档入口
 
 - [架构](docs/architecture.md)

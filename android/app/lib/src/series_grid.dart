@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'library_repository.dart';
@@ -5,8 +7,9 @@ import 'server_manager.dart';
 import 'servers_screen.dart';
 import 'series.dart';
 
-/// Library cover wall — reads series through [LibraryRepository] (local
-/// store); server management is one tap away (ServerManager).
+/// Library cover wall — reads series + cover paths from the local store
+/// ([LibraryRepository]); network is confined to sync/demo actions (Local
+/// First: 本地数据库负责展示). Server management is one tap away.
 class SeriesGridScreen extends StatefulWidget {
   const SeriesGridScreen({
     super.key,
@@ -29,8 +32,11 @@ class SeriesGridScreen extends StatefulWidget {
 
 class _SeriesGridScreenState extends State<SeriesGridScreen> {
   List<Series> _series = const [];
+  Map<String, String> _coverPaths = const {};
   Object? _error;
   String? _activeServerName;
+  bool _syncing = false;
+  bool _autoSynced = false;
 
   @override
   void initState() {
@@ -41,11 +47,68 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
   Future<void> _load() async {
     try {
       final rows = await widget.repository.fetchSeries();
+      final covers = await widget.repository.fetchCoverPaths();
       if (!mounted) return;
-      setState(() => _series = rows);
+      setState(() {
+        _series = rows;
+        _coverPaths = covers;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
+    }
+    _maybeAutoSync();
+  }
+
+  /// First load with an FFI-backed repository triggers one sync (mirrors
+  /// the iOS `initialLoad`): pull series into SQLite + backfill covers.
+  Future<void> _maybeAutoSync() async {
+    if (_autoSynced || !widget.repository.demoSupported) return;
+    _autoSynced = true;
+    await _sync(announce: false);
+  }
+
+  /// Acceptance chain on tap: 拉取 Series → SQLite → 补齐封面 → 重读本地库.
+  Future<void> _sync({bool announce = true}) async {
+    setState(() => _syncing = true);
+    try {
+      final summary = await widget.repository.bootstrapActiveServer();
+      await _load();
+      if (!mounted) return;
+      if (announce) {
+        final message = summary == null
+            ? '没有可同步的服务器（先添加并连接）'
+            : '已同步 ${summary.syncedSeries} 个 Series 到本地库';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      if (announce) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('同步失败: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  /// Offline demo: fixture series + generated covers (no server needed).
+  Future<void> _loadDemo() async {
+    setState(() => _syncing = true);
+    try {
+      final summary = await widget.repository.loadDemo();
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('演示数据：${summary.syncedSeries} 个 Series')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('演示加载失败: $e')));
+    } finally {
+      if (mounted) setState(() => _syncing = false);
     }
   }
 
@@ -95,6 +158,23 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
               tooltip: '服务器',
               icon: const Icon(Icons.dns_outlined),
             ),
+          if (widget.repository.demoSupported)
+            IconButton(
+              onPressed: _syncing ? null : _loadDemo,
+              tooltip: '演示（本地封面墙）',
+              icon: const Icon(Icons.auto_awesome_outlined),
+            ),
+          IconButton(
+            onPressed: _syncing ? null : _sync,
+            tooltip: '同步',
+            icon: _syncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+          ),
         ],
       ),
       body: Column(
@@ -124,12 +204,23 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('暂无 Series — 添加服务器并完成连接后显示封面墙'),
-            if (widget.manager != null)
-              TextButton(
-                onPressed: _openServers,
-                child: const Text('管理服务器'),
-              ),
+            const Text('暂无 Series — 添加服务器并同步后显示封面墙'),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              children: [
+                if (widget.manager != null)
+                  FilledButton.tonal(
+                    onPressed: _openServers,
+                    child: const Text('管理服务器'),
+                  ),
+                if (widget.repository.demoSupported)
+                  FilledButton(
+                    onPressed: _syncing ? null : _loadDemo,
+                    child: const Text('加载演示封面墙'),
+                  ),
+              ],
+            ),
           ],
         ),
       );
@@ -148,15 +239,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.menu_book_outlined),
-              ),
-            ),
+            Expanded(child: _coverFor(item)),
             const SizedBox(height: 4),
             Text(
               item.name,
@@ -167,6 +250,33 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
           ],
         );
       },
+    );
+  }
+
+  /// The cover wall tile: the local file path comes from SQLite
+  /// (`thumbnails` table) and the image is rendered straight from disk.
+  Widget _coverFor(Series item) {
+    final path = _coverPaths[item.remoteId];
+    if (path != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(path),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _coverPlaceholder(),
+        ),
+      );
+    }
+    return _coverPlaceholder();
+  }
+
+  Widget _coverPlaceholder() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Icon(Icons.menu_book_outlined),
     );
   }
 }

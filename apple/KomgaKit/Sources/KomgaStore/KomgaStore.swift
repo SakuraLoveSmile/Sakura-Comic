@@ -81,11 +81,15 @@ public final class KomgaStore: @unchecked Sendable {
     @discardableResult
     public func deleteServer(id: String) throws -> Bool {
         try dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM servers WHERE id = ?", arguments: [id])
             // Deleting the active server clears the active state with it.
             if try activeServerID(db: db) == id {
                 try db.execute(sql: "DELETE FROM app_state WHERE key = ?", arguments: [Self.activeServerKey])
             }
+            // Cascade: this server's cover records go away with the profile
+            // (files are removed by the caller through DiskImageCache).
+            try db.execute(sql: "DELETE FROM thumbnails WHERE server_id = ?", arguments: [id])
+            // The servers delete runs last so changesCount reflects it.
+            try db.execute(sql: "DELETE FROM servers WHERE id = ?", arguments: [id])
             return db.changesCount > 0
         }
     }
@@ -218,7 +222,122 @@ public final class KomgaStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - Thumbnails (cover-cache bookkeeping)
+
+    /// Insert or refresh the cover record for one remote entity.
+    public func upsertThumbnail(_ record: ThumbnailRecord) throws {
+        try dbQueue.write { db in
+            _ = try db.execute(
+                sql: """
+                INSERT INTO thumbnails (server_id, remote_id, variant, local_path, size_bytes, last_access)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(server_id, remote_id, variant) DO UPDATE SET
+                  local_path = excluded.local_path,
+                  size_bytes = excluded.size_bytes,
+                  last_access = excluded.last_access
+                """,
+                arguments: [
+                    record.serverID,
+                    record.remoteID,
+                    record.variant,
+                    record.localPath,
+                    record.sizeBytes,
+                    Self.rfc3339(record.lastAccess),
+                ]
+            )
+        }
+    }
+
+    /// The cover record for one entity, if any.
+    public func thumbnail(
+        serverID: String,
+        remoteID: String,
+        variant: String = ThumbnailRecord.variantSeries
+    ) throws -> ThumbnailRecord? {
+        try dbQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM thumbnails WHERE server_id = ? AND remote_id = ? AND variant = ?",
+                arguments: [serverID, remoteID, variant]
+            ).map(Self.thumbnail(from:))
+        }
+    }
+
+    /// All cover records for one server (the grid maps remoteID → path).
+    public func listThumbnails(serverID: String) throws -> [ThumbnailRecord] {
+        try dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM thumbnails WHERE server_id = ? ORDER BY remote_id",
+                arguments: [serverID]
+            ).map(Self.thumbnail(from:))
+        }
+    }
+
+    /// The local cover file path for one entity, resolved from SQLite only.
+    public func coverPath(serverID: String, remoteID: String) throws -> String? {
+        try thumbnail(serverID: serverID, remoteID: remoteID)?.localPath
+    }
+
+    // MARK: - Sync state
+
+    /// Record a successful sync: timestamp + status back to idle, error
+    /// cleared. Returns the refreshed row.
+    @discardableResult
+    public func recordSuccessfulSync(serverID: String) throws -> SyncStateRecord {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO sync_state (server_id, last_successful_sync, sync_status)
+                VALUES (?, ?, ?)
+                ON CONFLICT(server_id) DO UPDATE SET
+                  last_successful_sync = excluded.last_successful_sync,
+                  sync_status = excluded.sync_status,
+                  last_error = NULL
+                """,
+                arguments: [serverID, Self.rfc3339(Date()), "idle"]
+            )
+        }
+        guard let row = try syncState(serverID: serverID) else {
+            throw GRDB.DatabaseError(resultCode: .SQLITE_ERROR, message: "sync_state row missing")
+        }
+        return row
+    }
+
+    /// One server's sync state, if any.
+    public func syncState(serverID: String) throws -> SyncStateRecord? {
+        try dbQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM sync_state WHERE server_id = ?",
+                arguments: [serverID]
+            ).map(Self.syncState(from:))
+        }
+    }
+
     // MARK: - Row mapping
+
+    private static func thumbnail(from row: Row) throws -> ThumbnailRecord {
+        let lastAccess: String = row["last_access"]
+        return ThumbnailRecord(
+            serverID: row["server_id"],
+            remoteID: row["remote_id"],
+            variant: row["variant"],
+            localPath: row["local_path"],
+            sizeBytes: row["size_bytes"],
+            lastAccess: date(from: lastAccess) ?? Date()
+        )
+    }
+
+    private static func syncState(from row: Row) throws -> SyncStateRecord {
+        SyncStateRecord(
+            serverID: row["server_id"],
+            lastFullSync: row["last_full_sync"],
+            lastSuccessfulSync: row["last_successful_sync"],
+            lastError: row["last_error"],
+            syncStatus: row["sync_status"]
+        )
+    }
 
     private static func seriesRecord(from row: Row) throws -> SeriesRecord {
         SeriesRecord(

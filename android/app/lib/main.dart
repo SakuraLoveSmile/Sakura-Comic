@@ -31,7 +31,7 @@ Future<(LibraryRepository, ServerManager?, String?)> createServices() async {
     const api = FrbRustCoreApi();
     final manager = ServerManager(dbPath: dbPath, api: api);
     return (
-      RustLibraryRepository(dbPath: dbPath, api: api),
+      RustLibraryRepository(dbPath: dbPath, api: api, serverManager: manager),
       manager,
       'Rust core FFI 已连接',
     );

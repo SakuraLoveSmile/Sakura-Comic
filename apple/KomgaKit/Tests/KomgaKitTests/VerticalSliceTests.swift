@@ -51,6 +51,11 @@ final class VerticalSliceTests: XCTestCase {
         XCTAssertEqual(summary.syncedSeries, 3)
         XCTAssertEqual(summary.totalElements, 3)
 
+        // Bootstrap records the successful sync in sync_state.
+        let state = try store.syncState(serverID: "srv-1")
+        XCTAssertNotNil(state?.lastSuccessfulSync)
+        XCTAssertEqual(state?.syncStatus, "idle")
+
         let rows = try store.fetchSeries(serverID: "srv-1", limit: 10, offset: 0)
         XCTAssertEqual(rows.count, 3)
         XCTAssertEqual(rows.map(\.name), ["Berserk", "One Piece", "Solo Leveling"])

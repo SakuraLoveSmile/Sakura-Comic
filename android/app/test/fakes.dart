@@ -2,6 +2,7 @@ import 'package:comic_app/src/rust/ffi/application.dart';
 import 'package:comic_app/src/rust/model/server.dart';
 import 'package:comic_app/src/rust/model/server_profile.dart';
 import 'package:comic_app/src/rust/store/series.dart';
+import 'package:comic_app/src/rust/store/thumbnails.dart';
 import 'package:comic_app/src/rust/sync/bootstrap.dart';
 import 'package:comic_app/src/rust_core_api.dart';
 
@@ -103,4 +104,50 @@ class MemoryRustCoreApi implements RustCoreApi {
 
   @override
   Future<String?> getActiveServer({required String dbPath}) async => activeId;
+
+  @override
+  Future<String?> coverPath({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) async =>
+      null;
+
+  @override
+  Future<List<ThumbnailRow>> listThumbnails({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      const [];
+
+  @override
+  Future<String> ensureCover({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      '';
+
+  @override
+  Future<int> ensureCovers({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      0;
+
+  @override
+  Future<BootstrapSummary> bootstrapDemo({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      BootstrapSummary(
+        serverId: serverId,
+        syncedSeries: BigInt.zero,
+        totalElements: 0,
+        hasMorePages: false,
+      );
 }

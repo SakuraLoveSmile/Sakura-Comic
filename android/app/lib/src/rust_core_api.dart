@@ -2,6 +2,7 @@ import 'rust/ffi/application.dart';
 import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
 import 'rust/store/series.dart';
+import 'rust/store/thumbnails.dart';
 import 'rust/sync/bootstrap.dart';
 
 /// Contract for the FFI layer mirroring
@@ -55,6 +56,47 @@ abstract interface class RustCoreApi {
   Future<void> setActiveServer({required String dbPath, required String serverId});
 
   Future<String?> getActiveServer({required String dbPath});
+
+  /// Cover file path for one series, resolved from SQLite only (null = cache
+  /// miss; the UI shows a placeholder and triggers ensureCovers).
+  Future<String?> coverPath({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  });
+
+  /// All cover records for one server (dead files filtered out), so the
+  /// grid maps remote_id → local path with a single call.
+  Future<List<ThumbnailRow>> listThumbnails({
+    required String dbPath,
+    required String serverId,
+  });
+
+  /// Backfill one series cover (cache miss → download → disk → SQLite row),
+  /// returning the local file path.
+  Future<String> ensureCover({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  });
+
+  /// Backfill every series cover without a usable record (缓存缺失自动补齐).
+  /// Returns the number of covers written.
+  Future<int> ensureCovers({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  });
+
+  /// Offline demo: seeds the store with the shared fixture series and
+  /// generated covers — a demonstrable cover wall without a server.
+  Future<BootstrapSummary> bootstrapDemo({
+    required String dbPath,
+    required String serverId,
+  });
 }
 
 /// In-memory stub so tests and the fallback UI path can run without FFI.
@@ -124,4 +166,50 @@ class StubRustCoreApi implements RustCoreApi {
 
   @override
   Future<String?> getActiveServer({required String dbPath}) async => null;
+
+  @override
+  Future<String?> coverPath({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) async =>
+      null;
+
+  @override
+  Future<List<ThumbnailRow>> listThumbnails({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      const [];
+
+  @override
+  Future<String> ensureCover({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      '';
+
+  @override
+  Future<int> ensureCovers({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      0;
+
+  @override
+  Future<BootstrapSummary> bootstrapDemo({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      BootstrapSummary(
+        serverId: serverId,
+        syncedSeries: BigInt.zero,
+        totalElements: 0,
+        hasMorePages: false,
+      );
 }
