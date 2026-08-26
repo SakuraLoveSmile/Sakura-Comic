@@ -1,0 +1,21 @@
+{
+  "name": "read-progress: offline progress wins over stale server value",
+  "scenario": "offline-priority",
+  "remote": {
+    "bookId": "123",
+    "page": 17,
+    "completed": false,
+    "serverUpdatedAt": "2025-01-01T00:00:00Z"
+  },
+  "localPending": {
+    "page": 23,
+    "completed": false,
+    "localUpdatedAt": "2025-01-02T00:00:00Z",
+    "mutationPending": true
+  },
+  "expected": {
+    "page": 23,
+    "completed": false,
+    "uploadRequired": true
+  }
+}
