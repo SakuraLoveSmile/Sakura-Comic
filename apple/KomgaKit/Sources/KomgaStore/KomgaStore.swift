@@ -240,12 +240,23 @@ public final class KomgaStore: @unchecked Sendable {
         return String(data: data, encoding: .utf8) ?? "[]"
     }
 
+    /// RFC 3339 with fractional seconds so millisecond-truncated Dates
+    /// round-trip exactly (verified empirically; sub-second precision is
+    /// otherwise lost and equality breaks). Instances are created per call
+    /// (formatting/parsing are rare, and ISO8601DateFormatter is not
+    /// Sendable, so no shared state under Swift 6 strict concurrency).
     private static func rfc3339(_ date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     private static func date(from string: String) -> Date? {
-        ISO8601DateFormatter().date(from: string)
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // Prefer fractional; fall back to plain (older rows, other clients).
+        if let date = fractional.date(from: string) { return date }
+        return ISO8601DateFormatter().date(from: string)
     }
 
     private static func profile(from row: Row) throws -> ServerProfile {

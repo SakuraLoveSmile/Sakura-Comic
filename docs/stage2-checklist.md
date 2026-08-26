@@ -55,4 +55,11 @@ Apple 侧 live 测试：`KomgaKitTests/LiveConnectionTests`（无环境变量时
 
 - 无凭证 GET /actuator/info、GET /api/v1/libraries → 401（`authentication` 映射成立）
 - stage2_smoke live 携带无效 API Key → `connection probe failed: authentication failed`
-  （DNS/TCP/HTTP/认证头/错误映射全链路可用；成功路径待有效 Key 验收）
+- **成功路径（有效 API Key）双端通过**：
+  - Android：`stage2_smoke --base-url http://192.168.0.69:25600 --api-key <key>` →
+    `STAGE 2 SMOKE OK`（version=1.26.3，libraries=2，Profile 保存 + active 切换）
+  - Apple：`LiveConnectionTests`（env-gated）→ passed（ServerURL 规范化 → /actuator/info →
+    版本策略 → libraries 镜像 (server_id, remote_id) → Keychain + SQLite + active 切换）
+- 实测暴露并修复：`last_successful_connection` 的 RFC 3339 序列化必须保留毫秒精度
+  （ISO8601DateFormatter + `.withFractionalSeconds`），否则 Date 相等断言失效；
+  ISO8601FormatStyle 的 fractional 往返存在 ~10⁻⁷ 浮点噪声，不可用于精确相等
