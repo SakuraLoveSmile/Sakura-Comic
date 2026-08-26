@@ -1,11 +1,13 @@
 import SwiftUI
 import KomgaStore
 
-/// The Phase 0 cover wall. Reads series + covers from `LibraryViewModel`,
+/// The library cover wall. Reads series + covers from `LibraryViewModel`,
 /// which only ever reads the local store; network is confined to sync/cover.
+/// Server management (switch / add / manage) lives behind the toolbar.
 struct LibraryView: View {
     @EnvironmentObject private var model: LibraryViewModel
     @State private var showAdd = false
+    @State private var showServers = false
 
     var body: some View {
         NavigationStack {
@@ -17,22 +19,14 @@ struct LibraryView: View {
                         Button("演示") { Task { await model.loadDemo() } }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showAdd = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
+                        serverMenu
                     }
                     #else
                     ToolbarItem {
                         Button("演示") { Task { await model.loadDemo() } }
                     }
                     ToolbarItem {
-                        Button {
-                            showAdd = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
+                        serverMenu
                     }
                     #endif
                 }
@@ -40,14 +34,52 @@ struct LibraryView: View {
         }
         .task { await initialLoad() }
         .sheet(isPresented: $showAdd) {
-            AddServerView(onSave: { name, url, key in
-                showAdd = false
-                Task { await model.addServer(displayName: name, baseURL: url, apiKey: key) }
-            })
+            AddServerView(model: model, existing: nil)
+        }
+        .sheet(isPresented: $showServers) {
+            ServersView(model: model)
         }
         .overlay(alignment: .bottom) {
             if let banner = model.banner {
                 Banner(text: banner)
+            }
+        }
+    }
+
+    /// 当前服务器快速切换 + 管理入口.
+    private var serverMenu: some View {
+        Menu {
+            if model.servers.isEmpty {
+                Text("暂无服务器")
+            } else {
+                ForEach(model.servers) { profile in
+                    Button {
+                        Task { await model.switchServer(to: profile) }
+                    } label: {
+                        if profile.id == model.server?.id {
+                            Label(profile.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(profile.displayName)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button {
+                showAdd = true
+            } label: {
+                Label("添加服务器…", systemImage: "plus")
+            }
+            Button {
+                showServers = true
+            } label: {
+                Label("管理服务器…", systemImage: "server.rack")
+            }
+        } label: {
+            if let server = model.server {
+                Label(server.displayName, systemImage: "server.rack")
+            } else {
+                Image(systemName: "server.rack")
             }
         }
     }
@@ -59,6 +91,9 @@ struct LibraryView: View {
                 Label("暂无 Series", systemImage: "books.vertical")
             } description: {
                 Text("添加 Komga 服务器，或点“演示”加载本地数据")
+            } actions: {
+                Button("添加服务器") { showAdd = true }
+                    .buttonStyle(.borderedProminent)
             }
         } else {
             ScrollView {

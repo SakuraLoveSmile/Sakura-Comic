@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 
 /// Bump on every migration; stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Individual DDL statements, applied in order.
 pub const CREATE_STATEMENTS: &[&str] = &[
@@ -18,6 +18,11 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       credential_ref TEXT,
       capabilities TEXT NOT NULL DEFAULT '[]',
       last_successful_connection TEXT
+    )",
+    // v2: single-value app state (active server id, ...).
+    "CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     )",
     "CREATE TABLE IF NOT EXISTS libraries (
       server_id TEXT NOT NULL,

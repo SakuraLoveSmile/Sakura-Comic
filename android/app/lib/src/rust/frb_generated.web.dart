@@ -8,8 +8,10 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'ffi/application.dart';
 import 'ffi/bridge.dart';
 import 'frb_generated.dart';
+import 'model/server.dart';
 import 'model/server_profile.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 import 'store/series.dart';
@@ -36,7 +38,31 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BootstrapSummary dco_decode_bootstrap_summary(dynamic raw);
 
   @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw);
+
+  @protected
+  BuildInfo dco_decode_box_autoadd_build_info(dynamic raw);
+
+  @protected
+  GitCommit dco_decode_box_autoadd_git_commit(dynamic raw);
+
+  @protected
+  GitInfo dco_decode_box_autoadd_git_info(dynamic raw);
+
+  @protected
   ServerProfile dco_decode_box_autoadd_server_profile(dynamic raw);
+
+  @protected
+  BuildInfo dco_decode_build_info(dynamic raw);
+
+  @protected
+  ConnectionResult dco_decode_connection_result(dynamic raw);
+
+  @protected
+  GitCommit dco_decode_git_commit(dynamic raw);
+
+  @protected
+  GitInfo dco_decode_git_info(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
@@ -45,7 +71,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
+  Library dco_decode_library(dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<Library> dco_decode_list_library(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -60,7 +92,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
+
+  @protected
+  BuildInfo? dco_decode_opt_box_autoadd_build_info(dynamic raw);
+
+  @protected
+  GitCommit? dco_decode_opt_box_autoadd_git_commit(dynamic raw);
+
+  @protected
+  GitInfo? dco_decode_opt_box_autoadd_git_info(dynamic raw);
+
+  @protected
+  ServerProfile? dco_decode_opt_box_autoadd_server_profile(dynamic raw);
+
+  @protected
   SeriesRow dco_decode_series_row(dynamic raw);
+
+  @protected
+  ServerInfo dco_decode_server_info(dynamic raw);
 
   @protected
   ServerProfile dco_decode_server_profile(dynamic raw);
@@ -87,8 +137,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BootstrapSummary sse_decode_bootstrap_summary(SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
+  BuildInfo sse_decode_box_autoadd_build_info(SseDeserializer deserializer);
+
+  @protected
+  GitCommit sse_decode_box_autoadd_git_commit(SseDeserializer deserializer);
+
+  @protected
+  GitInfo sse_decode_box_autoadd_git_info(SseDeserializer deserializer);
+
+  @protected
   ServerProfile sse_decode_box_autoadd_server_profile(
       SseDeserializer deserializer);
+
+  @protected
+  BuildInfo sse_decode_build_info(SseDeserializer deserializer);
+
+  @protected
+  ConnectionResult sse_decode_connection_result(SseDeserializer deserializer);
+
+  @protected
+  GitCommit sse_decode_git_commit(SseDeserializer deserializer);
+
+  @protected
+  GitInfo sse_decode_git_info(SseDeserializer deserializer);
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
@@ -97,7 +171,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
+  Library sse_decode_library(SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<Library> sse_decode_list_library(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -113,7 +193,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
+  BuildInfo? sse_decode_opt_box_autoadd_build_info(
+      SseDeserializer deserializer);
+
+  @protected
+  GitCommit? sse_decode_opt_box_autoadd_git_commit(
+      SseDeserializer deserializer);
+
+  @protected
+  GitInfo? sse_decode_opt_box_autoadd_git_info(SseDeserializer deserializer);
+
+  @protected
+  ServerProfile? sse_decode_opt_box_autoadd_server_profile(
+      SseDeserializer deserializer);
+
+  @protected
   SeriesRow sse_decode_series_row(SseDeserializer deserializer);
+
+  @protected
+  ServerInfo sse_decode_server_info(SseDeserializer deserializer);
 
   @protected
   ServerProfile sse_decode_server_profile(SseDeserializer deserializer);
@@ -141,8 +242,35 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       BootstrapSummary self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_build_info(
+      BuildInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_git_commit(
+      GitCommit self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_git_info(GitInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_server_profile(
       ServerProfile self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_build_info(BuildInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_connection_result(
+      ConnectionResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_git_commit(GitCommit self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_git_info(GitInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -151,7 +279,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void sse_encode_library(Library self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_library(List<Library> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -169,7 +303,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_build_info(
+      BuildInfo? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_git_commit(
+      GitCommit? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_git_info(
+      GitInfo? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_server_profile(
+      ServerProfile? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_series_row(SeriesRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_server_info(ServerInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_server_profile(ServerProfile self, SseSerializer serializer);

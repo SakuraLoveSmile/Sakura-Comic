@@ -7,5 +7,6 @@
 /// - OpenAPI-driven models — contract source: `specs/openapi/komga-openapi.yaml`
 public enum KomgaAPI {
     /// Bumped when the transport contract snapshot changes.
-    public static let contractVersion = "0.0.1"
+    /// Must equal Rust `ApiContract::CONTRACT_VERSION` ("0.2.0").
+    public static let contractVersion = KomgaContract.contractVersion
 }

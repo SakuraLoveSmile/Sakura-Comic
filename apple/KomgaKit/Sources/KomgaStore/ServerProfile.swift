@@ -1,9 +1,19 @@
 import Foundation
 
 /// How a server authenticates.
-public enum AuthType: String, Codable, Sendable, CaseIterable {
+public enum AuthType: String, Codable, Sendable, CaseIterable, Hashable, Identifiable {
     case apiKey = "api_key"
     case basic
+
+    public var id: String { rawValue }
+
+    /// User-facing label (kept minimal; UI may localize).
+    public var label: String {
+        switch self {
+        case .apiKey: return "API Key"
+        case .basic: return "用户名 + 密码"
+        }
+    }
 }
 
 /// A saved Komga server profile.

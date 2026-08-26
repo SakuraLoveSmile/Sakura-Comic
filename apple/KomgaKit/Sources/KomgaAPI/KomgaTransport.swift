@@ -24,11 +24,13 @@ public struct PageRequest: Sendable, Equatable {
     }
 }
 
-/// Unified API error mapping (mirrors Rust ApiError).
+/// Unified API error mapping (mirrors Rust `ApiError`).
 public enum KomgaAPIError: Error, Sendable, Equatable {
     case authentication
     case network
     case server(statusCode: Int)
+    case apiCompatibility(String)
+    case urlInvalid(String)
     case decode(String)
 }
 
@@ -47,6 +49,23 @@ public struct KomgaTransport: Sendable {
 
     public func fetchSeriesPage(_ request: PageRequest) async throws -> SeriesPageDTO {
         let url = try Self.seriesPageURL(baseURL: baseURL, request: request)
+        return try await fetch(SeriesPageDTO.self, url: url)
+    }
+
+    /// `GET /actuator/info` — server identity + version (connection probe).
+    public func fetchServerInfo() async throws -> ServerInfoDTO {
+        let url = try Self.serverInfoURL(baseURL: baseURL)
+        return try await fetch(ServerInfoDTO.self, url: url)
+    }
+
+    /// `GET /api/v1/libraries` — plain array (no pagination wrapper).
+    public func fetchLibraries() async throws -> [LibraryDTO] {
+        let url = try Self.librariesURL(baseURL: baseURL)
+        return try await fetch([LibraryDTO].self, url: url)
+    }
+
+    /// Authenticated GET with unified error mapping.
+    public func fetch<T: Decodable>(_ type: T.Type, url: URL) async throws -> T {
         var urlRequest = URLRequest(url: url)
         auth.apply(to: &urlRequest)
 
@@ -57,7 +76,7 @@ public struct KomgaTransport: Sendable {
         } catch {
             throw KomgaAPIError.network
         }
-        return try Self.decode(SeriesPageDTO.self, data: data, response: response)
+        return try Self.decode(type, data: data, response: response)
     }
 
     /// Stable URL builder (public for tests and Swift/Rust parity checks).
@@ -77,6 +96,24 @@ public struct KomgaTransport: Sendable {
     public static func seriesThumbnailURL(baseURL: String, seriesID: String) throws -> URL {
         let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         guard let url = URL(string: "\(base)/api/v1/series/\(seriesID)/thumbnail") else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// Server-info endpoint (connection probe; see specs/openapi).
+    public static func serverInfoURL(baseURL: String) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/actuator/info") else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// Libraries endpoint (connection probe).
+    public static func librariesURL(baseURL: String) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/api/v1/libraries") else {
             throw KomgaAPIError.network
         }
         return url

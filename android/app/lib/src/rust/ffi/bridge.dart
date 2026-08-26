@@ -4,9 +4,11 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import '../model/server.dart';
 import '../model/server_profile.dart';
 import '../store/series.dart';
 import '../sync/bootstrap.dart';
+import 'application.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// BootstrapSync (API Key auth) — mirrors the first page of series.
@@ -18,6 +20,13 @@ Future<BootstrapSummary> bootstrap(
     RustLib.instance.api.crateFfiBridgeBootstrap(
         dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
 
+/// Connection probe (acceptance chain): authenticate + verify Komga +
+/// fetch server info + libraries + version policy check.
+Future<ConnectionResult> testConnection(
+        {required String baseUrl, required String apiKey}) =>
+    RustLib.instance.api
+        .crateFfiBridgeTestConnection(baseUrl: baseUrl, apiKey: apiKey);
+
 Future<void> saveServer(
         {required String dbPath, required ServerProfile profile}) =>
     RustLib.instance.api
@@ -25,6 +34,31 @@ Future<void> saveServer(
 
 Future<List<ServerProfile>> listServers({required String dbPath}) =>
     RustLib.instance.api.crateFfiBridgeListServers(dbPath: dbPath);
+
+Future<ServerProfile?> getServer(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeGetServer(dbPath: dbPath, serverId: serverId);
+
+Future<bool> deleteServer({required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeDeleteServer(dbPath: dbPath, serverId: serverId);
+
+/// Persist libraries discovered during a successful connection.
+Future<void> saveLibraries(
+        {required String dbPath,
+        required String serverId,
+        required List<Library> libraries}) =>
+    RustLib.instance.api.crateFfiBridgeSaveLibraries(
+        dbPath: dbPath, serverId: serverId, libraries: libraries);
+
+Future<void> setActiveServer(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeSetActiveServer(dbPath: dbPath, serverId: serverId);
+
+Future<String?> getActiveServer({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeGetActiveServer(dbPath: dbPath);
 
 Future<List<SeriesRow>> fetchSeries(
         {required String dbPath,

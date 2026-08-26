@@ -1,3 +1,5 @@
+import 'rust/ffi/application.dart';
+import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
 import 'rust/store/series.dart';
 import 'rust/sync/bootstrap.dart';
@@ -17,6 +19,13 @@ abstract interface class RustCoreApi {
     required String apiKey,
   });
 
+  /// Connection probe (acceptance chain): authenticate + verify Komga +
+  /// fetch server info + libraries + version policy check.
+  Future<ConnectionResult> testConnection({
+    required String baseUrl,
+    required String apiKey,
+  });
+
   Future<List<SeriesRow>> fetchSeries({
     required String dbPath,
     required String serverId,
@@ -27,6 +36,25 @@ abstract interface class RustCoreApi {
   Future<List<ServerProfile>> listServers({required String dbPath});
 
   Future<void> saveServer({required String dbPath, required ServerProfile profile});
+
+  Future<ServerProfile?> getServer({
+    required String dbPath,
+    required String serverId,
+  });
+
+  /// Deletes a server profile (clears the active-server state when needed).
+  Future<bool> deleteServer({required String dbPath, required String serverId});
+
+  /// Persist libraries discovered during a successful connection.
+  Future<void> saveLibraries({
+    required String dbPath,
+    required String serverId,
+    required List<Library> libraries,
+  });
+
+  Future<void> setActiveServer({required String dbPath, required String serverId});
+
+  Future<String?> getActiveServer({required String dbPath});
 }
 
 /// In-memory stub so tests and the fallback UI path can run without FFI.
@@ -48,6 +76,18 @@ class StubRustCoreApi implements RustCoreApi {
       );
 
   @override
+  Future<ConnectionResult> testConnection({
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      const ConnectionResult(
+        serverInfo: ServerInfo(),
+        serverVersion: null,
+        libraries: [],
+        capabilities: [],
+      );
+
+  @override
   Future<List<SeriesRow>> fetchSeries({
     required String dbPath,
     required String serverId,
@@ -61,4 +101,27 @@ class StubRustCoreApi implements RustCoreApi {
 
   @override
   Future<void> saveServer({required String dbPath, required ServerProfile profile}) async {}
+
+  @override
+  Future<ServerProfile?> getServer({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      null;
+
+  @override
+  Future<bool> deleteServer({required String dbPath, required String serverId}) async => false;
+
+  @override
+  Future<void> saveLibraries({
+    required String dbPath,
+    required String serverId,
+    required List<Library> libraries,
+  }) async {}
+
+  @override
+  Future<void> setActiveServer({required String dbPath, required String serverId}) async {}
+
+  @override
+  Future<String?> getActiveServer({required String dbPath}) async => null;
 }

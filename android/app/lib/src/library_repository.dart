@@ -29,9 +29,9 @@ class StubLibraryRepository implements LibraryRepository {
   Stream<List<Series>> observeSeries() => const Stream.empty();
 }
 
-/// Rust Core-backed repository (single-server scope for Phase 0): reads the
-/// first configured server profile from SQLite via the FFI bridge, then
-/// mirrors its series rows.
+/// Rust Core-backed repository (multi-server): reads the active server
+/// profile from SQLite via the FFI bridge (falling back to the first
+/// profile), then mirrors its series rows.
 class RustLibraryRepository implements LibraryRepository {
   RustLibraryRepository({required this.dbPath, RustCoreApi? api})
       : _api = api ?? const FrbRustCoreApi();
@@ -46,13 +46,15 @@ class RustLibraryRepository implements LibraryRepository {
       debugPrint('[RustCore] listServers -> 0 servers (grid stays empty)');
       return const [];
     }
+    final activeId = await _api.getActiveServer(dbPath: dbPath);
+    final serverId = activeId ?? servers.first.id;
     final rows = await _api.fetchSeries(
       dbPath: dbPath,
-      serverId: servers.first.id,
+      serverId: serverId,
       limit: limit,
       offset: offset,
     );
-    debugPrint('[RustCore] fetchSeries("${servers.first.id}") -> ${rows.length} rows');
+    debugPrint('[RustCore] fetchSeries("$serverId") -> ${rows.length} rows');
     return rows.map(SeriesRowToSeries.toSeries).toList();
   }
 

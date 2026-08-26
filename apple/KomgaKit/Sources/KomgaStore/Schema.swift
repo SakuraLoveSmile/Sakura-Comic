@@ -2,7 +2,7 @@
 /// and the Rust side (`android/komga_core/src/store/schema.rs`).
 public enum Schema {
     /// Bump when migrations are added; stored in `PRAGMA user_version`.
-    public static let currentVersion: Int64 = 1
+    public static let currentVersion: Int64 = 2
 
     public static let createStatements: [String] = [
         """
@@ -14,6 +14,13 @@ public enum Schema {
           credential_ref TEXT,
           capabilities TEXT NOT NULL DEFAULT '[]',
           last_successful_connection TEXT
+        )
+        """,
+        // v2: single-value app state (active server id, ...).
+        """
+        CREATE TABLE IF NOT EXISTS app_state (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
         )
         """,
         """

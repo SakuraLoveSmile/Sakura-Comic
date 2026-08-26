@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import KomgaAPI
 
 /// Local-first store on GRDB.
 ///
@@ -81,7 +82,85 @@ public final class KomgaStore: @unchecked Sendable {
     public func deleteServer(id: String) throws -> Bool {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM servers WHERE id = ?", arguments: [id])
+            // Deleting the active server clears the active state with it.
+            if try activeServerID(db: db) == id {
+                try db.execute(sql: "DELETE FROM app_state WHERE key = ?", arguments: [Self.activeServerKey])
+            }
             return db.changesCount > 0
+        }
+    }
+
+    // MARK: - Active server
+
+    private static let activeServerKey = "active_server_id"
+
+    public func setActiveServer(id: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                arguments: [Self.activeServerKey, id]
+            )
+        }
+    }
+
+    public func activeServerID() throws -> String? {
+        try dbQueue.read { db in try self.activeServerID(db: db) }
+    }
+
+    private func activeServerID(db: GRDB.Database) throws -> String? {
+        try String.fetchOne(
+            db,
+            sql: "SELECT value FROM app_state WHERE key = ?",
+            arguments: [Self.activeServerKey]
+        )
+    }
+
+    /// The server profile currently marked active, if any.
+    public func activeServerProfile() throws -> ServerProfile? {
+        guard let id = try activeServerID() else { return nil }
+        return try server(id: id)
+    }
+
+    // MARK: - Libraries
+
+    /// Batch upsert remotely fetched libraries (multi-server safe).
+    @discardableResult
+    public func upsertLibraries(serverID: String, libraries: [LibraryDTO]) throws -> Int {
+        try dbQueue.write { db in
+            var written = 0
+            for library in libraries {
+                let record = LibraryRecord(serverID: serverID, dto: library)
+                _ = try db.execute(
+                    sql: """
+                    INSERT INTO libraries (server_id, remote_id, name)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(server_id, remote_id) DO UPDATE SET name = excluded.name
+                    """,
+                    arguments: [record.serverID, record.remoteID, record.name]
+                )
+                written += 1
+            }
+            return written
+        }
+    }
+
+    /// All libraries for one server, ordered by name.
+    public func fetchLibraries(serverID: String) throws -> [LibraryRecord] {
+        try dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM libraries WHERE server_id = ? ORDER BY name COLLATE NOCASE",
+                arguments: [serverID]
+            ).map { row in
+                LibraryRecord(
+                    serverID: row["server_id"],
+                    remoteID: row["remote_id"],
+                    name: row["name"]
+                )
+            }
         }
     }
 

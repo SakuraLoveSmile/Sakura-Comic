@@ -1,5 +1,7 @@
+import 'rust/ffi/application.dart';
 import 'rust/ffi/bridge.dart' as frb;
 import 'rust/frb_generated.dart';
+import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
 import 'rust/store/series.dart';
 import 'rust/sync/bootstrap.dart';
@@ -41,6 +43,14 @@ class FrbRustCoreApi implements RustCoreApi {
   }
 
   @override
+  Future<ConnectionResult> testConnection({
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    return frb.testConnection(baseUrl: baseUrl, apiKey: apiKey);
+  }
+
+  @override
   Future<List<SeriesRow>> fetchSeries({
     required String dbPath,
     required String serverId,
@@ -66,5 +76,47 @@ class FrbRustCoreApi implements RustCoreApi {
     required ServerProfile profile,
   }) {
     return frb.saveServer(dbPath: dbPath, profile: profile);
+  }
+
+  @override
+  Future<ServerProfile?> getServer({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.getServer(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<bool> deleteServer({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.deleteServer(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<void> saveLibraries({
+    required String dbPath,
+    required String serverId,
+    required List<Library> libraries,
+  }) {
+    return frb.saveLibraries(
+      dbPath: dbPath,
+      serverId: serverId,
+      libraries: libraries,
+    );
+  }
+
+  @override
+  Future<void> setActiveServer({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.setActiveServer(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<String?> getActiveServer({required String dbPath}) {
+    return frb.getActiveServer(dbPath: dbPath);
   }
 }
