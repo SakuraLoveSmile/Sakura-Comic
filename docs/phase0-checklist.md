@@ -90,4 +90,4 @@
       Rust demo PNG 生成器（纯 Rust stored-deflate，`file`/`sips` 实测 200×300 合法 PNG）；
       facade `cover_path`/`ensure_cover`/`ensure_covers`/`bootstrap_demo` + FRB 重新 codegen
       （coverPath/listThumbnails/ensureCover/ensureCovers/bootstrapDemo）；
-      Android 封面墙渲染 + 同步/演示动作 + widget 测试；`e2e_stage3.sh` + `docs/stage3-checklist.md
+      Android 封面墙渲染 + 同步/演示动作 + widget 测试；`e2e_stage3.sh` + `docs/stage3-checklist.md`
