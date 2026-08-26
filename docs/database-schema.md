@@ -2,15 +2,18 @@
 
 ## 原则
 
-- 所有表的主键为 `(server_id, remote_id)`；read_progress 为 `(server_id, book_id)`
+- 所有表的主键为 `(server_id, remote_id)`；read_progress 为 `(server_id, book_id)`；
+  app_state 为 `(key)` 单值状态表
 - Apple：GRDB；Android(Rust)：rusqlite（Flutter 不直接访问数据库）
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
+- 当前 Schema 版本：**v2**（v2 新增 `app_state`，用于 `active_server_id`；
+  两端用幂等 `CREATE TABLE IF NOT EXISTS` 应用迁移并写 `PRAGMA user_version`）
 
 ## 主要表
 
-servers / libraries / series / books / collections / readlists / read_progress /
-series_metadata / book_metadata / sync_state / pending_mutations /
-downloads / download_pages / cache_entries
+servers / app_state / libraries / series / books / collections / readlists /
+read_progress / series_metadata / book_metadata / sync_state /
+pending_mutations / downloads / download_pages / cache_entries
 
 ## DDL 草案
 
@@ -23,6 +26,19 @@ CREATE TABLE servers (
   credential_ref TEXT,
   capabilities TEXT,
   last_successful_connection TEXT
+);
+
+-- v2: 单值应用状态（当前服务器等）
+CREATE TABLE app_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE libraries (
+  server_id TEXT NOT NULL,
+  remote_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (server_id, remote_id)
 );
 
 CREATE TABLE series (

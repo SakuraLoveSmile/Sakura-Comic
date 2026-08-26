@@ -1,6 +1,8 @@
 //! rusqlite-backed local store. All database access goes through Rust Core
 //! (no Flutter SQLite plugin).
 
+pub mod app_state;
+pub mod libraries;
 pub mod schema;
 pub mod series;
 pub mod servers;

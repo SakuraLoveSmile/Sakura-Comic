@@ -5,10 +5,12 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'ffi/application.dart';
 import 'ffi/bridge.dart';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
+import 'model/server.dart';
 import 'model/server_profile.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'store/series.dart';
@@ -71,7 +73,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1297872781;
+  int get rustContentHash => 169164183;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -89,17 +91,36 @@ abstract class RustLibApi extends BaseApi {
       required String baseUrl,
       required String apiKey});
 
+  Future<bool> crateFfiBridgeDeleteServer(
+      {required String dbPath, required String serverId});
+
   Future<List<SeriesRow>> crateFfiBridgeFetchSeries(
       {required String dbPath,
       required String serverId,
       required PlatformInt64 limit,
       required PlatformInt64 offset});
 
+  Future<String?> crateFfiBridgeGetActiveServer({required String dbPath});
+
+  Future<ServerProfile?> crateFfiBridgeGetServer(
+      {required String dbPath, required String serverId});
+
   Future<List<ServerProfile>> crateFfiBridgeListServers(
       {required String dbPath});
 
+  Future<void> crateFfiBridgeSaveLibraries(
+      {required String dbPath,
+      required String serverId,
+      required List<Library> libraries});
+
   Future<void> crateFfiBridgeSaveServer(
       {required String dbPath, required ServerProfile profile});
+
+  Future<void> crateFfiBridgeSetActiveServer(
+      {required String dbPath, required String serverId});
+
+  Future<ConnectionResult> crateFfiBridgeTestConnection(
+      {required String baseUrl, required String apiKey});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -142,6 +163,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<bool> crateFfiBridgeDeleteServer(
+      {required String dbPath, required String serverId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 2, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeDeleteServerConstMeta,
+      argValues: [dbPath, serverId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeDeleteServerConstMeta => const TaskConstMeta(
+        debugName: "delete_server",
+        argNames: ["dbPath", "serverId"],
+      );
+
+  @override
   Future<List<SeriesRow>> crateFfiBridgeFetchSeries(
       {required String dbPath,
       required String serverId,
@@ -155,7 +202,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_i_64(limit, serializer);
         sse_encode_i_64(offset, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
+            funcId: 3, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_series_row,
@@ -173,6 +220,57 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String?> crateFfiBridgeGetActiveServer({required String dbPath}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 4, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeGetActiveServerConstMeta,
+      argValues: [dbPath],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeGetActiveServerConstMeta =>
+      const TaskConstMeta(
+        debugName: "get_active_server",
+        argNames: ["dbPath"],
+      );
+
+  @override
+  Future<ServerProfile?> crateFfiBridgeGetServer(
+      {required String dbPath, required String serverId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 5, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_box_autoadd_server_profile,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeGetServerConstMeta,
+      argValues: [dbPath, serverId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeGetServerConstMeta => const TaskConstMeta(
+        debugName: "get_server",
+        argNames: ["dbPath", "serverId"],
+      );
+
+  @override
   Future<List<ServerProfile>> crateFfiBridgeListServers(
       {required String dbPath}) {
     return handler.executeNormal(NormalTask(
@@ -180,7 +278,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(dbPath, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 3, port: port_);
+            funcId: 6, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_server_profile,
@@ -198,6 +296,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateFfiBridgeSaveLibraries(
+      {required String dbPath,
+      required String serverId,
+      required List<Library> libraries}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        sse_encode_list_library(libraries, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 7, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeSaveLibrariesConstMeta,
+      argValues: [dbPath, serverId, libraries],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeSaveLibrariesConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_libraries",
+        argNames: ["dbPath", "serverId", "libraries"],
+      );
+
+  @override
   Future<void> crateFfiBridgeSaveServer(
       {required String dbPath, required ServerProfile profile}) {
     return handler.executeNormal(NormalTask(
@@ -206,7 +334,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dbPath, serializer);
         sse_encode_box_autoadd_server_profile(profile, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 4, port: port_);
+            funcId: 8, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -221,6 +349,60 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateFfiBridgeSaveServerConstMeta => const TaskConstMeta(
         debugName: "save_server",
         argNames: ["dbPath", "profile"],
+      );
+
+  @override
+  Future<void> crateFfiBridgeSetActiveServer(
+      {required String dbPath, required String serverId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dbPath, serializer);
+        sse_encode_String(serverId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 9, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeSetActiveServerConstMeta,
+      argValues: [dbPath, serverId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeSetActiveServerConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_active_server",
+        argNames: ["dbPath", "serverId"],
+      );
+
+  @override
+  Future<ConnectionResult> crateFfiBridgeTestConnection(
+      {required String baseUrl, required String apiKey}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(baseUrl, serializer);
+        sse_encode_String(apiKey, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 10, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_connection_result,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateFfiBridgeTestConnectionConstMeta,
+      argValues: [baseUrl, apiKey],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateFfiBridgeTestConnectionConstMeta =>
+      const TaskConstMeta(
+        debugName: "test_connection",
+        argNames: ["baseUrl", "apiKey"],
       );
 
   @protected
@@ -256,9 +438,86 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
+  BuildInfo dco_decode_box_autoadd_build_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_build_info(raw);
+  }
+
+  @protected
+  GitCommit dco_decode_box_autoadd_git_commit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_git_commit(raw);
+  }
+
+  @protected
+  GitInfo dco_decode_box_autoadd_git_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_git_info(raw);
+  }
+
+  @protected
   ServerProfile dco_decode_box_autoadd_server_profile(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_server_profile(raw);
+  }
+
+  @protected
+  BuildInfo dco_decode_build_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return BuildInfo(
+      artifact: dco_decode_opt_String(arr[0]),
+      name: dco_decode_opt_String(arr[1]),
+      time: dco_decode_opt_String(arr[2]),
+      version: dco_decode_opt_String(arr[3]),
+      group: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  ConnectionResult dco_decode_connection_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return ConnectionResult(
+      serverInfo: dco_decode_server_info(arr[0]),
+      serverVersion: dco_decode_opt_String(arr[1]),
+      libraries: dco_decode_list_library(arr[2]),
+      capabilities: dco_decode_list_String(arr[3]),
+    );
+  }
+
+  @protected
+  GitCommit dco_decode_git_commit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return GitCommit(
+      id: dco_decode_opt_String(arr[0]),
+      time: dco_decode_opt_String(arr[1]),
+    );
+  }
+
+  @protected
+  GitInfo dco_decode_git_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return GitInfo(
+      branch: dco_decode_opt_String(arr[0]),
+      commit: dco_decode_opt_box_autoadd_git_commit(arr[1]),
+    );
   }
 
   @protected
@@ -274,9 +533,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Library dco_decode_library(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return Library(
+      id: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      root: dco_decode_String(arr[2]),
+      unavailable: dco_decode_opt_box_autoadd_bool(arr[3]),
+    );
+  }
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
+  List<Library> dco_decode_list_library(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_library).toList();
   }
 
   @protected
@@ -304,6 +583,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bool(raw);
+  }
+
+  @protected
+  BuildInfo? dco_decode_opt_box_autoadd_build_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_build_info(raw);
+  }
+
+  @protected
+  GitCommit? dco_decode_opt_box_autoadd_git_commit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_git_commit(raw);
+  }
+
+  @protected
+  GitInfo? dco_decode_opt_box_autoadd_git_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_git_info(raw);
+  }
+
+  @protected
+  ServerProfile? dco_decode_opt_box_autoadd_server_profile(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_server_profile(raw);
+  }
+
+  @protected
   SeriesRow dco_decode_series_row(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -318,6 +627,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       status: dco_decode_opt_String(arr[5]),
       createdAt: dco_decode_opt_String(arr[6]),
       lastModified: dco_decode_opt_String(arr[7]),
+    );
+  }
+
+  @protected
+  ServerInfo dco_decode_server_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return ServerInfo(
+      build: dco_decode_opt_box_autoadd_build_info(arr[0]),
+      git: dco_decode_opt_box_autoadd_git_info(arr[1]),
     );
   }
 
@@ -391,10 +712,80 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bool(deserializer));
+  }
+
+  @protected
+  BuildInfo sse_decode_box_autoadd_build_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_build_info(deserializer));
+  }
+
+  @protected
+  GitCommit sse_decode_box_autoadd_git_commit(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_git_commit(deserializer));
+  }
+
+  @protected
+  GitInfo sse_decode_box_autoadd_git_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_git_info(deserializer));
+  }
+
+  @protected
   ServerProfile sse_decode_box_autoadd_server_profile(
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_server_profile(deserializer));
+  }
+
+  @protected
+  BuildInfo sse_decode_build_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_artifact = sse_decode_opt_String(deserializer);
+    var var_name = sse_decode_opt_String(deserializer);
+    var var_time = sse_decode_opt_String(deserializer);
+    var var_version = sse_decode_opt_String(deserializer);
+    var var_group = sse_decode_opt_String(deserializer);
+    return BuildInfo(
+        artifact: var_artifact,
+        name: var_name,
+        time: var_time,
+        version: var_version,
+        group: var_group);
+  }
+
+  @protected
+  ConnectionResult sse_decode_connection_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_serverInfo = sse_decode_server_info(deserializer);
+    var var_serverVersion = sse_decode_opt_String(deserializer);
+    var var_libraries = sse_decode_list_library(deserializer);
+    var var_capabilities = sse_decode_list_String(deserializer);
+    return ConnectionResult(
+        serverInfo: var_serverInfo,
+        serverVersion: var_serverVersion,
+        libraries: var_libraries,
+        capabilities: var_capabilities);
+  }
+
+  @protected
+  GitCommit sse_decode_git_commit(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_opt_String(deserializer);
+    var var_time = sse_decode_opt_String(deserializer);
+    return GitCommit(id: var_id, time: var_time);
+  }
+
+  @protected
+  GitInfo sse_decode_git_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_branch = sse_decode_opt_String(deserializer);
+    var var_commit = sse_decode_opt_box_autoadd_git_commit(deserializer);
+    return GitInfo(branch: var_branch, commit: var_commit);
   }
 
   @protected
@@ -410,6 +801,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Library sse_decode_library(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_root = sse_decode_String(deserializer);
+    var var_unavailable = sse_decode_opt_box_autoadd_bool(deserializer);
+    return Library(
+        id: var_id,
+        name: var_name,
+        root: var_root,
+        unavailable: var_unavailable);
+  }
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -417,6 +822,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<Library> sse_decode_list_library(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Library>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_library(deserializer));
     }
     return ans_;
   }
@@ -465,6 +882,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bool(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BuildInfo? sse_decode_opt_box_autoadd_build_info(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_build_info(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  GitCommit? sse_decode_opt_box_autoadd_git_commit(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_git_commit(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  GitInfo? sse_decode_opt_box_autoadd_git_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_git_info(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  ServerProfile? sse_decode_opt_box_autoadd_server_profile(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_server_profile(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   SeriesRow sse_decode_series_row(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_serverId = sse_decode_String(deserializer);
@@ -484,6 +959,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         status: var_status,
         createdAt: var_createdAt,
         lastModified: var_lastModified);
+  }
+
+  @protected
+  ServerInfo sse_decode_server_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_build = sse_decode_opt_box_autoadd_build_info(deserializer);
+    var var_git = sse_decode_opt_box_autoadd_git_info(deserializer);
+    return ServerInfo(build: var_build, git: var_git);
   }
 
   @protected
@@ -552,10 +1035,70 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_build_info(
+      BuildInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_build_info(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_git_commit(
+      GitCommit self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_git_commit(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_git_info(GitInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_git_info(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_server_profile(
       ServerProfile self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_server_profile(self, serializer);
+  }
+
+  @protected
+  void sse_encode_build_info(BuildInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.artifact, serializer);
+    sse_encode_opt_String(self.name, serializer);
+    sse_encode_opt_String(self.time, serializer);
+    sse_encode_opt_String(self.version, serializer);
+    sse_encode_opt_String(self.group, serializer);
+  }
+
+  @protected
+  void sse_encode_connection_result(
+      ConnectionResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_server_info(self.serverInfo, serializer);
+    sse_encode_opt_String(self.serverVersion, serializer);
+    sse_encode_list_library(self.libraries, serializer);
+    sse_encode_list_String(self.capabilities, serializer);
+  }
+
+  @protected
+  void sse_encode_git_commit(GitCommit self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.id, serializer);
+    sse_encode_opt_String(self.time, serializer);
+  }
+
+  @protected
+  void sse_encode_git_info(GitInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.branch, serializer);
+    sse_encode_opt_box_autoadd_git_commit(self.commit, serializer);
   }
 
   @protected
@@ -571,11 +1114,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_library(Library self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.root, serializer);
+    sse_encode_opt_box_autoadd_bool(self.unavailable, serializer);
+  }
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_library(List<Library> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_library(item, serializer);
     }
   }
 
@@ -618,6 +1179,60 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bool(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_build_info(
+      BuildInfo? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_build_info(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_git_commit(
+      GitCommit? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_git_commit(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_git_info(
+      GitInfo? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_git_info(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_server_profile(
+      ServerProfile? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_server_profile(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_series_row(SeriesRow self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.serverId, serializer);
@@ -628,6 +1243,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.status, serializer);
     sse_encode_opt_String(self.createdAt, serializer);
     sse_encode_opt_String(self.lastModified, serializer);
+  }
+
+  @protected
+  void sse_encode_server_info(ServerInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_build_info(self.build, serializer);
+    sse_encode_opt_box_autoadd_git_info(self.git, serializer);
   }
 
   @protected

@@ -1,17 +1,24 @@
 import 'package:flutter/material.dart';
 
 import 'library_repository.dart';
+import 'server_manager.dart';
+import 'servers_screen.dart';
 import 'series.dart';
 
-/// Library cover wall — Phase 0 vertical slice screen.
+/// Library cover wall — reads series through [LibraryRepository] (local
+/// store); server management is one tap away (ServerManager).
 class SeriesGridScreen extends StatefulWidget {
   const SeriesGridScreen({
     super.key,
     this.repository = const StubLibraryRepository(),
+    this.manager,
     this.rustStatus,
   });
 
   final LibraryRepository repository;
+
+  /// Optional server manager — enables the server management entry point.
+  final ServerManager? manager;
 
   /// Optional FFI connectivity banner (e.g. "Rust core FFI 已连接").
   final String? rustStatus;
@@ -23,6 +30,7 @@ class SeriesGridScreen extends StatefulWidget {
 class _SeriesGridScreenState extends State<SeriesGridScreen> {
   List<Series> _series = const [];
   Object? _error;
+  String? _activeServerName;
 
   @override
   void initState() {
@@ -41,10 +49,54 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
     }
   }
 
+  Future<void> _loadServerName() async {
+    final manager = widget.manager;
+    if (manager == null) return;
+    final id = await manager.activeServerId();
+    if (id == null) {
+      if (mounted && _activeServerName != null) {
+        setState(() => _activeServerName = null);
+      }
+      return;
+    }
+    final profile = await manager.get(serverId: id);
+    if (!mounted) return;
+    setState(() => _activeServerName = profile?.displayName);
+  }
+
+  Future<void> _openServers() async {
+    final manager = widget.manager;
+    if (manager == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ServersScreen(
+          manager: manager,
+          onChanged: () {
+            _load();
+            _loadServerName();
+          },
+        ),
+      ),
+    );
+    await _load();
+    await _loadServerName();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final manager = widget.manager;
     return Scaffold(
-      appBar: AppBar(title: const Text('Library')),
+      appBar: AppBar(
+        title: Text(_activeServerName ?? 'Library'),
+        actions: [
+          if (manager != null)
+            IconButton(
+              onPressed: _openServers,
+              tooltip: '服务器',
+              icon: const Icon(Icons.dns_outlined),
+            ),
+        ],
+      ),
       body: Column(
         children: [
           if (widget.rustStatus != null)
@@ -68,8 +120,18 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
       return Center(child: Text('加载失败: $_error'));
     }
     if (_series.isEmpty) {
-      return const Center(
-        child: Text('暂无 Series — 完成 BootstrapSync 后显示封面墙'),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('暂无 Series — 添加服务器并完成连接后显示封面墙'),
+            if (widget.manager != null)
+              TextButton(
+                onPressed: _openServers,
+                child: const Text('管理服务器'),
+              ),
+          ],
+        ),
       );
     }
     return GridView.builder(

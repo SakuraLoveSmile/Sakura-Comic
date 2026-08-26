@@ -1,0 +1,16 @@
+{
+  "build": {
+    "artifact": "komga",
+    "name": "komga",
+    "time": "2026-08-14T10:26:23.386Z",
+    "version": "1.26.3",
+    "group": "org.gotson.komga"
+  },
+  "git": {
+    "branch": "master",
+    "commit": {
+      "id": "e93fa2a",
+      "time": "2026-08-14T10:26:23.386Z"
+    }
+  }
+}

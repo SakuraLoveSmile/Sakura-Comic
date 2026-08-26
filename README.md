@@ -75,6 +75,29 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
 
 验收细节与勾选状态见 [docs/phase0-checklist.md](docs/phase0-checklist.md)。
 
+## Stage 2 — API 契约与服务器管理
+
+双端验收链：`添加服务器 → 登录 → 验证 Komga → 获取服务器信息 → 保存 Server Profile`。
+
+- **API 契约**：OpenAPI 快照 `specs/openapi/komga-openapi.yaml`（Komga 1.26.3）为唯一事实来源；
+  Swift/Rust 以共享 fixture（`specs/contracts/fixtures/connection/`）对齐 DTO、分页与错误模型；
+  版本兼容策略见 [specs/openapi/compatibility.md](specs/openapi/compatibility.md)。
+- **Server Profile**：多服务器 CRUD + 测试连接 + 切换；认证信息只存
+  Keychain（Apple）/ Android Keystore（Keystore 通道），数据库只存 `credential_ref`；
+  远端实体一律 `(serverId, remoteId)` 隔离。
+- **离线验收**：
+  ```bash
+  bash scripts/verify.sh
+  cd android/komga_core && cargo run --bin stage2_smoke -- --fixture --db /tmp/comic-stage2.sqlite
+  ```
+- **真实服务器验收**（需 API Key）：
+  ```bash
+  export KOMGA_BASE_URL=http://192.168.0.69:25600
+  export KOMGA_API_KEY=your-api-key
+  bash scripts/e2e_stage2.sh
+  ```
+  勾选状态与实现位置见 [docs/stage2-checklist.md](docs/stage2-checklist.md)。
+
 ## 文档入口
 
 - [架构](docs/architecture.md)

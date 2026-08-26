@@ -85,23 +85,26 @@ impl KomgaClient {
     }
 
     pub async fn series_page(&self, request: &PageRequest) -> Result<SeriesPage> {
-        let url = series_page_url(&self.base_url, request);
+        self.get_json(&series_page_url(&self.base_url, request))
+            .await
+    }
+
+    /// Shared authenticated GET: applies auth headers, maps HTTP status
+    /// codes to the unified error model, decodes the JSON body.
+    pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
         let mut headers = HeaderMap::new();
         self.auth.apply_headers(&mut headers);
         let response = self
             .http
-            .get(&url)
+            .get(url)
             .headers(headers)
             .send()
             .await
             .map_err(|_| ApiError::Network)?;
         match response.status().as_u16() {
-            200 => response
-                .json::<SeriesPage>()
-                .await
-                .map_err(|e| ApiError::Decode {
-                    message: e.to_string(),
-                }),
+            200 => response.json::<T>().await.map_err(|e| ApiError::Decode {
+                message: e.to_string(),
+            }),
             401 | 403 => Err(ApiError::Authentication),
             code => Err(ApiError::Server { status_code: code }),
         }
