@@ -29,20 +29,35 @@ class BookPageResult {
           total == other.total;
 }
 
-/// One library row with its local series count (Library 列表/详情).
+/// One library row with its local counts (Library 列表/详情).
 class LibraryCountRow {
   final String remoteId;
   final String name;
+  final String? root;
+  final bool unavailable;
   final PlatformInt64 seriesCount;
+  final PlatformInt64 bookCount;
+  final PlatformInt64 readCount;
 
   const LibraryCountRow({
     required this.remoteId,
     required this.name,
+    this.root,
+    required this.unavailable,
     required this.seriesCount,
+    required this.bookCount,
+    required this.readCount,
   });
 
   @override
-  int get hashCode => remoteId.hashCode ^ name.hashCode ^ seriesCount.hashCode;
+  int get hashCode =>
+      remoteId.hashCode ^
+      name.hashCode ^
+      root.hashCode ^
+      unavailable.hashCode ^
+      seriesCount.hashCode ^
+      bookCount.hashCode ^
+      readCount.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -51,7 +66,11 @@ class LibraryCountRow {
           runtimeType == other.runtimeType &&
           remoteId == other.remoteId &&
           name == other.name &&
-          seriesCount == other.seriesCount;
+          root == other.root &&
+          unavailable == other.unavailable &&
+          seriesCount == other.seriesCount &&
+          bookCount == other.bookCount &&
+          readCount == other.readCount;
 }
 
 class SeriesPageResult {

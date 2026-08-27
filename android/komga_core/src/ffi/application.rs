@@ -14,14 +14,18 @@ use crate::model::server::{Library, ServerInfo};
 use crate::model::server_profile::ServerProfile;
 use crate::store;
 use crate::store::collections::CollectionRow;
+use crate::store::prune::Tombstone;
 use crate::store::query::{BookQuery, BookSort, SeriesQuery, SeriesSort};
 use crate::store::read_progress::ContinueReadingRow;
 use crate::store::readlists::ReadlistRow;
 use crate::store::series::SeriesRow;
+use crate::store::sync_state::EntitySyncState;
 use crate::store::thumbnails::{ThumbnailRow, VARIANT_BOOK, VARIANT_SERIES};
 use crate::sync;
 use crate::sync::full::FixtureLibraryFetcher;
-use crate::sync::{BootstrapSummary, FullSyncSummary, LibraryFetcher};
+use crate::sync::{
+    BootstrapSummary, FullSyncSummary, LibraryFetcher, ReconcileSummary, ReconcileTrigger,
+};
 
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
@@ -394,6 +398,99 @@ impl App {
         sync::full_sync(&self.db_path, server_id, fetcher).await
     }
 
+    // MARK: - Stage 5: sync engine (resumable bootstrap + reconcile)
+
+    /// Bootstrap Sync against a live server. `fresh` re-mirrors from page 0;
+    /// by default an interrupted run resumes from its stored cursors.
+    pub async fn bootstrap_sync(
+        &self,
+        server_id: String,
+        base_url: String,
+        api_key: String,
+        fresh: bool,
+    ) -> Result<FullSyncSummary, ApiError> {
+        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let start = if fresh {
+            sync::StartAt::Fresh
+        } else {
+            sync::StartAt::Resume
+        };
+        let summary = sync::full_sync_from(&self.db_path, &server_id, &client, start).await?;
+        Ok(summary)
+    }
+
+    /// Reconcile Sync (live server): id sweep + delete propagation. Safe to
+    /// call on every trigger — it is what makes SSE events optional.
+    pub async fn reconcile(
+        &self,
+        server_id: String,
+        base_url: String,
+        api_key: String,
+        trigger: String,
+    ) -> Result<ReconcileSummary, ApiError> {
+        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        self.reconcile_with(&client, &server_id, &trigger).await
+    }
+
+    /// Reconcile with an injectable fetcher (offline tests / scenario replay).
+    pub async fn reconcile_with<F: LibraryFetcher + Sync>(
+        &self,
+        fetcher: &F,
+        server_id: &str,
+        trigger: &str,
+    ) -> Result<ReconcileSummary, ApiError> {
+        let summary = sync::reconcile::reconcile(
+            &self.db_path,
+            server_id,
+            fetcher,
+            ReconcileTrigger::parse(trigger),
+        )
+        .await?;
+        // Delete propagation contract: covers of pruned entities go too.
+        self.remove_cover_files(&summary.orphaned_covers);
+        Ok(summary)
+    }
+
+    /// Should this trigger sweep now? Background triggers are throttled so
+    /// returning to the foreground does not hammer the server.
+    pub fn should_reconcile(&self, server_id: &str, trigger: &str) -> Result<bool, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        sync::reconcile::should_reconcile(
+            &conn,
+            server_id,
+            ReconcileTrigger::parse(trigger),
+            chrono::Utc::now(),
+        )
+        .map_err(db_err)
+    }
+
+    /// Per entity type sync state (`serverId` / `entityType` / `lastSyncAt` /
+    /// `syncCursor` / `syncStatus`) — drives the sync status UI.
+    pub fn sync_states(&self, server_id: &str) -> Result<Vec<EntitySyncState>, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        store::sync_state::list_entity_states(&conn, server_id).map_err(db_err)
+    }
+
+    /// Tombstones for one entity type (what Reconcile removed, and when).
+    pub fn tombstones(
+        &self,
+        server_id: &str,
+        entity_type: &str,
+    ) -> Result<Vec<Tombstone>, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        store::prune::list_tombstones(&conn, server_id, entity_type).map_err(db_err)
+    }
+
+    /// Remove orphaned cover files (rows are already gone; files follow).
+    fn remove_cover_files(&self, paths: &[String]) {
+        let Ok(cache) = DiskCache::new(self.cache_root()) else {
+            return;
+        };
+        for path in paths {
+            let _ = cache.remove(std::path::Path::new(path));
+        }
+    }
+
     // MARK: - Media library queries (全部本地：SQLite)
 
     #[allow(clippy::too_many_arguments)]
@@ -702,6 +799,16 @@ impl App {
     pub fn library_counts(&self, server_id: &str) -> Result<Vec<LibraryCountRow>, ApiError> {
         let conn = store::open(&self.db_path).map_err(db_err)?;
         store::query::library_counts(&conn, server_id).map_err(db_err)
+    }
+
+    /// One library with its counts, root and availability (Library 详情).
+    pub fn library_detail(
+        &self,
+        server_id: &str,
+        library_id: &str,
+    ) -> Result<Option<LibraryCountRow>, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        store::query::library_detail(&conn, server_id, library_id).map_err(db_err)
     }
 
     // MARK: - Reading status (本地优先 + Mutation Outbox)
@@ -1320,6 +1427,95 @@ mod tests {
         assert_eq!(app.list_thumbnails("demo").unwrap().len(), 6);
 
         cleanup_temp(&db);
+    }
+
+    /// Stage 5 contract: a remote series deletion cascades locally, leaves a
+    /// tombstone, and takes its cached cover file off the disk with it.
+    #[tokio::test]
+    async fn reconcile_propagates_remote_delete_and_orphan_covers() {
+        let dir = std::env::temp_dir().join(format!("komga_reconcile_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("comic.sqlite").to_string_lossy().into_owned();
+        let app = App::new(&db);
+
+        // Mirror the shared fixtures, then pretend a cover is cached for
+        // series-3 (a real file under the cache root).
+        app.full_sync_with(&FixtureLibraryFetcher {}, "rec")
+            .await
+            .unwrap();
+        let cover = dir.join("cache").join("thumbnails").join("series-3.png");
+        std::fs::create_dir_all(cover.parent().unwrap()).unwrap();
+        std::fs::write(&cover, b"png").unwrap();
+        {
+            let conn = store::open(&db).unwrap();
+            store::thumbnails::record_thumbnail(
+                &conn,
+                "rec",
+                "series-3",
+                crate::store::thumbnails::VARIANT_SERIES,
+                &cover.to_string_lossy(),
+                3,
+            )
+            .unwrap();
+        }
+
+        // The server now serves the same library minus series-3 (and books).
+        let scenario: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../specs/contracts/fixtures/sync/scenario-reconcile.json"
+        ))
+        .unwrap();
+        let mut snapshot = scenario["snapshots"][0].clone();
+        snapshot["series"][0]
+            .as_array_mut()
+            .unwrap()
+            .retain(|item| item["id"] != "series-3");
+        let books = snapshot["books"].as_object_mut().unwrap();
+        books.remove("series-3");
+        for page in books.values_mut() {
+            page[0]
+                .as_array_mut()
+                .unwrap()
+                .retain(|item| item["seriesId"] != "series-3");
+        }
+        for collection in snapshot["collections"][0].as_array_mut().unwrap() {
+            collection["seriesIds"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|id| id != "series-3");
+        }
+        let server = crate::sync::scenario::server_from_snapshot(&snapshot.to_string()).unwrap();
+
+        let summary = app
+            .reconcile_with(&server, "rec", "manual_refresh")
+            .await
+            .unwrap();
+        assert_eq!(summary.series_removed, 1);
+        // series-3's books go through the series cascade, so the scoped book
+        // sweep finds nothing extra to remove.
+        assert_eq!(summary.books_removed, 0);
+
+        let conn = store::open(&db).unwrap();
+        assert_eq!(store::series::count_series(&conn, "rec").unwrap(), 2);
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM books WHERE server_id = ?1",
+                rusqlite::params!["rec"],
+                |row| row.get(0)
+            )
+            .unwrap(),
+            5
+        );
+        let tombstones = store::prune::list_tombstones(&conn, "rec", "series").unwrap();
+        assert_eq!(tombstones.len(), 1);
+        assert_eq!(tombstones[0].remote_id, "series-3");
+        assert_eq!(tombstones[0].cause, store::prune::CAUSE_RECONCILE);
+        // The cover row is gone (its path surfaced on the summary).
+        assert_eq!(summary.orphaned_covers, vec![cover.to_string_lossy()]);
+        assert!(app.tombstones("rec", "series").unwrap().len() == 1);
+        drop(conn);
+        // ...and so is the file.
+        assert!(!cover.exists(), "the orphaned cover file must be deleted");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

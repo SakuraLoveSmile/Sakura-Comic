@@ -195,7 +195,7 @@ class _FakeRepository extends LibraryRepository {
   Future<Map<String, String>> fetchCoverPaths() async => const {};
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer() async => null;
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async => null;
 
   @override
   Future<int> syncCovers() async => 0;

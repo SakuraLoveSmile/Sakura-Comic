@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'collections_screen.dart';
+import 'libraries_screen.dart';
 import 'library_repository.dart';
 import 'models.dart';
 import 'readlists_screen.dart';
@@ -38,13 +39,15 @@ class SeriesGridScreen extends StatefulWidget {
   State<SeriesGridScreen> createState() => _SeriesGridScreenState();
 }
 
-class _SeriesGridScreenState extends State<SeriesGridScreen> {
+class _SeriesGridScreenState extends State<SeriesGridScreen>
+    with WidgetsBindingObserver {
   List<Series> _series = const [];
   Map<String, String> _coverPaths = const {};
   Object? _error;
   String? _activeServerName;
   bool _syncing = false;
   bool _autoSynced = false;
+  SyncStatus _syncStatus = const SyncStatus();
 
   // Stage 4 query state (全部本地：SQLite).
   final TextEditingController _searchController = TextEditingController();
@@ -67,11 +70,22 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
   @override
   void initState() {
     super.initState();
+    // Stage 5 triggers: cold start syncs, coming back to the foreground
+    // reconciles, and pull-to-refresh reconciles on demand.
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reconcile('did_become_active');
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -83,12 +97,19 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         _loadWall(reset: true),
         _loadSyncState(),
         _loadCovers(),
+        _loadSyncStatus(),
       ]);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
     }
     _maybeAutoSync();
+  }
+
+  Future<void> _loadSyncStatus() async {
+    final status = await widget.repository.fetchSyncStatus();
+    if (!mounted) return;
+    setState(() => _syncStatus = status);
   }
 
   Future<void> _loadCovers() async {
@@ -151,12 +172,44 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
     });
   }
 
-  /// First load with an FFI-backed repository triggers one sync (mirrors
-  /// the iOS `initialLoad`): pull series into SQLite + backfill covers.
+  /// First load with an FFI-backed repository: Bootstrap Sync when the server
+  /// has never been mirrored, otherwise a Reconcile sweep (mirrors the iOS
+  /// `initialLoad`). Both paths read back from SQLite afterwards.
   Future<void> _maybeAutoSync() async {
     if (_autoSynced || !widget.repository.demoSupported) return;
     _autoSynced = true;
-    await _sync(announce: false);
+    if (_syncStatus.neverSynced) {
+      await _sync(announce: false);
+    } else {
+      await _reconcile('app_launch', announce: false);
+    }
+  }
+
+  /// Reconcile Sync for one trigger; the wall re-reads SQLite afterwards, so
+  /// added / changed / deleted entities all land in the UI in one pass.
+  Future<void> _reconcile(String trigger, {bool announce = true}) async {
+    if (_syncing) return;
+    setState(() => _syncing = true);
+    try {
+      final report = await widget.repository.reconcileActiveServer(trigger: trigger);
+      await _load();
+      if (!mounted || report == null) return;
+      if (announce) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(report.message)));
+      }
+    } catch (e) {
+      // An unreachable server must never take the shelf down with it: the
+      // local mirror keeps serving (and `sync_state` says what failed).
+      await _loadSyncStatus();
+      if (!mounted) return;
+      if (announce) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('同步失败（本地库仍可用）: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
   }
 
   /// Acceptance chain on tap: 拉取 Series → SQLite → 补齐封面 → 重读本地库.
@@ -245,6 +298,24 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         appBar: AppBar(
           title: Text(_activeServerName ?? 'Library'),
           actions: [
+            IconButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => LibrariesScreen(
+                      repository: widget.repository,
+                      selectedLibraryId: _selectedLibraryId,
+                      onSelected: (libraryId) {
+                        setState(() => _selectedLibraryId = libraryId);
+                        _loadWall(reset: true);
+                      },
+                    ),
+                  ),
+                );
+              },
+              tooltip: '图书馆',
+              icon: const Icon(Icons.library_books_outlined),
+            ),
             if (manager != null)
               IconButton(
                 onPressed: _openServers,
@@ -289,6 +360,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
+            _syncStatusBanner(),
             Expanded(
               child: TabBarView(
                 children: [
@@ -307,6 +379,22 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Stage 5 sync state (`sync_state`) surfaced where the shelf is read.
+  Widget _syncStatusBanner() {
+    return Container(
+      key: const ValueKey('sync-status'),
+      width: double.infinity,
+      color: _syncStatus.failed
+          ? Theme.of(context).colorScheme.errorContainer
+          : Theme.of(context).colorScheme.surfaceContainerLow,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Text(
+        _syncStatus.label,
+        style: Theme.of(context).textTheme.bodySmall,
       ),
     );
   }
@@ -341,9 +429,13 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         ),
       );
     }
-    return ListView(
-      padding: const EdgeInsets.all(12),
-      children: [
+    return RefreshIndicator(
+      onRefresh: () => _reconcile('manual_refresh'),
+      child: ListView(
+        key: const ValueKey('shelf-list'),
+        padding: const EdgeInsets.all(12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
         _searchField(),
         const SizedBox(height: 8),
         _libraryChips(),
@@ -360,7 +452,8 @@ class _SeriesGridScreenState extends State<SeriesGridScreen> {
         ),
         const SizedBox(height: 4),
         _seriesGrid(),
-      ],
+        ],
+      ),
     );
   }
 

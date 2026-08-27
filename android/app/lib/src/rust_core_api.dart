@@ -7,6 +7,8 @@ import 'rust/store/series.dart';
 import 'rust/store/thumbnails.dart';
 import 'rust/sync/bootstrap.dart';
 import 'rust/sync/full.dart';
+import 'rust/sync/reconcile.dart';
+import 'rust/store/sync_state.dart';
 
 /// In-memory stub so tests and the fallback UI path can run without FFI.
 class StubRustCoreApi extends RustCoreApi {
@@ -121,7 +123,37 @@ class StubRustCoreApi extends RustCoreApi {
         totalElements: 0,
         hasMorePages: false,
       );
+
+
 }
+
+/// A zero Reconcile summary: test doubles and the no-server path use it.
+ReconcileSummary emptyReconcileSummary(String serverId, String trigger) => ReconcileSummary(
+      serverId: serverId,
+      trigger: trigger,
+      seriesUpserted: BigInt.zero,
+      seriesAdded: BigInt.zero,
+      seriesChanged: BigInt.zero,
+      seriesRemoved: BigInt.zero,
+      booksUpserted: BigInt.zero,
+      booksAdded: BigInt.zero,
+      booksChanged: BigInt.zero,
+      booksRemoved: BigInt.zero,
+      collectionsUpserted: BigInt.zero,
+      collectionsAdded: BigInt.zero,
+      collectionsChanged: BigInt.zero,
+      collectionsRemoved: BigInt.zero,
+      readlistsUpserted: BigInt.zero,
+      readlistsAdded: BigInt.zero,
+      readlistsChanged: BigInt.zero,
+      readlistsRemoved: BigInt.zero,
+      librariesUpserted: BigInt.zero,
+      librariesRemoved: BigInt.zero,
+      readProgress: BigInt.zero,
+      pagesSwept: 0,
+      orphanedCovers: const [],
+      clean: true,
+    );
 
 /// Contract for the FFI layer mirroring
 /// android/komga_core/src/ffi/bridge.rs (Phase 0 step 02).
@@ -234,6 +266,7 @@ abstract class RustCoreApi {
   }) async =>
       FullSyncSummary(
         serverId: serverId,
+        libraries: BigInt.zero,
         series: BigInt.zero,
         books: BigInt.zero,
         collections: BigInt.zero,
@@ -241,7 +274,44 @@ abstract class RustCoreApi {
         readProgress: BigInt.zero,
         seriesPages: 0,
         bookPages: 0,
+        skippedSteps: const [],
+        resumedSteps: const [],
       );
+
+  /// Stage 5 Bootstrap Sync with an explicit resume policy.
+  Future<FullSyncSummary> bootstrapSync({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+    required bool resume,
+  }) =>
+      fullSync(dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+
+  /// Stage 5 Reconcile Sync: remote id sweep → Added / Changed / Deleted.
+  Future<ReconcileSummary> reconcile({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+    required String trigger,
+  }) async =>
+      emptyReconcileSummary(serverId, trigger);
+
+  /// Per entity type sync state (entityType / lastSyncAt / syncCursor / syncStatus).
+  Future<List<EntitySyncState>> syncStates({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      const [];
+
+  /// Whether this trigger should sweep now (background triggers are throttled).
+  Future<bool> shouldReconcile({
+    required String dbPath,
+    required String serverId,
+    required String trigger,
+  }) async =>
+      true;
 
   /// Paged series wall with search / filters / sort (本地查询).
   Future<SeriesPageResult> querySeries({
@@ -351,6 +421,14 @@ abstract class RustCoreApi {
     required String serverId,
   }) async =>
       const [];
+
+  /// One library with counts + root + availability (Library 详情).
+  Future<LibraryCountRow?> libraryDetail({
+    required String dbPath,
+    required String serverId,
+    required String libraryId,
+  }) async =>
+      null;
 
   /// Local page update + outbox row (READ_PROGRESS).
   Future<void> setReadProgress({

@@ -91,7 +91,7 @@ public final class KomgaStore: @unchecked Sendable {
                 "collections", "collection_series",
                 "readlists", "readlist_books",
                 "read_progress", "libraries", "sync_state", "pending_mutations",
-                "thumbnails", "downloads", "download_pages",
+                "thumbnails", "downloads", "download_pages", "deleted_entities",
             ]
             for table in tables {
                 try db.execute(sql: "DELETE FROM \(table) WHERE server_id = ?", arguments: [id])
@@ -149,11 +149,16 @@ public final class KomgaStore: @unchecked Sendable {
                 let record = LibraryRecord(serverID: serverID, dto: library)
                 _ = try db.execute(
                     sql: """
-                    INSERT INTO libraries (server_id, remote_id, name)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(server_id, remote_id) DO UPDATE SET name = excluded.name
+                    INSERT INTO libraries (server_id, remote_id, name, root, unavailable)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(server_id, remote_id)
+                    DO UPDATE SET name = excluded.name, root = excluded.root,
+                                  unavailable = excluded.unavailable
                     """,
-                    arguments: [record.serverID, record.remoteID, record.name]
+                    arguments: [
+                        record.serverID, record.remoteID, record.name,
+                        record.root, record.unavailable ? 1 : 0
+                    ]
                 )
                 written += 1
             }
@@ -169,10 +174,14 @@ public final class KomgaStore: @unchecked Sendable {
                 sql: "SELECT * FROM libraries WHERE server_id = ? ORDER BY name COLLATE NOCASE",
                 arguments: [serverID]
             ).map { row in
-                LibraryRecord(
+                let root: String? = row["root"]
+                let unavailableFlag: Int? = row["unavailable"]
+                return LibraryRecord(
                     serverID: row["server_id"],
                     remoteID: row["remote_id"],
-                    name: row["name"]
+                    name: row["name"],
+                    root: root,
+                    unavailable: (unavailableFlag ?? 0) != 0
                 )
             }
         }
@@ -292,20 +301,23 @@ public final class KomgaStore: @unchecked Sendable {
     // MARK: - Sync state
 
     /// Record a successful sync: timestamp + status back to idle, error
-    /// cleared. Returns the refreshed row.
+    /// cleared. Returns the refreshed rollup row (mirror of Rust
+    /// `touch_successful_sync`).
     @discardableResult
     public func recordSuccessfulSync(serverID: String) throws -> SyncStateRecord {
+        let now = Self.rfc3339Text(Date())
         try dbQueue.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO sync_state (server_id, last_successful_sync, sync_status)
-                VALUES (?, ?, ?)
-                ON CONFLICT(server_id) DO UPDATE SET
-                  last_successful_sync = excluded.last_successful_sync,
+                INSERT INTO sync_state (server_id, entity_type, last_sync_at, sync_status, last_successful_sync)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(server_id, entity_type) DO UPDATE SET
+                  last_sync_at = excluded.last_sync_at,
                   sync_status = excluded.sync_status,
-                  last_error = NULL
+                  last_error = NULL,
+                  last_successful_sync = excluded.last_successful_sync
                 """,
-                arguments: [serverID, Self.rfc3339(Date()), "idle"]
+                arguments: [serverID, SyncEntity.full, now, SyncStatus.idle, now]
             )
         }
         guard let row = try syncState(serverID: serverID) else {
@@ -314,15 +326,9 @@ public final class KomgaStore: @unchecked Sendable {
         return row
     }
 
-    /// One server's sync state, if any.
+    /// The server-level rollup (the `full` row), if any.
     public func syncState(serverID: String) throws -> SyncStateRecord? {
-        try dbQueue.read { db in
-            try Row.fetchOne(
-                db,
-                sql: "SELECT * FROM sync_state WHERE server_id = ?",
-                arguments: [serverID]
-            ).map(Self.syncState(from:))
-        }
+        try entityState(serverID: serverID, entityType: SyncEntity.full).map(SyncStateRecord.init)
     }
 
     // MARK: - Row mapping
@@ -336,16 +342,6 @@ public final class KomgaStore: @unchecked Sendable {
             localPath: row["local_path"],
             sizeBytes: row["size_bytes"],
             lastAccess: date(from: lastAccess) ?? Date()
-        )
-    }
-
-    private static func syncState(from row: Row) throws -> SyncStateRecord {
-        SyncStateRecord(
-            serverID: row["server_id"],
-            lastFullSync: row["last_full_sync"],
-            lastSuccessfulSync: row["last_successful_sync"],
-            lastError: row["last_error"],
-            syncStatus: row["sync_status"]
         )
     }
 

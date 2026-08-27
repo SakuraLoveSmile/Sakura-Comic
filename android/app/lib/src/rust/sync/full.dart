@@ -6,9 +6,10 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-/// Tally of a full mirror run.
+/// Tally of one mirror run (rows written per step, not local row counts).
 class FullSyncSummary {
   final String serverId;
+  final BigInt libraries;
   final BigInt series;
   final BigInt books;
   final BigInt collections;
@@ -17,8 +18,15 @@ class FullSyncSummary {
   final int seriesPages;
   final int bookPages;
 
+  /// Steps that had already completed, so this run skipped them.
+  final List<String> skippedSteps;
+
+  /// Steps this run continued from a stored cursor (interrupt recovery).
+  final List<String> resumedSteps;
+
   const FullSyncSummary({
     required this.serverId,
+    required this.libraries,
     required this.series,
     required this.books,
     required this.collections,
@@ -26,18 +34,23 @@ class FullSyncSummary {
     required this.readProgress,
     required this.seriesPages,
     required this.bookPages,
+    required this.skippedSteps,
+    required this.resumedSteps,
   });
 
   @override
   int get hashCode =>
       serverId.hashCode ^
+      libraries.hashCode ^
       series.hashCode ^
       books.hashCode ^
       collections.hashCode ^
       readlists.hashCode ^
       readProgress.hashCode ^
       seriesPages.hashCode ^
-      bookPages.hashCode;
+      bookPages.hashCode ^
+      skippedSteps.hashCode ^
+      resumedSteps.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -45,11 +58,14 @@ class FullSyncSummary {
       other is FullSyncSummary &&
           runtimeType == other.runtimeType &&
           serverId == other.serverId &&
+          libraries == other.libraries &&
           series == other.series &&
           books == other.books &&
           collections == other.collections &&
           readlists == other.readlists &&
           readProgress == other.readProgress &&
           seriesPages == other.seriesPages &&
-          bookPages == other.bookPages;
+          bookPages == other.bookPages &&
+          skippedSteps == other.skippedSteps &&
+          resumedSteps == other.resumedSteps;
 }

@@ -17,13 +17,16 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 import 'store.dart';
 import 'store/books.dart';
 import 'store/collections.dart';
+import 'store/prune.dart';
 import 'store/query.dart';
 import 'store/read_progress.dart';
 import 'store/readlists.dart';
 import 'store/series.dart';
+import 'store/sync_state.dart';
 import 'store/thumbnails.dart';
 import 'sync/bootstrap.dart';
 import 'sync/full.dart';
+import 'sync/reconcile.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RustLibApiImplPlatform({
@@ -82,6 +85,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
+  LibraryCountRow dco_decode_box_autoadd_library_count_row(dynamic raw);
+
+  @protected
   ReadlistDetailRow dco_decode_box_autoadd_readlist_detail_row(dynamic raw);
 
   @protected
@@ -110,6 +116,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ContinueReadingRow dco_decode_continue_reading_row(dynamic raw);
+
+  @protected
+  EntitySyncState dco_decode_entity_sync_state(dynamic raw);
 
   @protected
   double dco_decode_f_64(dynamic raw);
@@ -157,6 +166,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ContinueReadingRow> dco_decode_list_continue_reading_row(dynamic raw);
 
   @protected
+  List<EntitySyncState> dco_decode_list_entity_sync_state(dynamic raw);
+
+  @protected
   List<Library> dco_decode_list_library(dynamic raw);
 
   @protected
@@ -176,6 +188,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ThumbnailRow> dco_decode_list_thumbnail_row(dynamic raw);
+
+  @protected
+  List<Tombstone> dco_decode_list_tombstone(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -206,6 +221,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  LibraryCountRow? dco_decode_opt_box_autoadd_library_count_row(dynamic raw);
+
+  @protected
   ReadlistDetailRow? dco_decode_opt_box_autoadd_readlist_detail_row(
       dynamic raw);
 
@@ -225,6 +243,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ReadlistRow dco_decode_readlist_row(dynamic raw);
 
   @protected
+  ReconcileSummary dco_decode_reconcile_summary(dynamic raw);
+
+  @protected
   SeriesDetailRow dco_decode_series_detail_row(dynamic raw);
 
   @protected
@@ -241,6 +262,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ThumbnailRow dco_decode_thumbnail_row(dynamic raw);
+
+  @protected
+  Tombstone dco_decode_tombstone(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -305,6 +329,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  LibraryCountRow sse_decode_box_autoadd_library_count_row(
+      SseDeserializer deserializer);
+
+  @protected
   ReadlistDetailRow sse_decode_box_autoadd_readlist_detail_row(
       SseDeserializer deserializer);
 
@@ -339,6 +367,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   ContinueReadingRow sse_decode_continue_reading_row(
       SseDeserializer deserializer);
+
+  @protected
+  EntitySyncState sse_decode_entity_sync_state(SseDeserializer deserializer);
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
@@ -389,6 +420,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<EntitySyncState> sse_decode_list_entity_sync_state(
+      SseDeserializer deserializer);
+
+  @protected
   List<Library> sse_decode_list_library(SseDeserializer deserializer);
 
   @protected
@@ -411,6 +446,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<ThumbnailRow> sse_decode_list_thumbnail_row(
       SseDeserializer deserializer);
+
+  @protected
+  List<Tombstone> sse_decode_list_tombstone(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -444,6 +482,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  LibraryCountRow? sse_decode_opt_box_autoadd_library_count_row(
+      SseDeserializer deserializer);
+
+  @protected
   ReadlistDetailRow? sse_decode_opt_box_autoadd_readlist_detail_row(
       SseDeserializer deserializer);
 
@@ -467,6 +509,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ReadlistRow sse_decode_readlist_row(SseDeserializer deserializer);
 
   @protected
+  ReconcileSummary sse_decode_reconcile_summary(SseDeserializer deserializer);
+
+  @protected
   SeriesDetailRow sse_decode_series_detail_row(SseDeserializer deserializer);
 
   @protected
@@ -483,6 +528,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ThumbnailRow sse_decode_thumbnail_row(SseDeserializer deserializer);
+
+  @protected
+  Tombstone sse_decode_tombstone(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -552,6 +600,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_library_count_row(
+      LibraryCountRow self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_readlist_detail_row(
       ReadlistDetailRow self, SseSerializer serializer);
 
@@ -587,6 +639,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_continue_reading_row(
       ContinueReadingRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_entity_sync_state(
+      EntitySyncState self, SseSerializer serializer);
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
@@ -640,6 +696,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<ContinueReadingRow> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_entity_sync_state(
+      List<EntitySyncState> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_library(List<Library> self, SseSerializer serializer);
 
   @protected
@@ -665,6 +725,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_thumbnail_row(
       List<ThumbnailRow> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_tombstone(
+      List<Tombstone> self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -700,6 +764,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       PlatformInt64? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_library_count_row(
+      LibraryCountRow? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_readlist_detail_row(
       ReadlistDetailRow? self, SseSerializer serializer);
 
@@ -723,6 +791,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_readlist_row(ReadlistRow self, SseSerializer serializer);
 
   @protected
+  void sse_encode_reconcile_summary(
+      ReconcileSummary self, SseSerializer serializer);
+
+  @protected
   void sse_encode_series_detail_row(
       SeriesDetailRow self, SseSerializer serializer);
 
@@ -741,6 +813,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_thumbnail_row(ThumbnailRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_tombstone(Tombstone self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);

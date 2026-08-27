@@ -17,11 +17,13 @@ use crate::ffi::application::{
     ReadlistDetailRow, ReadlistPageResult, SeriesDetailRow,
 };
 use crate::model::server_profile::ServerProfile;
+use crate::store::prune::Tombstone;
 use crate::store::query::{BookPageResult, LibraryCountRow, SeriesPageResult};
 use crate::store::read_progress::ContinueReadingRow;
 use crate::store::series::SeriesRow;
+use crate::store::sync_state::EntitySyncState;
 use crate::store::thumbnails::ThumbnailRow;
-use crate::sync::{BootstrapSummary, FullSyncSummary};
+use crate::sync::{BootstrapSummary, FullSyncSummary, ReconcileSummary};
 
 /// BootstrapSync (API Key auth) — mirrors the first page of series.
 pub async fn bootstrap(
@@ -179,6 +181,65 @@ pub async fn full_sync(
         .map_err(|e| e.to_string())
 }
 
+/// Stage 5 Bootstrap Sync: ordered, paged, checkpointed. `resume = true`
+/// continues an interrupted run from its stored cursors.
+pub async fn bootstrap_sync(
+    db_path: String,
+    server_id: String,
+    base_url: String,
+    api_key: String,
+    resume: bool,
+) -> Result<FullSyncSummary, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.bootstrap_sync(server_id, base_url, api_key, !resume)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Stage 5 Reconcile Sync: remote id sweep → Added / Changed / Deleted →
+/// local mirror. `trigger` is one of `app_launch`, `did_become_active`,
+/// `network_recovered`, `sse_reconnected`, `manual_refresh`.
+pub async fn reconcile(
+    db_path: String,
+    server_id: String,
+    base_url: String,
+    api_key: String,
+    trigger: String,
+) -> Result<ReconcileSummary, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reconcile(server_id, base_url, api_key, trigger)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Whether this trigger should sweep now (background triggers are throttled).
+pub fn should_reconcile(
+    db_path: String,
+    server_id: String,
+    trigger: String,
+) -> Result<bool, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.should_reconcile(&server_id, &trigger)
+        .map_err(|e| e.to_string())
+}
+
+/// Per entity type sync state: entityType / lastSyncAt / syncCursor / syncStatus.
+pub fn sync_states(db_path: String, server_id: String) -> Result<Vec<EntitySyncState>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.sync_states(&server_id).map_err(|e| e.to_string())
+}
+
+/// Tombstones left by delete propagation for one entity type.
+pub fn tombstones(
+    db_path: String,
+    server_id: String,
+    entity_type: String,
+) -> Result<Vec<Tombstone>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.tombstones(&server_id, &entity_type)
+        .map_err(|e| e.to_string())
+}
+
 // MARK: - Media library queries (全部本地：SQLite，断开网络依旧可用)
 
 /// Paged series wall with search / filters / sort (本地查询).
@@ -329,6 +390,17 @@ pub fn filter_options(db_path: String, server_id: String) -> Result<FilterOption
 pub fn library_counts(db_path: String, server_id: String) -> Result<Vec<LibraryCountRow>, String> {
     let app = crate::ffi::application::App::new(db_path);
     app.library_counts(&server_id).map_err(|e| e.to_string())
+}
+
+/// One library with counts + root + availability (Library 详情).
+pub fn library_detail(
+    db_path: String,
+    server_id: String,
+    library_id: String,
+) -> Result<Option<LibraryCountRow>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.library_detail(&server_id, &library_id)
+        .map_err(|e| e.to_string())
 }
 
 // MARK: - Reading status (本地优先 + Mutation Outbox)

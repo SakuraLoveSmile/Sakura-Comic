@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'models.dart';
 import 'rust/model/server_profile.dart';
 import 'rust/store/books.dart' show BookRow;
+import 'rust/store/query.dart' show LibraryCountRow;
 import 'rust/store/series.dart';
 import 'rust/sync/bootstrap.dart';
 import 'series.dart';
@@ -29,12 +30,22 @@ abstract class LibraryRepository {
   /// (remote_id → local path). Missing covers are rendered as placeholders.
   Future<Map<String, String>> fetchCoverPaths();
 
-  /// Pulls the first Series page into SQLite and backfills covers for the
-  /// active server. Returns null when no server (or credential) exists.
-  Future<BootstrapSummary?> bootstrapActiveServer();
+  /// Bootstrap Sync for the active server: mirror the media library into
+  /// SQLite and backfill covers. `resume` continues an interrupted run from
+  /// the cursors the core stored per entity type. Returns null when there is
+  /// no server (or no credential) to talk to.
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume});
 
   /// Backfills covers for series without a usable record (缓存缺失自动补齐).
   Future<int> syncCovers();
+
+  /// Stage 5 Reconcile Sync: sweep the server for Added / Changed / Deleted
+  /// and converge SQLite on it — this is what makes SSE events optional.
+  /// Returns null when there is no server or credential to talk to.
+  Future<ReconcileReport?> reconcileActiveServer({required String trigger}) async => null;
+
+  /// Sync bookkeeping (`sync_state`) for the shelf header.
+  Future<SyncStatus> fetchSyncStatus() async => const SyncStatus();
 
   /// Offline demo: seeds fixture series + generated covers (no server).
   Future<BootstrapSummary> loadDemo();
@@ -91,6 +102,9 @@ abstract class LibraryRepository {
 
   Future<List<LibraryCount>> fetchLibraryCounts() async => const [];
 
+  /// One library with counts / root / availability (Library 详情).
+  Future<LibraryCount?> libraryDetail({required String libraryId}) async => null;
+
   Future<Map<String, String>> fetchBookCoverPaths() async => const {};
 
   Future<int> syncBookCovers({required String seriesId}) async => 0;
@@ -117,7 +131,7 @@ class StubLibraryRepository extends LibraryRepository {
   Future<Map<String, String>> fetchCoverPaths() async => const {};
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer() async => null;
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async => null;
 
   @override
   Future<int> syncCovers() async => 0;
@@ -258,23 +272,96 @@ class RustLibraryRepository extends LibraryRepository {
   }
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer() async {
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async {
     final credential = await _activeCredential();
     if (credential == null) return null;
     final (profile, apiKey) = credential;
-    final summary = await _api.fullSync(
+    final summary = await _api.bootstrapSync(
       dbPath: dbPath,
       serverId: profile.id,
       baseUrl: profile.baseUrl,
       apiKey: apiKey,
+      resume: resume,
     );
-    debugPrint('[RustCore] fullSync("${profile.id}") -> ${summary.series} series / ${summary.books} books');
+    debugPrint(
+      '[RustCore] bootstrapSync("${profile.id}" resume=$resume) -> '
+      '${summary.series} series / ${summary.books} books, '
+      'resumed ${summary.resumedSteps}, skipped ${summary.skippedSteps}',
+    );
     await syncCovers();
     return BootstrapSummary(
       serverId: profile.id,
       syncedSeries: summary.series,
       totalElements: summary.series.toInt(),
       hasMorePages: false,
+    );
+  }
+
+  @override
+  Future<ReconcileReport?> reconcileActiveServer({required String trigger}) async {
+    final credential = await _activeCredential();
+    if (credential == null) return null;
+    final (profile, apiKey) = credential;
+    if (!await _api.shouldReconcile(
+      dbPath: dbPath,
+      serverId: profile.id,
+      trigger: trigger,
+    )) {
+      debugPrint('[RustCore] reconcile($trigger) throttled');
+      return null;
+    }
+    final summary = await _api.reconcile(
+      dbPath: dbPath,
+      serverId: profile.id,
+      baseUrl: profile.baseUrl,
+      apiKey: apiKey,
+      trigger: trigger,
+    );
+    final added = (summary.seriesAdded + summary.booksAdded +
+            summary.collectionsAdded +
+            summary.readlistsAdded)
+        .toInt();
+    final changed = (summary.seriesChanged +
+            summary.booksChanged +
+            summary.collectionsChanged +
+            summary.readlistsChanged)
+        .toInt();
+    final removed = (summary.seriesRemoved +
+            summary.booksRemoved +
+            summary.collectionsRemoved +
+            summary.readlistsRemoved +
+            summary.librariesRemoved)
+        .toInt();
+    debugPrint(
+      '[RustCore] reconcile("$profile.id", $trigger) -> +$added ~$changed -$removed '
+      'clean=${summary.clean}',
+    );
+    // New series need covers; pruned ones were already dropped core-side.
+    if (added > 0 || summary.orphanedCovers.isNotEmpty) await syncCovers();
+    return ReconcileReport(
+      added: added,
+      changed: changed,
+      removed: removed,
+      clean: summary.clean,
+    );
+  }
+
+  @override
+  Future<SyncStatus> fetchSyncStatus() async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return const SyncStatus();
+    final states = await _api.syncStates(dbPath: dbPath, serverId: serverId);
+    final rollup = states.where((state) => state.entityType == 'full');
+    final resumable = states
+        .where((state) => state.syncCursor != null && state.entityType != 'full')
+        .map((state) => state.entityType)
+        .toList();
+    final row = rollup.isEmpty ? null : rollup.first;
+    return SyncStatus(
+      lastSyncAt: row?.lastSyncAt,
+      status: row?.syncStatus ?? 'idle',
+      error: row?.lastError,
+      resumableEntities: resumable,
     );
   }
 
@@ -498,10 +585,30 @@ class RustLibraryRepository extends LibraryRepository {
     final serverId = await _activeServerId();
     if (serverId == null) return const [];
     final rows = await _api.libraryCounts(dbPath: dbPath, serverId: serverId);
-    return rows
-        .map((r) => LibraryCount(remoteId: r.remoteId, name: r.name, seriesCount: r.seriesCount.toInt()))
-        .toList();
+    return rows.map(_toLibraryCount).toList();
   }
+
+  @override
+  Future<LibraryCount?> libraryDetail({required String libraryId}) async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return null;
+    final row = await _api.libraryDetail(
+      dbPath: dbPath,
+      serverId: serverId,
+      libraryId: libraryId,
+    );
+    return row == null ? null : _toLibraryCount(row);
+  }
+
+  static LibraryCount _toLibraryCount(LibraryCountRow r) => LibraryCount(
+        remoteId: r.remoteId,
+        name: r.name,
+        root: r.root,
+        unavailable: r.unavailable,
+        seriesCount: r.seriesCount.toInt(),
+        bookCount: r.bookCount.toInt(),
+        readCount: r.readCount.toInt(),
+      );
 
   @override
   Future<Map<String, String>> fetchBookCoverPaths() async {

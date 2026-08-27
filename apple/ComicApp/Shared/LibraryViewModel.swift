@@ -4,6 +4,7 @@ import KomgaStore
 import KomgaAPI
 import KomgaSync
 import KomgaReader
+import Network
 
 /// Errors surfaced by the server-management flow (banner messages).
 enum ServerConfigError: LocalizedError, Equatable {
@@ -38,6 +39,29 @@ final class LibraryViewModel: ObservableObject {
     @Published var covers: [String: Data] = [:]
     @Published var isRefreshing = false
     @Published var banner: String?
+
+    // MARK: Stage 5 — sync engine state (`sync_state`)
+
+    /// Last successful sync of the active server, for the "最近同步" surface.
+    @Published var lastSyncAt: String?
+    /// Entity types an interrupted run left a resume cursor on.
+    @Published var resumableEntities: [String] = []
+    /// Last sync error recorded by the core (the shelf keeps working without it).
+    @Published var syncError: String?
+
+    /// One-line summary of `sync_state` for the shelf header.
+    var syncStatusLabel: String {
+        if let error = syncError { return "同步中断：" + error }
+        if !resumableEntities.isEmpty {
+            return "同步未完成，将从 " + resumableEntities.joined(separator: "、") + " 续跑"
+        }
+        if let last = lastSyncAt { return "最近同步 " + last }
+        return "尚未同步"
+    }
+
+    /// Connectivity watcher: coming back online is a Reconcile trigger.
+    private let pathMonitor = NWPathMonitor()
+    private var wasOffline = false
 
     // MARK: Stage 4 — media library browsing state (全部来自 SQLite)
 
@@ -287,23 +311,125 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Sync (write-through to SQLite)
+    // MARK: - Stage 5 sync engine (Bootstrap resume + Reconcile)
 
-    /// Pull the first page of Series into SQLite, then reload the grid.
-    func bootstrap() async {
-        guard let transport else { return }
-        guard let server else { return }
+    /// Starts the connectivity watcher. Call once, after the store is open.
+    func startSyncTriggers() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            // The handler runs off the main actor: only the derived Bool crosses.
+            let offline = path.status != .satisfied
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.wasOffline && !offline {
+                    await self.reconcile(trigger: .networkRecovered)
+                }
+                self.wasOffline = offline
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "komga.reachability"))
+    }
+
+    /// Reads `sync_state` into the published fields (SQLite only).
+    func refreshSyncState() {
+        guard let server else {
+            lastSyncAt = nil
+            resumableEntities = []
+            syncError = nil
+            return
+        }
+        let states = (try? store.listEntityStates(serverID: server.id)) ?? []
+        let rollup = states.first { $0.entityType == SyncEntity.full }
+        lastSyncAt = rollup?.lastSyncAt
+        syncError = rollup?.lastError
+        resumableEntities = states
+            .filter { $0.entityType != SyncEntity.full && $0.syncCursor != nil }
+            .map { $0.entityType }
+    }
+
+    /// Cold start entry point: mirror the library the first time (resuming an
+    /// interrupted run), reconcile it on every later launch.
+    func syncLibrary(trigger: ReconcileTrigger = .appLaunch) async {
+        guard server != nil else { return }
+        if lastSyncAt == nil {
+            await bootstrapLibrary()
+        } else {
+            await reconcile(trigger: trigger)
+        }
+    }
+
+    /// Bootstrap Sync: Libraries → Series → Books → Collections → Readlists →
+    /// Progress, resuming from the cursors a previous run left behind.
+    func bootstrapLibrary(fresh: Bool = false) async {
+        guard let transport, let server else { return }
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let summary = try await BootstrapSync.run(fetcher: transport, store: store, serverID: server.id)
+            let summary = try await FullSync.run(
+                fetcher: transport,
+                store: store,
+                serverID: server.id,
+                start: fresh ? .fresh : .resume
+            )
             try loadSeries()
             await refreshAllCovers()
-            banner = "已同步 \(summary.syncedSeries) 个 Series"
+            try syncMediaState()
+            refreshSyncState()
+            var message = "已镜像 \(summary.series) Series / \(summary.books) Books"
+            if !summary.resumedSteps.isEmpty {
+                message += "（续跑 \(summary.resumedSteps.joined(separator: "、"))）"
+            }
+            banner = message
         } catch {
-            banner = "同步失败：\(error.localizedDescription)"
+            refreshSyncState()
+            banner = "同步失败（本地库仍可用）：\(error.localizedDescription)"
         }
     }
+
+    /// Reconcile Sync for one trigger. Every trigger runs the same full id
+    /// sweep, so the mirror converges even when no SSE event ever arrived.
+    func reconcile(trigger: ReconcileTrigger) async {
+        guard let transport, let server, !isRefreshing else { return }
+        do {
+            guard try ReconcileSync.shouldRun(store: store, serverID: server.id, trigger: trigger)
+            else { return } // background trigger inside the throttle window
+        } catch {
+            return
+        }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let summary = try await ReconcileSync.run(
+                fetcher: transport, store: store, serverID: server.id, trigger: trigger
+            )
+            // Delete propagation reaches the disk too: pruned covers are gone.
+            for path in summary.orphanedCovers {
+                try? cache.remove(URL(fileURLWithPath: path))
+            }
+            let changed = summary.totalMutations() > 0
+            if changed {
+                try loadSeries()
+                await refreshAllCovers()
+                try syncMediaState()
+            }
+            refreshSyncState()
+            if trigger == .manualRefresh {
+                let added = summary.seriesAdded + summary.booksAdded
+                let edited = summary.seriesChanged + summary.booksChanged
+                let removed = summary.seriesRemoved + summary.booksRemoved
+                banner = changed
+                    ? "同步完成：新增 \(added) · 更新 \(edited) · 删除 \(removed)"
+                    : "本地库已与服务器一致"
+            }
+        } catch {
+            // An unreachable server never takes the shelf down.
+            refreshSyncState()
+            if trigger == .manualRefresh {
+                banner = "同步失败（本地库仍可用）：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - Sync (write-through to SQLite)
 
     func loadSeries() throws {
         guard let server else { return }
@@ -406,23 +532,6 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// FullSync (Series → Books → Collections → Readlists → Progress),
-    /// then reload every shelf from the local store.
-    func fullSync() async {
-        guard let transport, let server else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
-        do {
-            let summary = try await FullSync.run(fetcher: transport, store: store, serverID: server.id)
-            try loadSeries()
-            await refreshAllCovers()
-            try syncMediaState()
-            banner = "已同步 \(summary.series) Series / \(summary.books) Books"
-        } catch {
-            banner = "同步失败：\(error.localizedDescription)"
-        }
-    }
-
     /// Shelf entry points: libraries, filter options, continue reading,
     /// collections, readlists — all SQLite (断网可用).
     func syncMediaState() throws {
@@ -436,6 +545,41 @@ final class LibraryViewModel: ObservableObject {
         let readlistsPage = try store.listReadlists(serverID: server.id, limit: 200, offset: 0)
         readlists = readlistsPage.items
         readlistsTotal = readlistsPage.total
+    }
+
+    /// Library 详情 row + its own paged series wall — SQLite only (断网可用).
+    func libraryDetail(id: String) throws -> LibraryCountRecord? {
+        guard let server else { return nil }
+        return try store.libraryDetail(serverID: server.id, libraryID: id)
+    }
+
+    /// A library's series page. Deliberately independent of `selectedLibraryID`
+    /// so opening a library doesn't silently rewrite the shelf filters.
+    func librarySeries(
+        id: String,
+        search: String? = nil,
+        limit: Int = 50,
+        offset: Int = 0
+    ) throws -> PagedSeries {
+        guard let server else { return PagedSeries(items: [], total: 0) }
+        return try store.querySeries(
+            serverID: server.id,
+            search: search,
+            libraryID: id,
+            status: nil,
+            tag: nil,
+            genre: nil,
+            sort: .name,
+            ascending: true,
+            limit: Int64(limit),
+            offset: Int64(offset)
+        )
+    }
+
+    /// 切换：把书架筛选范围设为某个 Library（nil = 全部）。
+    func selectLibrary(id: String?) {
+        selectedLibraryID = id
+        loadSeriesWall(reset: true)
     }
 
     /// (Re)load the series wall honoring search/filters/sort (SQLite FTS).

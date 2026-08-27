@@ -9,13 +9,16 @@ import '../model/server_profile.dart';
 import '../store.dart';
 import '../store/books.dart';
 import '../store/collections.dart';
+import '../store/prune.dart';
 import '../store/query.dart';
 import '../store/read_progress.dart';
 import '../store/readlists.dart';
 import '../store/series.dart';
+import '../store/sync_state.dart';
 import '../store/thumbnails.dart';
 import '../sync/bootstrap.dart';
 import '../sync/full.dart';
+import '../sync/reconcile.dart';
 import 'application.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -133,6 +136,59 @@ Future<FullSyncSummary> fullSync(
         required String apiKey}) =>
     RustLib.instance.api.crateFfiBridgeFullSync(
         dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+
+/// Stage 5 Bootstrap Sync: ordered, paged, checkpointed. `resume = true`
+/// continues an interrupted run from its stored cursors.
+Future<FullSyncSummary> bootstrapSync(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey,
+        required bool resume}) =>
+    RustLib.instance.api.crateFfiBridgeBootstrapSync(
+        dbPath: dbPath,
+        serverId: serverId,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        resume: resume);
+
+/// Stage 5 Reconcile Sync: remote id sweep → Added / Changed / Deleted →
+/// local mirror. `trigger` is one of `app_launch`, `did_become_active`,
+/// `network_recovered`, `sse_reconnected`, `manual_refresh`.
+Future<ReconcileSummary> reconcile(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey,
+        required String trigger}) =>
+    RustLib.instance.api.crateFfiBridgeReconcile(
+        dbPath: dbPath,
+        serverId: serverId,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        trigger: trigger);
+
+/// Whether this trigger should sweep now (background triggers are throttled).
+Future<bool> shouldReconcile(
+        {required String dbPath,
+        required String serverId,
+        required String trigger}) =>
+    RustLib.instance.api.crateFfiBridgeShouldReconcile(
+        dbPath: dbPath, serverId: serverId, trigger: trigger);
+
+/// Per entity type sync state: entityType / lastSyncAt / syncCursor / syncStatus.
+Future<List<EntitySyncState>> syncStates(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeSyncStates(dbPath: dbPath, serverId: serverId);
+
+/// Tombstones left by delete propagation for one entity type.
+Future<List<Tombstone>> tombstones(
+        {required String dbPath,
+        required String serverId,
+        required String entityType}) =>
+    RustLib.instance.api.crateFfiBridgeTombstones(
+        dbPath: dbPath, serverId: serverId, entityType: entityType);
 
 /// Paged series wall with search / filters / sort (本地查询).
 Future<SeriesPageResult> querySeries(
@@ -277,6 +333,14 @@ Future<List<LibraryCountRow>> libraryCounts(
         {required String dbPath, required String serverId}) =>
     RustLib.instance.api
         .crateFfiBridgeLibraryCounts(dbPath: dbPath, serverId: serverId);
+
+/// One library with counts + root + availability (Library 详情).
+Future<LibraryCountRow?> libraryDetail(
+        {required String dbPath,
+        required String serverId,
+        required String libraryId}) =>
+    RustLib.instance.api.crateFfiBridgeLibraryDetail(
+        dbPath: dbPath, serverId: serverId, libraryId: libraryId);
 
 /// Local page update + outbox row (READ_PROGRESS).
 Future<void> setReadProgress(

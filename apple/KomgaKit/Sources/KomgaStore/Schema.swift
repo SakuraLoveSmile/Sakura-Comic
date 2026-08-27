@@ -4,7 +4,7 @@ import GRDB
 /// and the Rust side (`android/komga_core/src/store/schema.rs`).
 public enum Schema {
     /// Bump when migrations are added; stored in `PRAGMA user_version`.
-    public static let currentVersion: Int64 = 4
+    public static let currentVersion: Int64 = 6
 
     public static let createStatements: [String] = [
         """
@@ -25,11 +25,15 @@ public enum Schema {
           value TEXT NOT NULL
         )
         """,
+        // v5: root + unavailable so the Library list/detail screens have real
+        // metadata to render from SQLite.
         """
         CREATE TABLE IF NOT EXISTS libraries (
           server_id TEXT NOT NULL,
           remote_id TEXT NOT NULL,
           name TEXT NOT NULL,
+          root TEXT,
+          unavailable INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (server_id, remote_id)
         )
         """,
@@ -140,13 +144,35 @@ public enum Schema {
           PRIMARY KEY (server_id, book_id)
         )
         """,
+        // v6: one row per (server, entity type). `sync_cursor` is the resume
+        // point of an interrupted sweep and `sync_status` tells the UI whether a
+        // step is idle / running / failed, so Bootstrap can pick up where it
+        // stopped instead of starting over. The `full` entity type carries the
+        // server-level rollup (`last_full_sync` / `last_successful_sync`).
         """
         CREATE TABLE IF NOT EXISTS sync_state (
-          server_id TEXT PRIMARY KEY,
+          server_id TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          last_sync_at TEXT,
+          sync_cursor TEXT,
+          sync_status TEXT NOT NULL DEFAULT 'idle',
+          last_error TEXT,
           last_full_sync TEXT,
           last_successful_sync TEXT,
-          last_error TEXT,
-          sync_status TEXT NOT NULL DEFAULT 'idle'
+          PRIMARY KEY (server_id, entity_type)
+        )
+        """,
+        // v6: remote deletions discovered by Reconcile. The mirrored row itself
+        // is removed (cascade); the tombstone records that it is gone, so a
+        // late-arriving event or a stale Outbox mutation can be recognised.
+        """
+        CREATE TABLE IF NOT EXISTS deleted_entities (
+          server_id TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          remote_id TEXT NOT NULL,
+          deleted_at TEXT NOT NULL,
+          cause TEXT NOT NULL DEFAULT 'reconcile',
+          PRIMARY KEY (server_id, entity_type, remote_id)
         )
         """,
         """
@@ -308,15 +334,23 @@ public enum Schema {
         "ALTER TABLE book_metadata ADD COLUMN release_date TEXT",
     ]
 
+    /// v4 → v5: libraries gained their detail columns
+    /// (mirror of Rust `V5_ALTER_STATEMENTS`).
+    public static let v5AlterStatements: [String] = [
+        "ALTER TABLE libraries ADD COLUMN root TEXT",
+        "ALTER TABLE libraries ADD COLUMN unavailable INTEGER NOT NULL DEFAULT 0",
+    ]
+
     /// Applies the full migration set on a connection (mirror of the Rust
-    /// `schema::migrate`): FTS shape repair → CREATE statements → guarded
-    /// v4 ALTER column additions → `PRAGMA user_version`.
+    /// `schema::migrate`): FTS shape repair → sync_state rebuild → CREATE
+    /// statements → guarded v4/v5 ALTER column additions → `PRAGMA user_version`.
     public static func migrate(_ db: GRDB.Database) throws {
         try repairFTSShape(db)
+        try migrateSyncStateShape(db)
         for statement in createStatements {
             try db.execute(sql: statement)
         }
-        for statement in v4AlterStatements {
+        for statement in v4AlterStatements + v5AlterStatements {
             // "ALTER TABLE t ADD COLUMN column ..." → skip when present.
             guard let rest = statement.split(separator: " ADD COLUMN ").first,
                   let column = statement.split(separator: " ADD COLUMN ").dropFirst().first?
@@ -348,5 +382,39 @@ public enum Schema {
                 try db.execute(sql: "DROP TABLE IF EXISTS \(table)")
             }
         }
+    }
+
+    /// v5 → v6: `sync_state` gains `entity_type` as part of its primary key, so
+    /// an existing table has to be rebuilt (SQLite cannot alter a PK). The old
+    /// single row per server becomes the `full` rollup row (mirror of Rust
+    /// `migrate_sync_state_shape`).
+    private static func migrateSyncStateShape(_ db: GRDB.Database) throws {
+        let ddl = try String.fetchOne(
+            db,
+            sql: "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'"
+        )
+        guard let ddl else { return } // never existed → CREATE builds the v6 shape
+        if ddl.contains("entity_type") { return }
+        try db.execute(sql: """
+        CREATE TABLE sync_state_v6 (
+          server_id TEXT NOT NULL,
+          entity_type TEXT NOT NULL,
+          last_sync_at TEXT,
+          sync_cursor TEXT,
+          sync_status TEXT NOT NULL DEFAULT 'idle',
+          last_error TEXT,
+          last_full_sync TEXT,
+          last_successful_sync TEXT,
+          PRIMARY KEY (server_id, entity_type)
+        );
+        INSERT INTO sync_state_v6 (server_id, entity_type, last_sync_at, sync_status,
+                                   last_error, last_full_sync, last_successful_sync)
+          SELECT server_id, 'full',
+                 COALESCE(last_successful_sync, last_full_sync),
+                 sync_status, last_error, last_full_sync, last_successful_sync
+          FROM sync_state;
+        DROP TABLE sync_state;
+        ALTER TABLE sync_state_v6 RENAME TO sync_state;
+        """)
     }
 }

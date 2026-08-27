@@ -6,18 +6,47 @@
   app_state 为 `(key)` 单值状态表
 - Apple：GRDB；Android(Rust)：rusqlite（Flutter 不直接访问数据库）
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
-- 当前 Schema 版本：**v4**（v2 新增 `app_state`；v3 新增 `thumbnails`；
+- 当前 Schema 版本：**v6**（v2 新增 `app_state`；v3 新增 `thumbnails`；
   v4 新增归一化筛选表 / 成员关系表 / 完整元数据列 / 服务器作用域 FTS；
+  v5 为 `libraries` 补齐详情列；v6 让 `sync_state` 按实体类型记账并新增墓碑表；
   两端用幂等 `CREATE TABLE IF NOT EXISTS` + 受保护的 `ALTER TABLE ADD COLUMN`
   应用迁移并写 `PRAGMA user_version`）
 
 ## 主要表
 
 servers / app_state / libraries / series / books / collections / readlists /
-read_progress / series_metadata / book_metadata / sync_state /
-pending_mutations / downloads / download_pages / **thumbnails** / cache_entries /
+read_progress / series_metadata / book_metadata / **sync_state (v6 复合主键)** /
+**deleted_entities**（v6 墓碑）/ pending_mutations / downloads / download_pages /
+**thumbnails** / cache_entries /
 **series_genres / series_tags / series_authors / book_tags / book_authors /
 collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服务器作用域）
+
+## v6 变更（同步引擎）
+
+- `sync_state` 主键从 `server_id` 改为 `(server_id, entity_type)`，新增
+  `entity_type` / `last_sync_at` / `sync_cursor`；一行一个实体类型
+  （`libraries` / `series` / `books` / `collections` / `readlists` /
+  `read_progress`），另有一行 `full` 承载服务器级汇总
+  （`last_full_sync` / `last_successful_sync`）。`sync_cursor` 是被中断扫描的
+  续跑点：`page=N`（按页扫描）或 `series=<id>|page=<n>`（Books 逐 series 扫描）；
+  `sync_status ∈ idle | syncing | error`
+- v5 老库迁移：检测到旧表形状（无 `entity_type`）时重建表，把原单行搬进
+  `entity_type = 'full'`，时间戳原样保留（`schema.rs::migrate_sync_state_shape`
+  与 `Schema.swift` 等价实现）
+- 新增 `deleted_entities(server_id, entity_type, remote_id, deleted_at, cause)`
+  墓碑表：Reconcile 发现远端已删除时写入，`cause ∈ reconcile | cascade | event`；
+  镜像行本身级联删除（`store/prune.rs`），封面记录与 Outbox 条目一并失效
+- `delete_server_mirror` 覆盖墓碑表，删服务器时不留残余
+
+## v5 变更
+
+- `libraries` 增加 `root`（扫描根路径）与 `unavailable`（服务端可用性标记）——
+  两端的 Library DTO 本来就带这两个字段，此前在入库时被丢弃，
+  导致 Library 详情页无 Metadata 可渲染
+- Library 列表 / 详情统一由一条聚合 SQL 提供（相关子查询计数，避免 join 行数放大）：
+  `series_count` / `book_count`（books 经 series 归属到库）/ `read_count`
+  （`read_progress.completed = 1`）—— Rust `store/query.rs::library_counts` +
+  `library_detail`，Swift `KomgaStore+MediaLibrary.libraryCounts` + `libraryDetail`
 
 ## v4 变更
 
@@ -41,8 +70,8 @@ collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服
 ## DDL
 
 实际 DDL 见实现（两端逐字镜像）：
-- Rust：`android/komga_core/src/store/schema.rs`（CREATE_STATEMENTS + V4_ALTER_STATEMENTS + FTS 形状迁移）
-- Swift：`apple/KomgaKit/Sources/KomgaStore/Schema.swift`
+- Rust：`android/komga_core/src/store/schema.rs`（CREATE_STATEMENTS + V4/V5_ALTER_STATEMENTS + FTS 形状迁移）
+- Swift：`apple/KomgaKit/Sources/KomgaStore/Schema.swift`（createStatements + v4/v5AlterStatements）
 
 搜索域：标题 / Sort Title / 作者 / 出版社 / 标签 / 简介（FTS5，前缀查询，
 用户输入被转义为 `"term"* AND ...`）。

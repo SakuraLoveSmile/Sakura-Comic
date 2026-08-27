@@ -41,7 +41,7 @@ Comic/
 | --- | --- |
 | Phase 0 | Architecture Vertical Slice（真实服务器 → SQLite → 封面墙） |
 | Phase 1 | Media Library（封面墙 / 搜索 / Home / Series Detail） |
-| Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理） |
+| Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理）— Stage 5 已落地 Bootstrap + Reconcile |
 | Phase 3 | Reader（单页 / 双页 / Webtoon） |
 | Phase 4 | Offline（缓存 / 下载 / 离线浏览） |
 | Phase 5 | Platform Polish（macOS / tvOS / visionOS） |
@@ -130,7 +130,9 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
 客户端扩展为可离线使用的完整 Komga 媒体库浏览器。核心原则不变：
 **网络负责同步，本地数据库负责展示** — 搜索、筛选、排序、分页全部基于 SQLite（FTS5 + 归一化表）。
 
-- **Library**：列表（含 Series 计数）/ 详情 / 切换（`library_counts` + 图书馆筛选）
+- **Library**：列表页（每库本地 series/book/已读 计数 + 根路径 + 可用性）/ 详情页
+  （统计 + 阅读进度 + 本库内 FTS 搜索 + 该库封面墙分页）/ 切换（书架 chips、
+  「设为书架筛选」、服务器切换入口），全部读 SQLite（`library_counts` / `library_detail`）
 - **Series**：封面墙 / 详情（Metadata、Tags、Genres、Status、作者、出版社、阅读方向、
   所属合集）/ 阅读计数器
 - **Books**：列表（封面缩略图 `variant='book'`、阅读状态）/ 详情 / 阅读状态本地变更
@@ -154,6 +156,42 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   bash scripts/e2e_stage4.sh
   ```
   勾选状态与实现位置见 [docs/stage4-checklist.md](docs/stage4-checklist.md)。
+
+## Stage 5 — 同步引擎
+
+把「一次性镜像」升级为「长期可靠的同步系统」。本阶段落地 **Bootstrap Sync** 与
+**Reconcile Sync**，目标是：**即使 SSE 完全失效，本地数据库仍能依靠 Reconcile 最终恢复到正确状态。**
+
+- **Bootstrap Sync**（`sync/full.rs` ↔ `KomgaSync/FullSync.swift`）：按契约顺序
+  Libraries → Series → Books → Collections → Readlists → Read Progress；每页一个事务，
+  并在同一写入路径记录续跑游标（`page=N` / `series=<id>|page=<n>`）。中断后重启从游标续跑，
+  已完成步骤直接跳过；失败只标 `error` 并保留游标，已镜像数据照常可浏览
+- **Sync State**（Schema v6）：`sync_state` 主键改为 `(server_id, entity_type)`，
+  每类实体记录 `lastSyncAt` / `syncCursor` / `syncStatus`；`full` 行承载服务器级
+  `lastFullSync` / `lastSuccessfulSync` 供 UI 显示「最近同步」
+- **Reconcile Sync**（`sync/reconcile.rs` ↔ `KomgaSync/ReconcileSync.swift`）：
+  App 启动 / 回前台 / 网络恢复 / SSE 重连 / 手动刷新五种触发走同一条全量 id 扫描路径
+  （前两种受 60s 节流）→ upsert Added/Changed → **扫描完整后**才 prune Deleted。
+  半途失败最多推迟一个删除，绝不删服务器还拥有的数据
+- **Deleted 传播**（`store/prune.rs`）：Series / Book / Collection / Readlist 各自的级联
+  范围明确，含封面记录 + 磁盘文件 + FTS + Outbox 条目；删除写入墓碑表
+  `deleted_entities`（`cause ∈ reconcile | cascade | event`），同一 id 重现时清除
+- **双端共享验收**：`specs/contracts/fixtures/sync/*.json` 脚本化 Komga 侧历史
+  （新建 / 修改 / 删除 Series、新增 Book、改 Metadata、离线后重连、同步中途失败恢复），
+  每步比对「本地 SQLite == 服务器快照」+ 墓碑 + `sync_state` + 请求次数；
+  两个场景都标注 `"sse": "disabled"`
+- **验收**：
+  ```bash
+  bash scripts/e2e_stage5.sh          # 场景重放（无需网络）+ 可选真实服务器链路
+  bash scripts/verify.sh
+  ```
+  真实服务器链路（Bootstrap → Reconcile → 逐 series 校验镜像 == 服务器 → 再扫一次 clean）：
+  ```bash
+  export KOMGA_BASE_URL=http://192.168.0.69:25600
+  export KOMGA_API_KEY=your-api-key
+  bash scripts/e2e_stage5.sh
+  ```
+  勾选状态与实现位置见 [docs/stage5-checklist.md](docs/stage5-checklist.md)。
 
 ## 文档入口
 
