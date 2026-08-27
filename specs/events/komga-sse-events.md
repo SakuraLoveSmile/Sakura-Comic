@@ -1,6 +1,9 @@
 # Komga SSE 事件契约
 
-端点：`/sse/v1/events`
+端点：`/sse/v1/events`（**未经验证**：Komga 1.26.3 从你自己服务器导出的 OpenAPI
+文档里没有任何 `/sse*` 路由 —— SpringDoc 通常会省略 `text/event-stream` 端点，所以
+这既可能是「文档不导出」也可能是「路径不对」。接入 SSE 之前必须先用真实服务器实测确认，
+不要按本文件照抄。）
 
 ## 事件类型
 

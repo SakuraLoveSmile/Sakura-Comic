@@ -17,7 +17,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 bash scripts/e2e_stage5.sh        # 场景 16/16 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
 KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 112 / Swift 99（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 116 / Swift 99（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -177,6 +177,23 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 - **删除传播落盘**：Reconcile 摘要携带真实封面路径（`Pruned.coverPaths` 两端一致），
   Apple 侧 `LibraryViewModel.reconcile` 逐个 `cache.remove(...)`，Android 侧由
   facade `remove_cover_files` 完成
+
+## 从你自己服务器的 OpenAPI 导出里查出来的两件事
+
+`specs/openapi/` 是 Komga 1.26.3 从 `http://192.168.0.69:25600` 导出的文档，属于
+可离线核对的事实。据此新增了一道 API 一致性门禁（`api/openapi.rs`，4 条测试，
+变异校验过：改坏一个 URL 构造器就报错）：
+
+1. **同步引擎踩在两个已废弃端点上** —— `GET /api/v1/series` 与
+   `GET /api/v1/series/{id}/books` 在 1.26.3 标记 deprecated，Komga 的策略是
+   「下一个大版本移除」。未废弃的后继是 `POST /api/v1/series/list` 与
+   `POST /api/v1/books/list`（带搜索 body）。换端点是传输层改动，必须在真实服务器上
+   验证，所以本阶段不动，只把它钉成显式清单：将来任何新调用到废弃端点的代码都会让
+   测试失败。
+2. **`/sse/v1/events` 在文档里根本不存在**（整个 spec 没有任何 `/sse*` 路由）。
+   这大概率是 SpringDoc 不导出 `text/event-stream`，但也可能是路径不对 ——
+   已在 `specs/events/komga-sse-events.md` 标注「未经验证」，接入 SSE 之前必须实测。
+   这不影响本阶段的完成条件：那正是「不靠 SSE 也能收敛」。
 
 ## 已知边界
 

@@ -8,6 +8,7 @@ pub mod book;
 pub mod collection;
 pub mod contract;
 pub mod error;
+pub mod openapi;
 pub mod readlist;
 pub mod series;
 pub mod server;
