@@ -48,6 +48,19 @@ Komga 没有变更日志，也没有「已删除 id」接口，因此对账的�
 `lastModified`）→ 扫描完成后，把服务器不再报告的本地 id 删掉（Deleted →
 级联 + 墓碑）。
 
+**只写真正变化的行。** 扫描仍覆盖全量 id（删除判定需要完整集合），但写入是增量的：
+只有「本地没有这个 id」或「`lastModified` 变了」才 upsert。此外还要比较三类
+**时间戳不动、内容却会变**的字段，否则会静默漏更新：
+
+| 实体 | 额外比较 | 为什么 |
+| --- | --- | --- |
+| Book | `read_progress` 的 `(page, completed, server_updated_at)` | 远端阅读进度变化不推进 book 的 `lastModified` |
+| Series | 镜像里的 `booksCount` 与已读/未读/进行中计数 | 这些是派生计数，不推进 `series.lastModified` |
+| Collection / Readlist | `collection_series` / `readlist_books` 成员（书单按顺序比） | 改成员未必改 `lastModifiedDate` |
+
+这条不是推出来的，是被测出来的：只做时间戳比较时，共享场景契约里
+「col-1 换了成员但没换时间戳」那一步立刻失败。
+
 安全规则：**只有扫描跑到 `last = true` 之后才允许 prune。** 半途失败永远不删数据，
 一次失败的同步最多把某个删除推迟一轮。从中断处续跑时，已提交页的 id 用本地行播种进
 seen 集合（偏差方向同样是「宁可少删」）。
