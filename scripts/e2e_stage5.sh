@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Stage 5 acceptance — the sync engine converges SQLite on Komga without SSE.
 #
-#   1/4 scenario replay (specs/contracts/fixtures/sync, no network at all):
+#   1/4 scenario replay (specs/contracts/fixtures/sync, no network at all) +
+#       a scale sweep, so "the mirror is correct for a big library" is checked
+#       on every run rather than assumed:
 #       bootstrap → add / change / delete → reconcile → mirror == server,
 #       interrupted runs resume from their cursors, an offline sweep loses
 #       nothing and heals itself when the network returns.
@@ -34,15 +36,20 @@ CORE="$ROOT/android/komga_core"
 echo "== 1/4 Sync scenario replay (shared contract fixtures, SSE disabled) =="
 (cd "$CORE" && "${SMOKE[@]}" --scenario)
 
+echo "== 1b/4 Scale sweep (300 series / 6000 books): correctness of a big mirror =="
+(cd "$CORE" && "${SMOKE[@]}" --scale 300 20)
+
 echo "== 2/4 Real HTTP over loopback: KomgaClient against the fixture server =="
 WORK="$(mktemp -d)"
-trap 'kill "\${SERVER_PID:-}" 2>/dev/null || true; wait "\${SERVER_PID:-}" 2>/dev/null || true; rm -rf "\$WORK"' EXIT
+# Kill the server itself, not a `cargo run` wrapper: if only the wrapper dies,
+# the server it spawned keeps listening forever.
+trap 'kill "${SERVER_PID:-}" 2>/dev/null || true; wait "${SERVER_PID:-}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
 SCENARIO="$ROOT/specs/contracts/fixtures/sync/scenario-reconcile.json"
 echo s0 > "$WORK/snapshot"
-(cd "$CORE" && cargo run --quiet --bin komga_fixture_server -- \
+(cd "$CORE" && cargo build --quiet --bin komga_fixture_server)
+"$CORE/target/debug/komga_fixture_server" \
   --scenario "$SCENARIO" --snapshot-file "$WORK/snapshot" \
-  --expect-key fixture-key --port 0 \
-  > "$WORK/server.out" 2>&1) &
+  --expect-key fixture-key --port 0 > "$WORK/server.out" 2>&1 &
 SERVER_PID=$!
 
 PORT=""

@@ -347,6 +347,59 @@ mod tests {
         assert_eq!(hits, 2);
     }
 
+    /// docs/database-schema.md lists 事务回滚 as something the schema must be
+    /// verified against, and the sync engine writes a page per transaction, so
+    /// a page that fails halfway must leave no trace behind — a half-mirrored
+    /// page would look like "the server has this book" to the delete sweep.
+    #[test]
+    fn a_failed_page_write_rolls_back_the_whole_page() {
+        use crate::store::open_in_memory;
+        use crate::store::sync_state;
+
+        let conn = open_in_memory().unwrap();
+        // First book writes cleanly (no tags), the second one hits the missing
+        // table — after the first book's rows are already in the transaction.
+        let mut first = sample_book("book-1", "series-1", 1);
+        if let Some(metadata) = first.metadata.as_mut() {
+            metadata.tags.clear();
+        }
+        let second = sample_book("book-2", "series-1", 2);
+        conn.execute("DROP TABLE book_tags", []).unwrap();
+
+        assert!(
+            save_books_batch(&conn, "srv", &[first, second]).is_err(),
+            "the batch must surface the write failure"
+        );
+        for table in ["books", "book_metadata", "book_authors"] {
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE server_id = ?1"),
+                    rusqlite::params!["srv"],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "{table} must not keep a partial page");
+        }
+        let fts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM book_fts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fts, 0, "the search index is part of the same transaction");
+        let progress: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM read_progress WHERE server_id = ?1",
+                rusqlite::params!["srv"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(progress, 0, "embedded read progress rolls back too");
+
+        // And the page cursor is untouched, so the next run re-reads this page.
+        assert_eq!(
+            sync_state::resume_cursor(&conn, "srv", sync_state::ENTITY_BOOKS).unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn upsert_refreshes_children_and_read_progress() {
         let conn = open_in_memory().unwrap();
