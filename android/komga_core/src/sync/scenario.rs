@@ -93,6 +93,9 @@ pub struct Expect {
     /// entity types that must be left in `error` with their cursor intact.
     #[serde(default)]
     pub failed_entities: Vec<String>,
+    /// entity type → the exact resume cursor the step must leave behind.
+    #[serde(default)]
+    pub cursors: BTreeMap<String, String>,
     /// The mirror must equal this snapshot (defaults to the step's snapshot).
     pub mirror: Option<String>,
     /// Reconcile must report "nothing changed".
@@ -862,6 +865,17 @@ fn check_sync_state(
         let got = outcome.tallies.get(key).copied().unwrap_or(usize::MAX);
         if got != *want {
             problems.push(format!("tally {key}: got {got}, want {want}"));
+        }
+    }
+    for (entity, want_cursor) in &expect.cursors {
+        let got = sync_state::get_entity_state(&conn, server_id, entity)
+            .ok()
+            .flatten()
+            .and_then(|state| state.sync_cursor);
+        if got.as_deref() != Some(want_cursor.as_str()) {
+            problems.push(format!(
+                "sync_cursor[{entity}]: got {got:?}, want {want_cursor:?}"
+            ));
         }
     }
     for (entity, ids) in &expect.tombstoned {

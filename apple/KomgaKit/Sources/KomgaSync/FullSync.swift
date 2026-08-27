@@ -276,8 +276,11 @@ public enum FullSync {
         return try await runStep(store: store, serverID: serverID, entity: SyncEntity.books) {
             var index = 0
             if let resume {
-                // Skip the series a previous run already mirrored.
-                while index < seriesIDs.count && seriesIDs[index] <= resume.seriesID {
+                // Skip the series a previous run finished. The cursor names the
+                // series that was still in progress, so that one is re-entered
+                // at `resume.page` below — stepping past it would silently drop
+                // the rest of its pages.
+                while index < seriesIDs.count && seriesIDs[index] < resume.seriesID {
                     index += 1
                 }
             }

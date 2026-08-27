@@ -406,6 +406,32 @@ interrupt_scenario = {
             },
         },
         {
+            # Mid-series interruption: the cursor names the series that was
+            # still paging, which is the resume path a "skip finished series"
+            # loop can walk straight past.
+            "label": "a fresh mirror dies inside the books sweep, mid-series",
+            "action": "bootstrap_fresh",
+            "snapshot": "s3",
+            "fault": {"kind": "network", "entity": "books", "afterPages": 3},
+            "expectSuccess": False,
+            "expect": {
+                "failedEntities": ["books"],
+                "cursors": {"books": "series=bulk-0-1|page=1"},
+                "requests": {"series": 3, "books": 3, "collections": 0},
+            },
+        },
+        {
+            "label": "relaunch resumes the interrupted series at its stored page and mirrors the rest",
+            "action": "bootstrap",
+            "snapshot": "s3",
+            "expect": {
+                "mirror": "s3",
+                "resumedSteps": ["books"],
+                "skippedSteps": ["libraries", "series"],
+                "requests": {"libraries": 0, "series": 0, "books": 9, "collections": 2, "readlists": 1, "read_progress": 1},
+            },
+        },
+        {
             "label": "the library is browsable offline: a fully failing transport loses nothing",
             "action": "reconcile",
             "snapshot": "s3",

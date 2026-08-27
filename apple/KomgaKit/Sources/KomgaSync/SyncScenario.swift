@@ -78,6 +78,8 @@ public struct Expect: Decodable, Sendable {
     public var requests: [String: Int] = [:]
     /// entity types that must be left in `error` with their cursor intact.
     public var failedEntities: [String] = []
+    /// entity type → the exact resume cursor the step must leave behind.
+    public var cursors: [String: String] = [:]
     /// The mirror must equal this snapshot (defaults to the step's snapshot).
     public var mirror: String?
     /// Reconcile must report "nothing changed".
@@ -89,7 +91,7 @@ public struct Expect: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case tombstoned, resumedSteps, skippedSteps, requests, failedEntities
-        case mirror, clean, tallies, rollupError
+        case mirror, clean, tallies, rollupError, cursors
     }
 
     /// A step that only asserts snapshot equality.
@@ -106,6 +108,7 @@ public struct Expect: Decodable, Sendable {
         clean = container.decoded(Bool?.self, as: .clean, fallback: nil)
         tallies = container.decoded([String: Int].self, as: .tallies, fallback: [:])
         rollupError = container.decoded(Bool?.self, as: .rollupError, fallback: nil)
+        cursors = container.decoded([String: String].self, as: .cursors, fallback: [:])
     }
 }
 
@@ -610,6 +613,13 @@ func checkSyncState(
         // nothing partial, so only the paged sweeps must keep a cursor.
         if entity != "libraries" && state.syncCursor == nil {
             problems.append("\(entity): error left no resume cursor")
+        }
+    }
+    for (entity, wantCursor) in expect.cursors {
+        let got = try? store.resumeCursor(serverID: serverID, entityType: entity)
+        if got != wantCursor {
+            let want = wantCursor
+            problems.append("sync_cursor[\(entity)]: got \(String(describing: got)), want \(want)")
         }
     }
     if let want = expect.rollupError {

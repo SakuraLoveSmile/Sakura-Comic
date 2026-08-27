@@ -253,8 +253,11 @@ async fn sync_books(
     run_step(db_path, server_id, sync_state::ENTITY_BOOKS, async {
         let mut index = 0usize;
         if let Some((resume_series, _)) = &resume {
-            // Skip the series a previous run already mirrored.
-            while index < series_ids.len() && &series_ids[index] <= resume_series {
+            // Skip the series a previous run finished. The cursor names the
+            // series that was still in progress, so that one is re-entered at
+            // `resume_page` below — stepping past it would silently drop the
+            // rest of its pages.
+            while index < series_ids.len() && &series_ids[index] < resume_series {
                 index += 1;
             }
         }
