@@ -16,7 +16,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ```bash
 bash scripts/e2e_stage5.sh        # 4 步：场景重放 14/14 → 真实 HTTP 回环 → 真实服务器（需 Key）→ Swift 同契约
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 110 / Swift 97（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 111 / Swift 98（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -147,9 +147,12 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 
 ## 覆盖测试
 
-- **Rust（110 通过）**：`sync::scenario`（两个共享场景 14 步全绿）、`sync::full`（镜像完整性 /
+- **Rust（111 通过）**：`sync::scenario`（两个共享场景 14 步全绿）、`sync::full`（镜像完整性 /
   fresh 幂等 / 已完成步骤不再重镜）、
   `store::read_progress`（离线进度保护 + 共享 fixture 契约）、
+  `store::books::a_failed_page_write_rolls_back_the_whole_page`（一页一个事务：
+  中途失败不留半页，游标也不动；Swift 侧 `StoreRollbackTests` 同断言）
+  —— 补上 docs/database-schema.md 里「需要验证：事务回滚」这一项，两端各一条。
   `sync::reconcile`（节流：后台触发在 60s 窗口内不扫、显式触发永远扫、时间戳缺失或
   不可解析时宁可重扫；五种触发名双向映射）、`store::sync_state`（按实体独立、
   失败保留游标、多服务器隔离）、`store::prune`（级联 / 作用域内 book prune / 墓碑读写）、
@@ -157,7 +160,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 - **Flutter（26 通过，含新增 8 项）**：`test/sync_triggers_test.dart`（冷启动分叉
   Bootstrap/Reconcile、回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、
   对账失败仍可用、失败后按 `network_recovered` 重试并在成功时停止、重试次数有上界）
-- **Swift（97 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
+- **Swift（98 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
   `PruneStoreTests`、`ReadProgressSyncTests`（离线进度保护，含直接读共享 fixture 的一条）、
   `ScaleSyncTests`（300×20 规模镜像 + 幂等对账）、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）
