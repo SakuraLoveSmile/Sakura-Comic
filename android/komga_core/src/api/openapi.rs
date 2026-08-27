@@ -92,118 +92,6 @@ pub fn schema_properties(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The properties a client struct decodes as **mandatory** (no `Option`, no
-/// `#[serde(default)]`). If Komga ever makes one of these absent or nullable,
-/// decoding fails and the sweep dies halfway through — so the server's own
-/// document must keep saying `required` and non-nullable.
-const MANDATORY_FIELDS: &[(&str, &[&str])] = &[
-    ("SeriesDto", &["id", "libraryId", "name"]),
-    ("SeriesMetadataDto", &["title"]),
-    ("BookDto", &["id", "seriesId", "name"]),
-    ("BookMetadataDto", &["title"]),
-    ("CollectionDto", &["id", "name"]),
-    ("ReadListDto", &["id", "name"]),
-    ("LibraryDto", &["id", "name", "root"]),
-];
-
-/// Every property the client reads from each schema, mandatory or optional.
-/// Anything here that the server does not document would silently decode to
-/// `None`/default forever, so the mismatch has to be a deliberate exception.
-const DECODED_FIELDS: &[(&str, &[&str])] = &[
-    (
-        "SeriesDto",
-        &[
-            "id",
-            "libraryId",
-            "name",
-            "created",
-            "lastModified",
-            "booksCount",
-            "booksReadCount",
-            "booksUnreadCount",
-            "booksInProgressCount",
-            "booksMetadata",
-            "metadata",
-        ],
-    ),
-    (
-        "SeriesMetadataDto",
-        &[
-            "title",
-            "status",
-            "summary",
-            "publisher",
-            "genres",
-            "tags",
-            "readingDirection",
-            "language",
-            "ageRating",
-            // authors is deliberately NOT here: see
-            // `series_authors_come_from_the_aggregation`.
-        ],
-    ),
-    (
-        "BookDto",
-        &[
-            "id",
-            "seriesId",
-            "seriesTitle",
-            "name",
-            "number",
-            "oneshot",
-            "created",
-            "lastModified",
-            "sizeBytes",
-            "media",
-            "metadata",
-            "readProgress",
-        ],
-    ),
-    ("MediaDto", &["mediaType", "pagesCount"]),
-    (
-        "BookMetadataDto",
-        &[
-            "title",
-            "number",
-            "numberSort",
-            "summary",
-            "isbn",
-            "releaseDate",
-            "authors",
-            "tags",
-        ],
-    ),
-    ("ReadProgressDto", &["page", "completed", "lastModified"]),
-    (
-        "CollectionDto",
-        &[
-            "id",
-            "name",
-            "ordered",
-            "filtered",
-            "seriesIds",
-            "createdDate",
-            "lastModifiedDate",
-        ],
-    ),
-    (
-        "ReadListDto",
-        &[
-            "id",
-            "name",
-            "summary",
-            "ordered",
-            "filtered",
-            "bookIds",
-            "createdDate",
-            "lastModifiedDate",
-        ],
-    ),
-    ("LibraryDto", &["id", "name", "root", "unavailable"]),
-    ("BookMetadataAggregationDto", &["authors", "tags"]),
-    ("AuthorDto", &["name", "role"]),
-];
-
 /// Is this property documented as non-nullable by the server?
 pub fn field_is_nullable(schema: &str, field: &str) -> Option<bool> {
     let property = spec()["components"]["schemas"]
@@ -239,6 +127,118 @@ pub fn schema_has_field(schema: &str, field: &str) -> bool {
 #[cfg(test)]
 mod decode_tests {
     use super::*;
+
+    /// The properties a client struct decodes as **mandatory** (no `Option`, no
+    /// `#[serde(default)]`). If Komga ever makes one of these absent or nullable,
+    /// decoding fails and the sweep dies halfway through — so the server's own
+    /// document must keep saying `required` and non-nullable.
+    const MANDATORY_FIELDS: &[(&str, &[&str])] = &[
+        ("SeriesDto", &["id", "libraryId", "name"]),
+        ("SeriesMetadataDto", &["title"]),
+        ("BookDto", &["id", "seriesId", "name"]),
+        ("BookMetadataDto", &["title"]),
+        ("CollectionDto", &["id", "name"]),
+        ("ReadListDto", &["id", "name"]),
+        ("LibraryDto", &["id", "name", "root"]),
+    ];
+
+    /// Every property the client reads from each schema, mandatory or optional.
+    /// Anything here that the server does not document would silently decode to
+    /// `None`/default forever, so the mismatch has to be a deliberate exception.
+    const DECODED_FIELDS: &[(&str, &[&str])] = &[
+        (
+            "SeriesDto",
+            &[
+                "id",
+                "libraryId",
+                "name",
+                "created",
+                "lastModified",
+                "booksCount",
+                "booksReadCount",
+                "booksUnreadCount",
+                "booksInProgressCount",
+                "booksMetadata",
+                "metadata",
+            ],
+        ),
+        (
+            "SeriesMetadataDto",
+            &[
+                "title",
+                "status",
+                "summary",
+                "publisher",
+                "genres",
+                "tags",
+                "readingDirection",
+                "language",
+                "ageRating",
+                // authors is deliberately NOT here: see
+                // `series_authors_come_from_the_aggregation`.
+            ],
+        ),
+        (
+            "BookDto",
+            &[
+                "id",
+                "seriesId",
+                "seriesTitle",
+                "name",
+                "number",
+                "oneshot",
+                "created",
+                "lastModified",
+                "sizeBytes",
+                "media",
+                "metadata",
+                "readProgress",
+            ],
+        ),
+        ("MediaDto", &["mediaType", "pagesCount"]),
+        (
+            "BookMetadataDto",
+            &[
+                "title",
+                "number",
+                "numberSort",
+                "summary",
+                "isbn",
+                "releaseDate",
+                "authors",
+                "tags",
+            ],
+        ),
+        ("ReadProgressDto", &["page", "completed", "lastModified"]),
+        (
+            "CollectionDto",
+            &[
+                "id",
+                "name",
+                "ordered",
+                "filtered",
+                "seriesIds",
+                "createdDate",
+                "lastModifiedDate",
+            ],
+        ),
+        (
+            "ReadListDto",
+            &[
+                "id",
+                "name",
+                "summary",
+                "ordered",
+                "filtered",
+                "bookIds",
+                "createdDate",
+                "lastModifiedDate",
+            ],
+        ),
+        ("LibraryDto", &["id", "name", "root", "unavailable"]),
+        ("BookMetadataAggregationDto", &["authors", "tags"]),
+        ("AuthorDto", &["name", "role"]),
+    ];
 
     #[test]
     fn fields_we_require_are_required_by_the_server() {
