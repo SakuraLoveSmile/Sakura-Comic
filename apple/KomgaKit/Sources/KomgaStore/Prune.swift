@@ -566,7 +566,6 @@ private extension KomgaStore {
             "DELETE FROM read_progress WHERE server_id = ? AND book_id = ?",
             "DELETE FROM downloads WHERE server_id = ? AND book_id = ?",
             "DELETE FROM download_pages WHERE server_id = ? AND book_id = ?",
-            "DELETE FROM pending_mutations WHERE server_id = ? AND entity_id = ?",
         ] {
             try db.execute(sql: sql, arguments: [serverID, bookID])
         }

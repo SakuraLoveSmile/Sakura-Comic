@@ -8,10 +8,14 @@
 //! something that is gone.
 //!
 //! Cascade rules mirror `specs/contracts/delete-propagation/README.md`:
-//! covers / cache records for the deleted entity are dropped (the facade
-//! removes the files from disk), and pending Outbox entries for a deleted
-//! book are discarded — uploading progress for a book the server deleted is
-//! meaningless.
+//! covers / cache records for the deleted entity go with it (the facade
+//! removes the files from disk). Queued Outbox entries deliberately
+//! *survive*: a remote deletion is inferred from "this id was not in the
+//! sweep", and offset pagination can skip an id when rows shift under a
+//! concurrent change. Getting that wrong would silently discard a user
+//! action that can never be re-derived, while every mirrored row we do
+//! delete is refetchable — so the upload phase owns the "the server says
+//! this book is gone" verdict.
 
 use std::collections::{HashMap, HashSet};
 
@@ -192,7 +196,6 @@ pub fn delete_book(
         "DELETE FROM read_progress WHERE server_id = ?1 AND book_id = ?2",
         "DELETE FROM downloads WHERE server_id = ?1 AND book_id = ?2",
         "DELETE FROM download_pages WHERE server_id = ?1 AND book_id = ?2",
-        "DELETE FROM pending_mutations WHERE server_id = ?1 AND entity_id = ?2",
     ] {
         conn.execute(sql, params![server_id, book_id])?;
     }
@@ -513,13 +516,17 @@ mod tests {
             ),
             2
         );
-        assert_eq!(
-            count(
-                &conn,
-                "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ?1"
-            ),
-            0
-        );
+        // The queued upload survives on purpose: a deletion inferred from a
+        // sweep can be a pagination artefact, and a lost user action cannot be
+        // re-derived. Discarding it is the upload phase's call to make.
+        let queued: String = conn
+            .query_row(
+                "SELECT mutation_type FROM pending_mutations WHERE server_id = ?1",
+                params!["srv"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(queued, "READ_PROGRESS");
         assert_eq!(
             count(
                 &conn,

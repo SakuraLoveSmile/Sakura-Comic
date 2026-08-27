@@ -97,7 +97,9 @@ SSE 端点 `/sse/v1/events`。事件只是「数据变了」的提示，不是�
 本地先更新 → 写 `pending_mutations` → 后台上传 → 成功后删除。
 支持 READ_PROGRESS / MARK_READ / MARK_UNREAD。字段：id / server_id / entity_id /
 mutation_type / payload / created_at / retry_count / last_error。
-实体被远端删除时，其未上传条目随级联一并丢弃（见上）。
+实体被远端删除时其镜像行被级联删掉，但**未上传的条目保留**：删除只是「这一轮没扫到」
+的推断，而 offset 分页在并发增删下可能错位；镜像行可以重新拉回，用户动作丢了不能。
+只有上传阶段拿到服务器确认（404/410）后才丢弃 `pending_mutations`。
 
 ## 阅读进度冲突（已实现在同步路径上）
 
