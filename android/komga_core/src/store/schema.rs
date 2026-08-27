@@ -371,6 +371,15 @@ fn migrate_sync_state_shape(conn: &Connection) -> rusqlite::Result<()> {
 
 /// Apply all statements and stamp the schema version.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    // The sync engine opens a connection per page (a `Connection` must never be
+    // held across an `await`), so this runs hundreds of times per sweep. The
+    // version stamp makes repeat opens one query instead of ~40 DDL statements;
+    // `user_version` is only written after a migration succeeded, so a
+    // half-applied database is never skipped.
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == SCHEMA_VERSION {
+        return Ok(());
+    }
     migrate_fts_shape(conn)?;
     migrate_sync_state_shape(conn)?;
     for statement in CREATE_STATEMENTS {

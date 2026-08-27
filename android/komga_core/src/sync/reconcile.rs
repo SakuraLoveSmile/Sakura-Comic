@@ -199,6 +199,145 @@ fn local_stamps(
     rows.collect()
 }
 
+/// `book_id → (page, completed, server_updated_at)` currently stored, so a
+/// sweep can tell "the server says what we already have" from a real progress
+/// change (which does *not* bump the book's own lastModified).
+type ProgressState = (Option<i64>, bool, Option<String>);
+
+fn local_progress(
+    conn: &Connection,
+    server_id: &str,
+) -> rusqlite::Result<HashMap<String, ProgressState>> {
+    let mut stmt = conn.prepare(
+        "SELECT book_id, page, completed, server_updated_at FROM read_progress WHERE server_id = ?1",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![server_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            (
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, i64>(2)? != 0,
+                row.get::<_, Option<String>>(3)?,
+            ),
+        ))
+    })?;
+    rows.collect()
+}
+
+/// Does this book need writing at all? New or edited metadata always does;
+/// otherwise only a read-progress change does.
+fn needs_write(
+    added: bool,
+    changed: bool,
+    remote: Option<&crate::model::book::ReadProgress>,
+    stored: Option<&ProgressState>,
+) -> bool {
+    if added || changed {
+        return true;
+    }
+    match (remote, stored) {
+        (Some(progress), Some(stored)) => {
+            stored.0 != progress.page
+                || stored.1 != progress.completed
+                || stored.2 != progress.last_modified
+        }
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
+/// The mirrored series columns a sweep can compare against. `booksCount` and
+/// the read counters move without Komga touching `series.lastModified`, so
+/// comparing the stamp alone would miss them.
+type SeriesProjection = (
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
+
+fn series_projection(series: &crate::model::series::Series) -> SeriesProjection {
+    (
+        series.last_modified.clone(),
+        series.books_count,
+        series.books_read_count,
+        series.books_unread_count,
+        series.books_in_progress_count,
+    )
+}
+
+fn local_series_projection(
+    conn: &Connection,
+    server_id: &str,
+) -> rusqlite::Result<HashMap<String, SeriesProjection>> {
+    let mut stmt = conn.prepare(
+        "SELECT remote_id, last_modified, books_count, books_read_count, books_unread_count,
+                books_in_progress_count
+         FROM series WHERE server_id = ?1",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![server_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            (
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+            ),
+        ))
+    })?;
+    rows.collect()
+}
+
+/// `collection_id → members` as currently mirrored.
+fn local_collection_members(
+    conn: &Connection,
+    server_id: &str,
+) -> rusqlite::Result<HashMap<String, Vec<String>>> {
+    let mut stmt = conn
+        .prepare("SELECT collection_id, series_id FROM collection_series WHERE server_id = ?1")?;
+    let rows = stmt.query_map(rusqlite::params![server_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut members: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (collection_id, series_id) = row?;
+        members.entry(collection_id).or_default().push(series_id);
+    }
+    for list in members.values_mut() {
+        list.sort();
+    }
+    Ok(members)
+}
+
+/// `readlist_id → books` in mirrored order (a readlist is ordered).
+fn local_readlist_books(
+    conn: &Connection,
+    server_id: &str,
+) -> rusqlite::Result<HashMap<String, Vec<String>>> {
+    let mut stmt = conn.prepare(
+        "SELECT readlist_id, book_id FROM readlist_books WHERE server_id = ?1
+         ORDER BY readlist_id, position",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![server_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut books: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        let (readlist_id, book_id) = row?;
+        books.entry(readlist_id).or_default().push(book_id);
+    }
+    Ok(books)
+}
+
+fn sorted(values: &[String]) -> Vec<String> {
+    let mut sorted = values.to_vec();
+    sorted.sort();
+    sorted
+}
+
 fn classify(
     known: &HashMap<String, Option<String>>,
     id: &str,
@@ -280,6 +419,7 @@ async fn reconcile_series(
     run_step(db_path, server_id, sync_state::ENTITY_SERIES, async {
         let conn = store::open(db_path).map_err(db_err)?;
         let known = local_stamps(&conn, server_id, "series", "last_modified").map_err(db_err)?;
+        let projected = local_series_projection(&conn, server_id).map_err(db_err)?;
         drop(conn);
         let mut remote = seeded.clone();
         let mut page = match cursor_for(db_path, server_id, sync_state::ENTITY_SERIES)? {
@@ -292,19 +432,33 @@ async fn reconcile_series(
                 .await?;
             let last = resp.last;
             let conn = store::open(db_path).map_err(db_err)?;
+            let ids: Vec<String> = resp
+                .content
+                .iter()
+                .map(|series| series.id.clone())
+                .collect();
+            remote.extend(ids.iter().cloned());
+            let mut dirty: Vec<crate::model::series::Series> = Vec::new();
             for series in &resp.content {
                 let (added, changed) =
                     classify(&known, &series.id, series.last_modified.as_deref());
                 summary.series_added += added as usize;
                 summary.series_changed += changed as usize;
-                // A re-appearing id is not deleted any more.
-                prune::clear_tombstone(&conn, server_id, sync_state::ENTITY_SERIES, &series.id)
-                    .map_err(db_err)?;
-                remote.insert(series.id.clone());
+                let counters_moved = match projected.get(&series.id) {
+                    Some(stored) => *stored != series_projection(series),
+                    None => true,
+                };
+                if added || changed || counters_moved {
+                    dirty.push(series.clone());
+                }
             }
-            summary.series_upserted +=
-                store::series::save_series_batch(&conn, server_id, &resp.content)
-                    .map_err(db_err)?;
+            if !dirty.is_empty() {
+                summary.series_upserted +=
+                    store::series::save_series_batch(&conn, server_id, &dirty).map_err(db_err)?;
+            }
+            // A re-appearing id is not deleted any more.
+            prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_SERIES, &ids)
+                .map_err(db_err)?;
             summary.pages_swept += 1;
             if !last {
                 sync_state::checkpoint_entity(
@@ -349,6 +503,7 @@ async fn reconcile_books(
         let series_ids = mirrored_series_ids(db_path, server_id)?;
         let conn = store::open(db_path).map_err(db_err)?;
         let known = local_stamps(&conn, server_id, "books", "last_modified").map_err(db_err)?;
+        let stored = local_progress(&conn, server_id).map_err(db_err)?;
         drop(conn);
         // series_id → remote book ids (the scoped prune input).
         let mut swept: HashMap<String, HashSet<String>> = HashMap::new();
@@ -399,18 +554,31 @@ async fn reconcile_books(
                     .await?;
                 let last = resp.last;
                 let conn = store::open(db_path).map_err(db_err)?;
+                let ids: Vec<String> = resp.content.iter().map(|book| book.id.clone()).collect();
+                entry.extend(ids.iter().cloned());
+                let mut dirty: Vec<crate::model::book::Book> = Vec::new();
                 for book in &resp.content {
                     let (added, changed) =
                         classify(&known, &book.id, book.last_modified.as_deref());
                     summary.books_added += added as usize;
                     summary.books_changed += changed as usize;
-                    prune::clear_tombstone(&conn, server_id, sync_state::ENTITY_BOOKS, &book.id)
-                        .map_err(db_err)?;
-                    entry.insert(book.id.clone());
+                    if needs_write(
+                        added,
+                        changed,
+                        book.read_progress.as_ref(),
+                        stored.get(&book.id),
+                    ) {
+                        dirty.push(book.clone());
+                    }
                 }
-                summary.books_upserted +=
-                    store::books::save_books_batch(&conn, server_id, &resp.content)
-                        .map_err(db_err)?;
+                // A converged library costs a read sweep, not 20k redundant
+                // upserts (each of which also rewrites its FTS row).
+                if !dirty.is_empty() {
+                    summary.books_upserted +=
+                        store::books::save_books_batch(&conn, server_id, &dirty).map_err(db_err)?;
+                }
+                prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_BOOKS, &ids)
+                    .map_err(db_err)?;
                 summary.pages_swept += 1;
                 if !last {
                     sync_state::checkpoint_entity(
@@ -469,6 +637,7 @@ async fn reconcile_collections(
         let conn = store::open(db_path).map_err(db_err)?;
         let known =
             local_stamps(&conn, server_id, "collections", "last_modified_date").map_err(db_err)?;
+        let members = local_collection_members(&conn, server_id).map_err(db_err)?;
         drop(conn);
         let mut remote = seeded.clone();
         let mut page = match cursor_for(db_path, server_id, sync_state::ENTITY_COLLECTIONS)? {
@@ -481,6 +650,9 @@ async fn reconcile_collections(
                 .await?;
             let last = resp.last;
             let conn = store::open(db_path).map_err(db_err)?;
+            let ids: Vec<String> = resp.content.iter().map(|c| c.id.clone()).collect();
+            remote.extend(ids.iter().cloned());
+            let mut dirty: Vec<crate::model::collection::Collection> = Vec::new();
             for collection in &resp.content {
                 let (added, changed) = classify(
                     &known,
@@ -489,18 +661,23 @@ async fn reconcile_collections(
                 );
                 summary.collections_added += added as usize;
                 summary.collections_changed += changed as usize;
-                remote.insert(collection.id.clone());
-                prune::clear_tombstone(
-                    &conn,
-                    server_id,
-                    sync_state::ENTITY_COLLECTIONS,
-                    &collection.id,
-                )
-                .map_err(db_err)?;
+                // Members live in their own table and can be edited without a new
+                // lastModifiedDate, so they have to be compared too.
+                let members_moved = match members.get(&collection.id) {
+                    Some(stored) => *stored != sorted(&collection.series_ids),
+                    None => !collection.series_ids.is_empty(),
+                };
+                if added || changed || members_moved {
+                    dirty.push(collection.clone());
+                }
             }
-            summary.collections_upserted +=
-                store::collections::save_collections_batch(&conn, server_id, &resp.content)
-                    .map_err(db_err)?;
+            if !dirty.is_empty() {
+                summary.collections_upserted +=
+                    store::collections::save_collections_batch(&conn, server_id, &dirty)
+                        .map_err(db_err)?;
+            }
+            prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_COLLECTIONS, &ids)
+                .map_err(db_err)?;
             summary.pages_swept += 1;
             if !last {
                 sync_state::checkpoint_entity(
@@ -549,6 +726,7 @@ async fn reconcile_readlists(
         let conn = store::open(db_path).map_err(db_err)?;
         let known =
             local_stamps(&conn, server_id, "readlists", "last_modified_date").map_err(db_err)?;
+        let stored_books = local_readlist_books(&conn, server_id).map_err(db_err)?;
         drop(conn);
         let mut remote = seeded.clone();
         let mut page = match cursor_for(db_path, server_id, sync_state::ENTITY_READLISTS)? {
@@ -561,23 +739,29 @@ async fn reconcile_readlists(
                 .await?;
             let last = resp.last;
             let conn = store::open(db_path).map_err(db_err)?;
+            let ids: Vec<String> = resp.content.iter().map(|r| r.id.clone()).collect();
+            remote.extend(ids.iter().cloned());
+            let mut dirty: Vec<crate::model::readlist::ReadList> = Vec::new();
             for readlist in &resp.content {
                 let (added, changed) =
                     classify(&known, &readlist.id, readlist.last_modified_date.as_deref());
                 summary.readlists_added += added as usize;
                 summary.readlists_changed += changed as usize;
-                remote.insert(readlist.id.clone());
-                prune::clear_tombstone(
-                    &conn,
-                    server_id,
-                    sync_state::ENTITY_READLISTS,
-                    &readlist.id,
-                )
-                .map_err(db_err)?;
+                let books_moved = match stored_books.get(&readlist.id) {
+                    Some(stored) => *stored != readlist.book_ids,
+                    None => !readlist.book_ids.is_empty(),
+                };
+                if added || changed || books_moved {
+                    dirty.push(readlist.clone());
+                }
             }
-            summary.readlists_upserted +=
-                store::readlists::save_readlists_batch(&conn, server_id, &resp.content)
-                    .map_err(db_err)?;
+            if !dirty.is_empty() {
+                summary.readlists_upserted +=
+                    store::readlists::save_readlists_batch(&conn, server_id, &dirty)
+                        .map_err(db_err)?;
+            }
+            prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_READLISTS, &ids)
+                .map_err(db_err)?;
             summary.pages_swept += 1;
             if !last {
                 sync_state::checkpoint_entity(
@@ -669,7 +853,20 @@ async fn reconcile_read_progress(
 mod tests {
     use super::*;
     use crate::store::open_in_memory;
+    use crate::sync::full::{full_sync_from, FixtureLibraryFetcher, StartAt};
+    use crate::sync::scenario::server_from_snapshot;
     use chrono::Duration;
+    use serde_json::json;
+
+    fn temp_db() -> String {
+        let dir = std::env::temp_dir().join(format!("komga_reconcile_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("comic.sqlite").to_string_lossy().into_owned()
+    }
+
+    fn cleanup(db: &str) {
+        let _ = std::fs::remove_dir_all(std::path::Path::new(db).parent().unwrap());
+    }
 
     fn state_with_last_sync(age_secs: i64) -> Connection {
         let conn = open_in_memory().unwrap();
@@ -762,5 +959,128 @@ mod tests {
             ReconcileTrigger::parse("?"),
             ReconcileTrigger::ManualRefresh
         );
+    }
+
+    /// The whole point of writing incrementally: once the mirror has converged,
+    /// a sweep must not rewrite a single row.
+    #[tokio::test]
+    async fn a_sweep_of_a_converged_library_writes_nothing() {
+        let db = temp_db();
+        full_sync_from(&db, "srv", &FixtureLibraryFetcher {}, StartAt::Fresh)
+            .await
+            .unwrap();
+        let summary = reconcile(
+            &db,
+            "srv",
+            &FixtureLibraryFetcher {},
+            ReconcileTrigger::ManualRefresh,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            summary.series_upserted, 0,
+            "no series row should be rewritten"
+        );
+        assert_eq!(summary.books_upserted, 0, "no book row should be rewritten");
+        assert_eq!(summary.collections_upserted, 0);
+        assert_eq!(summary.readlists_upserted, 0);
+        assert_eq!(
+            summary.pages_swept, 7,
+            "1 series page + 3 book pages + collections + readlists + on-deck"
+        );
+        assert!(summary.clean, "{summary:?}");
+        cleanup(&db);
+    }
+
+    /// A remote read-progress change does *not* bump the book's own
+    /// `lastModified`, so skipping "unchanged" books has to compare progress as
+    /// well — otherwise reading on another device never reaches this one.
+    #[tokio::test]
+    async fn a_progress_only_change_still_lands() {
+        let fixture = |name: &str| -> serde_json::Value {
+            let text = match name {
+                "libraries" => {
+                    include_str!("../../../../specs/contracts/fixtures/library/libraries.json")
+                }
+                "series" => {
+                    include_str!("../../../../specs/contracts/fixtures/library/series-page.json")
+                }
+                "books" => {
+                    include_str!(
+                        "../../../../specs/contracts/fixtures/library/books-by-series.json"
+                    )
+                }
+                "collections" => {
+                    include_str!(
+                        "../../../../specs/contracts/fixtures/library/collections-page.json"
+                    )
+                }
+                "readlists" => {
+                    include_str!("../../../../specs/contracts/fixtures/library/readlists-page.json")
+                }
+                _ => {
+                    include_str!("../../../../specs/contracts/fixtures/library/ondeck-page.json")
+                }
+            };
+            serde_json::from_str(text).unwrap()
+        };
+        let content = |name: &str| fixture(name)["content"].clone();
+
+        // The library fixture maps seriesId -> Spring page object; the
+        // snapshot shape wants seriesId -> [page].
+        let mut books = serde_json::Map::new();
+        let raw: serde_json::Value = fixture("books");
+        for (series_id, page) in raw.as_object().unwrap() {
+            books.insert(series_id.clone(), json!([page["content"].clone()]));
+        }
+        // book-1-3 carries no progress at all; the server now reports page 7
+        // while leaving the book's own lastModified untouched.
+        for book in books["series-1"][0].as_array_mut().unwrap() {
+            if book["id"] == "book-1-3" {
+                book["readProgress"] = json!({
+                    "page": 7,
+                    "completed": false,
+                    "lastModified": "2025-05-05T00:00:00Z",
+                });
+            }
+        }
+        let snapshot = serde_json::json!({
+            "id": "progress-only",
+            "libraries": fixture("libraries"),
+            "series": [content("series")],
+            "books": books,
+            "collections": [content("collections")],
+            "readlists": [content("readlists")],
+            "onDeck": [content("on_deck")],
+        });
+
+        let db = temp_db();
+        full_sync_from(&db, "srv", &FixtureLibraryFetcher {}, StartAt::Fresh)
+            .await
+            .unwrap();
+        let server = server_from_snapshot(&snapshot.to_string()).unwrap();
+        let summary = reconcile(&db, "srv", &server, ReconcileTrigger::ManualRefresh)
+            .await
+            .unwrap();
+        assert_eq!(
+            summary.books_upserted, 1,
+            "only the book whose progress moved should be written"
+        );
+
+        let conn = crate::store::open(&db).unwrap();
+        let stored: Option<(Option<i64>, i64)> = conn
+            .query_row(
+                "SELECT page, completed FROM read_progress WHERE server_id = ?1 AND book_id = ?2",
+                rusqlite::params!["srv", "book-1-3"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        assert_eq!(
+            stored,
+            Some((Some(7), 0)),
+            "the other device's page 7 must reach this one"
+        );
+        drop(conn);
+        cleanup(&db);
     }
 }

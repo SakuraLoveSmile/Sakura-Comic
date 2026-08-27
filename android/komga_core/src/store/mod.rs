@@ -87,6 +87,15 @@ pub fn open_in_memory() -> rusqlite::Result<Connection> {
 
 fn configure(conn: &Connection) -> rusqlite::Result<()> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    // WAL + NORMAL: the sync engine writes page by page, and the default
+    // rollback journal fsyncs on every commit. This store is a mirror that can
+    // always be re-derived from the server, so paying an fsync per statement is
+    // the wrong trade — at 1,000 series / 20,000 books it made a *no-op*
+    // reconcile take 11s, which is far too slow for a foreground trigger.
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    conn.pragma_update(None, "cache_size", "-8000")?;
     Ok(())
 }
 

@@ -100,6 +100,39 @@ pub fn record_tombstone(
     Ok(())
 }
 
+/// True when one server/entity type has any tombstone at all. A steady-state
+/// sweep has none, and checking once beats issuing `ids.len()` deletes.
+pub fn has_tombstones(
+    conn: &Connection,
+    server_id: &str,
+    entity_type: &str,
+) -> rusqlite::Result<bool> {
+    let found: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM deleted_entities WHERE server_id = ?1 AND entity_type = ?2)",
+        params![server_id, entity_type],
+        |row| row.get(0),
+    )?;
+    Ok(found == 1)
+}
+
+/// Clear the tombstones of the ids a sweep saw. Cheap by design: a
+/// steady-state sweep has no tombstones at all, and that is answered with one
+/// `EXISTS` query instead of `ids.len()` deletes.
+pub fn clear_tombstones(
+    conn: &Connection,
+    server_id: &str,
+    entity_type: &str,
+    ids: &[String],
+) -> rusqlite::Result<()> {
+    if ids.is_empty() || !has_tombstones(conn, server_id, entity_type)? {
+        return Ok(());
+    }
+    for id in ids {
+        clear_tombstone(conn, server_id, entity_type, id)?;
+    }
+    Ok(())
+}
+
 /// A re-added entity (same id back on the server) clears its tombstone.
 pub fn clear_tombstone(
     conn: &Connection,
