@@ -16,7 +16,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ```bash
 bash scripts/e2e_stage5.sh        # 4 步：场景重放 14/14 → 真实 HTTP 回环 → 真实服务器（需 Key）→ Swift 同契约
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 103 / Swift 85（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 110 / Swift 85（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -77,6 +77,23 @@ v6 `sync_state`：主键 `(server_id, entity_type)`，字段
   进 seen 集合 → 失败的同步最多推迟一个删除，绝不会删掉服务器还有的数据
   （`scenario-interrupt` 步 3 断言：全量故障下镜像 == 断网前的 s3）
 
+## 离线阅读进度不被同步扫描吃掉
+
+`specs/contracts/fixtures/read-progress/offline-priority.json` 之前只是躺在那里：
+没有任何代码实现它。而 `upsert_synced_read_progress` 无条件覆盖本地行并把
+`mutation_pending` 清零——也就是说**一次普通 Reconcile 就会把用户没传上去的阅读进度
+连同排队中的 Outbox 语义一起吃掉**。现在按契约实现成扫描前的判定：
+
+| 情形 | 结果 |
+| --- | --- |
+| 本地有未上传的 MARK_READ / MARK_UNREAD | 远端被动值一律不覆盖（即使时间戳更新） |
+| 本地有未上传的被动进度，且更早 | 保留本地，Outbox 保持排队 |
+| 本地有未上传的被动进度，但远端确实更新 | 采纳远端值，**但保留排队条目**（这里丢弃等于丢用户动作） |
+| 本地没有未上传意图 | 照常镜像 |
+
+`newer()` 用 RFC3339 解析比较，不靠字符串对齐（秒/毫秒精度混在真实数据里）。
+5 条测试覆盖，其中 4 条在去掉判定后立刻失败（变异校验过）。
+
 ## Deleted 状态传播
 
 ```text
@@ -123,8 +140,9 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 
 ## 覆盖测试
 
-- **Rust（103 通过）**：`sync::scenario`（两个共享场景 14 步全绿）、`sync::full`（镜像完整性 /
+- **Rust（110 通过）**：`sync::scenario`（两个共享场景 14 步全绿）、`sync::full`（镜像完整性 /
   fresh 幂等 / 已完成步骤不再重镜）、
+  `store::read_progress`（离线进度保护 + 共享 fixture 契约）、
   `sync::reconcile`（节流：后台触发在 60s 窗口内不扫、显式触发永远扫、时间戳缺失或
   不可解析时宁可重扫；五种触发名双向映射）、`store::sync_state`（按实体独立、
   失败保留游标、多服务器隔离）、`store::prune`（级联 / 作用域内 book prune / 墓碑读写）、

@@ -99,6 +99,12 @@ SSE 端点 `/sse/v1/events`。事件只是「数据变了」的提示，不是�
 mutation_type / payload / created_at / retry_count / last_error。
 实体被远端删除时，其未上传条目随级联一并丢弃（见上）。
 
+## 阅读进度冲突（已实现在同步路径上）
+
+镜像扫描在写入进度前会先判定本地是否有**未上传的用户意图**，规则见下方三条；
+判定实现于 `store/read_progress.rs::sync_write_for`，由
+`specs/contracts/fixtures/read-progress/offline-priority.json` 驱动测试。
+
 ## 阅读进度冲突
 
 - **Passive Progress**：可结合本地更新时间、Mutation 是否上传、服务端更新时间合并
