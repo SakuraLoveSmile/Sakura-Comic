@@ -66,7 +66,17 @@ final class MediaLibraryStoreTests: XCTestCase {
         // The server-scoped FTS shape was rebuilt (server_id column).
         _ = try store.querySeries(serverID: "srv-1", limit: 10, offset: 0)
         // Reading the schema version through a pragma.
-        XCTAssertEqual(try store.schemaVersion(), 4)
+        XCTAssertEqual(try store.schemaVersion(), 6)
+        // v5 landed on the pre-existing libraries table.
+        let libraryColumns = try store.columnNames(table: "libraries")
+        XCTAssertTrue(libraryColumns.contains("root"), "\(libraryColumns)")
+        XCTAssertTrue(libraryColumns.contains("unavailable"), "\(libraryColumns)")
+        // v6 rebuilt sync_state around a per-entity key and added tombstones.
+        let syncColumns = try store.columnNames(table: "sync_state")
+        XCTAssertTrue(syncColumns.contains("entity_type"), "\(syncColumns)")
+        XCTAssertTrue(syncColumns.contains("sync_cursor"), "\(syncColumns)")
+        let tombstoneColumns = try store.columnNames(table: "deleted_entities")
+        XCTAssertTrue(tombstoneColumns.contains("cause"), "\(tombstoneColumns)")
     }
 
     // MARK: - FullSync + local query battery
@@ -81,11 +91,23 @@ final class MediaLibraryStoreTests: XCTestCase {
         XCTAssertEqual(summary.readlists, 2)
         XCTAssertEqual(summary.readProgress, 4) // 3 inline + 1 on-deck
 
-        // Libraries mirror so the Library UI has counts.
+        // Libraries mirror so the Library 列表 / 详情 screens have real data.
         _ = try store.upsertLibraries(serverID: "srv-1", libraries: try loadFixture("libraries.json"))
         let libs = try store.libraryCounts(serverID: "srv-1")
         XCTAssertEqual(libs.count, 2)
-        XCTAssertEqual(libs.first(where: { $0.remoteID == "lib-1" })?.seriesCount, 2)
+        let manga = libs.first(where: { $0.remoteID == "lib-1" })
+        XCTAssertEqual(manga?.seriesCount, 2)
+        XCTAssertEqual(manga?.root, "/manga")
+        XCTAssertEqual(manga?.unavailable, false)
+        XCTAssertGreaterThan(manga?.bookCount ?? 0, 0)
+        // Counts stay library-scoped: the two rows add up to the mirrored books.
+        XCTAssertEqual(libs.reduce(0) { $0 + $1.bookCount }, summary.books)
+
+        let libraryRow = try store.libraryDetail(serverID: "srv-1", libraryID: "lib-1")
+        XCTAssertEqual(libraryRow?.name, manga?.name)
+        XCTAssertEqual(libraryRow?.seriesCount, manga?.seriesCount)
+        XCTAssertEqual(libraryRow?.bookCount, manga?.bookCount)
+        XCTAssertNil(try store.libraryDetail(serverID: "srv-1", libraryID: "missing"))
 
         // Series wall: name order + totals.
         let wall = try store.querySeries(serverID: "srv-1", limit: 50, offset: 0)
@@ -175,14 +197,51 @@ final class MediaLibraryStoreTests: XCTestCase {
         XCTAssertNotNil(state.lastFullSync)
     }
 
-    func testFullSyncIsIdempotent() async throws {
+    func testFullSyncRecordsEveryStepAsCompleted() async throws {
+        let store = try KomgaStore()
+        let summary = try await FullSync.run(
+            fetcher: FixtureLibraryFetching(), store: store, serverID: "srv-1"
+        )
+        XCTAssertEqual(summary.libraries, 2)
+        XCTAssertTrue(summary.skippedSteps.isEmpty)
+        XCTAssertTrue(summary.resumedSteps.isEmpty)
+        // Every bootstrap step recorded its own completion, cursor cleared.
+        for entity in SyncEntity.bootstrapOrder {
+            let state = try XCTUnwrap(
+                store.entityState(serverID: "srv-1", entityType: entity), "\(entity) step row"
+            )
+            XCTAssertEqual(state.syncStatus, SyncStatus.idle, entity)
+            XCTAssertNil(state.syncCursor, "\(entity) left a cursor")
+            XCTAssertNotNil(state.lastSyncAt, entity)
+        }
+    }
+
+    func testFullSyncFromScratchIsIdempotent() async throws {
+        let store = try KomgaStore()
+        let fetcher = FixtureLibraryFetching()
+        let first = try await FullSync.run(
+            fetcher: fetcher, store: store, serverID: "srv-1", start: .fresh
+        )
+        let second = try await FullSync.run(
+            fetcher: fetcher, store: store, serverID: "srv-1", start: .fresh
+        )
+        XCTAssertEqual(first.series, second.series)
+        XCTAssertEqual(first.books, second.books)
+        XCTAssertEqual(first.collections, second.collections)
+        XCTAssertEqual(try store.countSeries(serverID: "srv-1"), 3)
+        XCTAssertEqual(try store.mirrorRowCount(serverID: "srv-1", table: "books"), 7)
+    }
+
+    func testCompletedBootstrapIsNotRemirrored() async throws {
         let store = try KomgaStore()
         let fetcher = FixtureLibraryFetching()
         _ = try await FullSync.run(fetcher: fetcher, store: store, serverID: "srv-1")
         let second = try await FullSync.run(fetcher: fetcher, store: store, serverID: "srv-1")
-        XCTAssertEqual(second.series, 3)
-        XCTAssertEqual(second.books, 7)
-        XCTAssertEqual(try store.countSeries(serverID: "srv-1"), 3)
+        // Keeping the mirror current is Reconcile's job; Bootstrap skips
+        // steps it already finished.
+        XCTAssertEqual(second.skippedSteps, SyncEntity.bootstrapOrder)
+        XCTAssertEqual(second.series, 0)
+        XCTAssertEqual(try store.mirrorRowCount(serverID: "srv-1", table: "books"), 7)
     }
 }
 
@@ -199,6 +258,10 @@ private struct FixtureLibraryFetching: LibraryFetching {
     private func load<T: Decodable>(_ name: String) throws -> T {
         let data = try Data(contentsOf: base.appendingPathComponent(name))
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    func fetchLibraries() async throws -> [LibraryDTO] {
+        try load("libraries.json")
     }
 
     func fetchSeriesPage(_ request: PageRequest) async throws -> SeriesPageDTO {

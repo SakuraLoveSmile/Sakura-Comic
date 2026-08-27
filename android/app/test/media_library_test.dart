@@ -73,6 +73,37 @@ void main() {
     expect(find.text('Book 1'), findsOneWidget);
   });
 
+  testWidgets('library list → detail → switch the shelf scope', (tester) async {
+    final repo = _MediaFakeRepository();
+    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('图书馆'));
+    await tester.pumpAndSettle();
+
+    // Library 列表：名字 + 本地计数 + 根路径。
+    expect(find.text('Manga Main'), findsOneWidget);
+    expect(find.textContaining('3 Books'), findsOneWidget);
+    expect(find.textContaining('/manga'), findsOneWidget);
+    expect(find.text('Webtoons'), findsOneWidget);
+
+    // Library 详情：metadata + 属于该库的 series 墙（本地查询）。
+    await tester.tap(find.text('Manga Main'));
+    await tester.pumpAndSettle();
+    expect(find.text('阅读进度 2 / 3'), findsOneWidget);
+    expect(find.text('根路径 /manga'), findsOneWidget);
+    expect(find.text('One Piece'), findsOneWidget);
+    expect(find.text('Solo Leveling'), findsNothing); // 属于 Webtoons
+    expect(repo.lastLibraryId, 'lib-1');
+
+    // Library 切换：设为书架筛选后回到书架，查询带上该库。
+    repo.lastLibraryId = null;
+    await tester.tap(find.byTooltip('设为书架筛选'));
+    await tester.pumpAndSettle();
+    expect(repo.lastLibraryId, 'lib-1');
+    expect(find.byTooltip('图书馆'), findsOneWidget); // 已回到书架
+  });
+
   testWidgets('series detail shows metadata and marks a book read',
       (tester) async {
     final repo = _MediaFakeRepository();
@@ -106,6 +137,7 @@ class _MediaFakeRepository extends LibraryRepository {
   static const _series = [
     Series(remoteId: 'series-1', libraryId: 'lib-1', name: 'One Piece', status: 'ENDED'),
     Series(remoteId: 'series-2', libraryId: 'lib-1', name: 'Berserk', status: 'ONGOING'),
+    Series(remoteId: 'series-4', libraryId: 'lib-2', name: 'Solo Leveling', status: 'COMPLETED'),
   ];
 
   static const _books = [
@@ -141,8 +173,31 @@ class _MediaFakeRepository extends LibraryRepository {
   }
 
   @override
-  Future<List<LibraryCount>> fetchLibraryCounts() async =>
-      const [LibraryCount(remoteId: 'lib-1', name: 'Manga Main', seriesCount: 2)];
+  Future<List<LibraryCount>> fetchLibraryCounts() async => const [
+        LibraryCount(
+          remoteId: 'lib-1',
+          name: 'Manga Main',
+          root: '/manga',
+          seriesCount: 2,
+          bookCount: 3,
+          readCount: 2,
+        ),
+        LibraryCount(
+          remoteId: 'lib-2',
+          name: 'Webtoons',
+          root: '/webtoons',
+          unavailable: true,
+          seriesCount: 1,
+        ),
+      ];
+
+  @override
+  Future<LibraryCount?> libraryDetail({required String libraryId}) async {
+    for (final library in await fetchLibraryCounts()) {
+      if (library.remoteId == libraryId) return library;
+    }
+    return null;
+  }
 
   @override
   Future<FilterOptions> fetchFilterOptions() async =>
@@ -252,7 +307,7 @@ class _MediaFakeRepository extends LibraryRepository {
   Future<Map<String, String>> fetchCoverPaths() async => const {};
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer() async => null;
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async => null;
 
   @override
   Future<int> syncCovers() async => 0;

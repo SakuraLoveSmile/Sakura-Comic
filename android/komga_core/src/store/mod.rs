@@ -6,6 +6,7 @@ pub mod books;
 pub mod collections;
 pub mod fts;
 pub mod libraries;
+pub mod prune;
 pub mod query;
 pub mod read_progress;
 pub mod readlists;
@@ -53,6 +54,7 @@ pub fn delete_server_mirror(conn: &Connection, server_id: &str) -> rusqlite::Res
         "read_progress",
         "libraries",
         "sync_state",
+        "deleted_entities",
         "pending_mutations",
         "thumbnails",
         "downloads",

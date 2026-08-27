@@ -10,6 +10,24 @@ struct LibraryView: View {
     @State private var showAdd = false
     @State private var showServers = false
     @State private var tab = 0
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Stage 5 sync state (`sync_state`) shown where the shelf is read. The
+    /// library stays browsable through every one of these states.
+    private var syncStatusLine: some View {
+        HStack(spacing: 6) {
+            if model.isRefreshing { ProgressView().controlSize(.small) }
+            Text(model.syncStatusLabel)
+                .font(.caption)
+                .foregroundStyle(model.syncError == nil ? Color.secondary : Color.red)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 6)
+        .accessibilityIdentifier("sync-status")
+    }
 
     var body: some View {
         NavigationStack {
@@ -23,6 +41,8 @@ struct LibraryView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 6)
 
+                syncStatusLine
+
                 switch tab {
                 case 1: CollectionsView(model: model)
                 case 2: ReadlistsView(model: model)
@@ -35,6 +55,13 @@ struct LibraryView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("演示") { Task { await model.loadFullDemo() } }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        LibrariesListView(model: model)
+                    } label: {
+                        Label("图书馆", systemImage: "books.vertical")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     serverMenu
                 }
@@ -43,11 +70,18 @@ struct LibraryView: View {
                     Button("演示") { Task { await model.loadFullDemo() } }
                 }
                 ToolbarItem {
+                    NavigationLink {
+                        LibrariesListView(model: model)
+                    } label: {
+                        Label("图书馆", systemImage: "books.vertical")
+                    }
+                }
+                ToolbarItem {
                     serverMenu
                 }
                 #endif
             }
-            .refreshable { await model.fullSync() }
+            .refreshable { await model.reconcile(trigger: .manualRefresh) }
         }
         .task { await initialLoad() }
         .sheet(isPresented: $showAdd) {
@@ -269,8 +303,10 @@ struct LibraryView: View {
     }
 
     private func initialLoad() async {
+        model.refreshSyncState()
         if model.server != nil {
-            await model.fullSync()
+            model.startSyncTriggers()
+            await model.syncLibrary(trigger: .appLaunch)
         } else {
             try? model.syncMediaState()
             model.loadSeriesWall(reset: true)

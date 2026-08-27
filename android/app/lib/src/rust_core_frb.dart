@@ -9,6 +9,8 @@ import 'rust/store/series.dart';
 import 'rust/store/thumbnails.dart';
 import 'rust/sync/bootstrap.dart';
 import 'rust/sync/full.dart';
+import 'rust/sync/reconcile.dart';
+import 'rust/store/sync_state.dart';
 import 'rust_core_api.dart';
 
 /// Tries to load the native library (`libkomga_core.so`).
@@ -199,6 +201,61 @@ class FrbRustCoreApi extends RustCoreApi {
   }
 
   @override
+  Future<FullSyncSummary> bootstrapSync({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+    required bool resume,
+  }) {
+    return frb.bootstrapSync(
+      dbPath: dbPath,
+      serverId: serverId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+      resume: resume,
+    );
+  }
+
+  @override
+  Future<ReconcileSummary> reconcile({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+    required String trigger,
+  }) {
+    return frb.reconcile(
+      dbPath: dbPath,
+      serverId: serverId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+      trigger: trigger,
+    );
+  }
+
+  @override
+  Future<List<EntitySyncState>> syncStates({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.syncStates(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<bool> shouldReconcile({
+    required String dbPath,
+    required String serverId,
+    required String trigger,
+  }) {
+    return frb.shouldReconcile(
+      dbPath: dbPath,
+      serverId: serverId,
+      trigger: trigger,
+    );
+  }
+
+  @override
   Future<SeriesPageResult> querySeries({
     required String dbPath,
     required String serverId,
@@ -371,6 +428,15 @@ class FrbRustCoreApi extends RustCoreApi {
     required String serverId,
   }) {
     return frb.libraryCounts(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<LibraryCountRow?> libraryDetail({
+    required String dbPath,
+    required String serverId,
+    required String libraryId,
+  }) {
+    return frb.libraryDetail(dbPath: dbPath, serverId: serverId, libraryId: libraryId);
   }
 
   @override

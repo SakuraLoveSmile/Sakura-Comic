@@ -194,17 +194,25 @@ class FilterOptions {
   final List<String> statuses;
 }
 
-/// Library row with its local series count.
+/// Library row with its local counts (Library 列表 / 详情).
 class LibraryCount {
   const LibraryCount({
     required this.remoteId,
     required this.name,
+    this.root,
+    this.unavailable = false,
     required this.seriesCount,
+    this.bookCount = 0,
+    this.readCount = 0,
   });
 
   final String remoteId;
   final String name;
+  final String? root;
+  final bool unavailable;
   final int seriesCount;
+  final int bookCount;
+  final int readCount;
 }
 
 /// Collection row.
@@ -249,4 +257,50 @@ class ReadlistDetail {
 
   final ReadlistItem item;
   final PagedBooks books;
+}
+/// Stage 5 sync bookkeeping for the shelf header, built from `sync_state`.
+class SyncStatus {
+  const SyncStatus({
+    this.lastSyncAt,
+    this.status = 'idle',
+    this.error,
+    this.resumableEntities = const [],
+  });
+
+  final String? lastSyncAt;
+  final String status;
+  final String? error;
+
+  /// Entity types a previous run left mid-sweep (resume points).
+  final List<String> resumableEntities;
+
+  bool get neverSynced => lastSyncAt == null;
+  bool get interrupted => resumableEntities.isNotEmpty;
+  bool get failed => status == 'error';
+
+  String get label {
+    if (failed) return '同步中断：${error ?? '未知错误'}';
+    if (interrupted) return '同步未完成，将从 ${resumableEntities.join('、')} 续跑';
+    if (lastSyncAt == null) return '尚未同步';
+    return '最近同步 $lastSyncAt';
+  }
+}
+
+/// What one Reconcile pass changed locally (UI view of the core summary).
+class ReconcileReport {
+  const ReconcileReport({
+    required this.added,
+    required this.changed,
+    required this.removed,
+    required this.clean,
+  });
+
+  final int added;
+  final int changed;
+  final int removed;
+  final bool clean;
+
+  String get message => clean
+      ? '本地库已与服务器一致'
+      : '同步完成：新增 $added · 更新 $changed · 删除 $removed';
 }

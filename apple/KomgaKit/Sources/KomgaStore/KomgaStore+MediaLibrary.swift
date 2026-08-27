@@ -851,42 +851,91 @@ public extension KomgaStore {
         }
     }
 
+    /// Correlated subqueries rather than joins, so the three counts stay
+    /// independent of each other's row multiplication (mirror of Rust
+    /// `LIBRARY_STATS_SQL`).
+    private static let libraryStatsSQL = """
+        SELECT l.remote_id, l.name, l.root, l.unavailable,
+               (SELECT COUNT(*) FROM series s
+                 WHERE s.server_id = l.server_id AND s.library_id = l.remote_id) AS series_count,
+               (SELECT COUNT(*) FROM books b
+                 JOIN series s2 ON s2.server_id = b.server_id AND s2.remote_id = b.series_id
+                 WHERE s2.server_id = l.server_id AND s2.library_id = l.remote_id) AS book_count,
+               (SELECT COUNT(*) FROM books b
+                 JOIN series s3 ON s3.server_id = b.server_id AND s3.remote_id = b.series_id
+                 JOIN read_progress rp ON rp.server_id = b.server_id AND rp.book_id = b.remote_id
+                 WHERE s3.server_id = l.server_id AND s3.library_id = l.remote_id
+                   AND rp.completed = 1) AS read_count
+          FROM libraries l
+        """
+
+    private static func libraryCount(from row: Row) -> LibraryCountRecord {
+        let root: String? = row["root"]
+        let unavailableFlag: Int? = row["unavailable"]
+        let seriesCount: Int? = row["series_count"]
+        let bookCount: Int? = row["book_count"]
+        let readCount: Int? = row["read_count"]
+        return LibraryCountRecord(
+            remoteID: row["remote_id"],
+            name: row["name"],
+            root: root,
+            unavailable: (unavailableFlag ?? 0) != 0,
+            seriesCount: seriesCount ?? 0,
+            bookCount: bookCount ?? 0,
+            readCount: readCount ?? 0
+        )
+    }
+
+    /// Every library of one server with its counts — the Library 列表.
     public func libraryCounts(serverID: String) throws -> [LibraryCountRecord] {
         try dbQueue.read { db in
             try Row.fetchAll(
                 db,
                 sql: """
-                SELECT l.remote_id, l.name, COUNT(s.remote_id) AS series_count
-                  FROM libraries l
-                  LEFT JOIN series s ON s.server_id = l.server_id AND s.library_id = l.remote_id
+                \(Self.libraryStatsSQL)
                  WHERE l.server_id = ?
-                 GROUP BY l.remote_id, l.name
                  ORDER BY l.name COLLATE NOCASE
                 """,
                 arguments: [serverID]
-            ).map { row in
-                LibraryCountRecord(remoteID: row["remote_id"], name: row["name"], seriesCount: row["series_count"])
-            }
+            ).map(Self.libraryCount(from:))
+        }
+    }
+
+    /// A single library by id — the Library 详情. Same SQL, extra filter.
+    public func libraryDetail(serverID: String, libraryID: String) throws -> LibraryCountRecord? {
+        try dbQueue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                \(Self.libraryStatsSQL)
+                 WHERE l.server_id = ? AND l.remote_id = ?
+                """,
+                arguments: [serverID, libraryID]
+            ) else { return nil }
+            return Self.libraryCount(from: row)
         }
     }
 
     // MARK: Sync state
 
-    /// Record a completed full mirror sync (last_full_sync + success stamp).
+    /// Record a completed full mirror sync (last_full_sync + success stamp) on
+    /// the `full` rollup row (mirror of Rust `record_full_sync`).
     @discardableResult
     public func recordFullSync(serverID: String) throws -> SyncStateRecord {
+        let now = Self.rfc3339Text(Date())
         try dbQueue.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO sync_state (server_id, last_full_sync, last_successful_sync, sync_status)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(server_id) DO UPDATE SET
-                  last_full_sync = excluded.last_full_sync,
-                  last_successful_sync = excluded.last_successful_sync,
+                INSERT INTO sync_state (server_id, entity_type, last_sync_at, sync_status, last_full_sync, last_successful_sync)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(server_id, entity_type) DO UPDATE SET
+                  last_sync_at = excluded.last_sync_at,
                   sync_status = excluded.sync_status,
-                  last_error = NULL
+                  last_error = NULL,
+                  last_full_sync = excluded.last_full_sync,
+                  last_successful_sync = excluded.last_successful_sync
                 """,
-                arguments: [serverID, Self.rfc3339Text(Date()), Self.rfc3339Text(Date()), "idle"]
+                arguments: [serverID, SyncEntity.full, now, SyncStatus.idle, now, now]
             )
         }
         guard let row = try syncState(serverID: serverID) else {
@@ -971,6 +1020,17 @@ public extension KomgaStore {
     func schemaVersion() throws -> Int64 {
         try dbQueue.read { db in
             try Int64.fetchOne(db, sql: "PRAGMA user_version") ?? 0
+        }
+    }
+
+    /// Column names of a table (migration probe).
+    func columnNames(table: String) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT name FROM pragma_table_info(?)",
+                arguments: [table]
+            )
         }
     }
 

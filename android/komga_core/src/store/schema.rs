@@ -6,7 +6,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 /// Bump on every migration; stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Individual DDL statements, applied in order. `CREATE TABLE IF NOT EXISTS`
 /// keeps existing databases untouched, so older installs get their missing
@@ -26,10 +26,14 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )",
+    // v5: root + unavailable so the Library list/detail screens have real
+    // metadata to render from SQLite.
     "CREATE TABLE IF NOT EXISTS libraries (
       server_id TEXT NOT NULL,
       remote_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      root TEXT,
+      unavailable INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (server_id, remote_id)
     )",
     // v4: per-series read counters + `fts_rowid` (incremental FTS5 updates).
@@ -125,12 +129,32 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       tags TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY (server_id, book_id)
     )",
+    // v6: one row per (server, entity type). `sync_cursor` is the resume
+    // point of an interrupted sweep and `sync_status` tells the UI whether a
+    // step is idle / running / failed, so Bootstrap can pick up where it
+    // stopped instead of starting over. The `full` entity type carries the
+    // server-level rollup (`last_full_sync` / `last_successful_sync`).
     "CREATE TABLE IF NOT EXISTS sync_state (
-      server_id TEXT PRIMARY KEY,
+      server_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      last_sync_at TEXT,
+      sync_cursor TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'idle',
+      last_error TEXT,
       last_full_sync TEXT,
       last_successful_sync TEXT,
-      last_error TEXT,
-      sync_status TEXT NOT NULL DEFAULT 'idle'
+      PRIMARY KEY (server_id, entity_type)
+    )",
+    // v6: remote deletions discovered by Reconcile. The mirrored row itself
+    // is removed (cascade); the tombstone records that it is gone, so a
+    // late-arriving event or a stale Outbox mutation can be recognised.
+    "CREATE TABLE IF NOT EXISTS deleted_entities (
+      server_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      remote_id TEXT NOT NULL,
+      deleted_at TEXT NOT NULL,
+      cause TEXT NOT NULL DEFAULT 'reconcile',
+      PRIMARY KEY (server_id, entity_type, remote_id)
     )",
     "CREATE TABLE IF NOT EXISTS pending_mutations (
       id TEXT PRIMARY KEY,
@@ -266,6 +290,12 @@ pub const V4_ALTER_STATEMENTS: &[&str] = &[
     "ALTER TABLE book_metadata ADD COLUMN release_date TEXT",
 ];
 
+/// v4 → v5: libraries gained their detail columns.
+pub const V5_ALTER_STATEMENTS: &[&str] = &[
+    "ALTER TABLE libraries ADD COLUMN root TEXT",
+    "ALTER TABLE libraries ADD COLUMN unavailable INTEGER NOT NULL DEFAULT 0",
+];
+
 /// True when a table exists and has the given column.
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
     let mut stmt = conn.prepare(&format!(
@@ -298,18 +328,65 @@ fn migrate_fts_shape(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// v5 → v6: `sync_state` gains `entity_type` as part of its primary key, so
+/// an existing table has to be rebuilt (SQLite cannot alter a PK). The old
+/// single row per server becomes the `full` rollup row.
+fn migrate_sync_state_shape(conn: &Connection) -> rusqlite::Result<()> {
+    let ddl: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(ddl) = ddl else {
+        return Ok(()); // never existed → CREATE builds the v6 shape
+    };
+    if ddl.contains("entity_type") {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "CREATE TABLE sync_state_v6 (
+           server_id TEXT NOT NULL,
+           entity_type TEXT NOT NULL,
+           last_sync_at TEXT,
+           sync_cursor TEXT,
+           sync_status TEXT NOT NULL DEFAULT 'idle',
+           last_error TEXT,
+           last_full_sync TEXT,
+           last_successful_sync TEXT,
+           PRIMARY KEY (server_id, entity_type)
+         );
+         INSERT INTO sync_state_v6 (server_id, entity_type, last_sync_at, sync_status,
+                                    last_error, last_full_sync, last_successful_sync)
+           SELECT server_id, 'full',
+                  COALESCE(last_successful_sync, last_full_sync),
+                  sync_status, last_error, last_full_sync, last_successful_sync
+           FROM sync_state;
+         DROP TABLE sync_state;
+         ALTER TABLE sync_state_v6 RENAME TO sync_state;",
+    )?;
+    Ok(())
+}
+
 /// Apply all statements and stamp the schema version.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     migrate_fts_shape(conn)?;
+    migrate_sync_state_shape(conn)?;
     for statement in CREATE_STATEMENTS {
         conn.execute(statement, [])?;
     }
-    // v3 → v4 column additions (skip when already present).
-    for statement in V4_ALTER_STATEMENTS {
+    // Column additions for tables that already exist on disk (skip when present).
+    let alters: Vec<&str> = V4_ALTER_STATEMENTS
+        .iter()
+        .chain(V5_ALTER_STATEMENTS)
+        .copied()
+        .collect();
+    for statement in &alters {
         // "ALTER TABLE {t} ADD COLUMN {c} ..." → split off the column name.
         let rest = statement
             .strip_prefix("ALTER TABLE ")
-            .expect("v4 alter statements are ALTER TABLE");
+            .expect("alter statements are ALTER TABLE");
         let (table, col_part) = rest.split_once(" ADD COLUMN ").expect("alter shape");
         let column = col_part
             .split_whitespace()

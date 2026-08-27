@@ -98,6 +98,20 @@ pub fn delete_for_server(conn: &Connection, server_id: &str) -> rusqlite::Result
     )
 }
 
+/// Remove one entity's cover record (delete propagation). Returns the number
+/// of rows removed; the caller deletes the file itself.
+pub fn delete_entity(
+    conn: &Connection,
+    server_id: &str,
+    remote_id: &str,
+    variant: &str,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "DELETE FROM thumbnails WHERE server_id = ?1 AND remote_id = ?2 AND variant = ?3",
+        params![server_id, remote_id, variant],
+    )
+}
+
 /// remote_ids of series (one server) with no recorded thumbnail — the
 /// backfill list for "缓存缺失自动补齐" (missing rows are refetched by the
 /// cover pipeline; rows whose file vanished are caught by the facade's

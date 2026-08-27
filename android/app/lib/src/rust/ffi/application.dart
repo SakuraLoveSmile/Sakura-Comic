@@ -344,7 +344,7 @@ class SeriesDetailRow {
   final String? publisher;
   final String? readingDirection;
   final String? language;
-  final PlatformInt64? ageRating;
+  final String? ageRating;
   final PlatformInt64? totalBookCount;
   final List<String> genres;
   final List<String> tags;
