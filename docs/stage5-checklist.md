@@ -14,7 +14,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ## 验收结果
 
 ```bash
-bash scripts/e2e_stage5.sh        # 场景重放 10/10 PASS（无需网络，双端同一份 JSON）
+bash scripts/e2e_stage5.sh        # 场景重放 12/12 PASS（无需网络，双端同一份 JSON）
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
                                   # → ALL GREEN：Rust 98 / Swift 85（1 skip=live）/ Flutter 24
 ```
@@ -98,7 +98,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 | 新增 Book | s1（`book-3-3` 进已有 series、`book-4-*` 进新 series）→ `books_added == 4` |
 | 修改 Metadata | s1 改 series-1 的 summary/genres/tags → 快照比对覆盖归一化表 |
 | App 离线后重新上线 | interrupt 步 3（全量故障，镜像不变）→ 步 4（恢复后收敛到 s2） |
-| 同步中途失败后恢复 | interrupt 步 1（series 第 2 页故障）→ 步 2（游标续跑，最终镜像 == s3） |
+| 同步中途失败后恢复 | interrupt 步 1/2（series 第 2 页故障 → 游标续跑）+ 步 3/4（**Books 扫到某个 series 的中途**故障，游标 `series=<id>|page=1` → 重启从该 series 该页续跑，最终镜像 == s3） |
 | 最终 SQLite == Komga | 每步 `diff_mirror`；收敛后再扫一次 `clean == true` |
 
 `bash scripts/e2e_stage5.sh` 的 `--scenario` 半程在无网络条件下跑完全部步骤；
@@ -117,7 +117,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 - **Swift（85 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
   `PruneStoreTests`、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）
-- **Smoke**：`stage5_smoke --scenario` 10/10 PASS
+- **Smoke**：`stage5_smoke --scenario` 12/12 PASS
 - **UI 构建**：ComicApp iOS + macOS scheme BUILD SUCCEEDED；flutter analyze 0 issues
 - **删除传播落盘**：Reconcile 摘要携带真实封面路径（`Pruned.coverPaths` 两端一致），
   Apple 侧 `LibraryViewModel.reconcile` 逐个 `cache.remove(...)`，Android 侧由
