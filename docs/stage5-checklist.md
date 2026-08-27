@@ -118,7 +118,7 @@ Komga 删除 → Reconcile 扫描发现缺失 → SQLite 级联删除 + deleted_
 | 实体 | 级联范围（`store/prune.rs`，两端一致） | 证据 |
 | --- | --- | --- |
 | Series | 其 Books（递归走 Book 规则）+ metadata/tags/genres/authors + FTS 行 + `collection_series` 成员 + 封面记录与磁盘文件；子 Book 墓碑 `cause = cascade` | `series_delete_cascades_to_books_and_children`、场景步 3 |
-| Book | 自身行 + metadata/tags/authors + FTS + `read_progress` + `readlist_books` 成员 + `downloads`/`download_pages` + 封面 + **该书的 Outbox 条目** | `book_delete_clears_membership_and_search`、场景步 3 |
+| Book | 自身行 + metadata/tags/authors + FTS + `read_progress` + `readlist_books` 成员 + `downloads`/`download_pages` + 封面；**Outbox 条目保留**（见下） | `book_delete_clears_membership_and_search`、场景步 3 |
 | Collection | `collections` + `collection_series` | 场景步 3（`col-2`） |
 | Readlist | `readlists` + `readlist_books` | 场景步 3（`rl-2`） |
 

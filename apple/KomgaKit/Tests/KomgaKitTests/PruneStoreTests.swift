@@ -66,7 +66,19 @@ final class PruneStoreTests: XCTestCase {
         XCTAssertEqual(try count(store, "SELECT COUNT(*) FROM series_metadata WHERE server_id = ?"), 2)
         XCTAssertEqual(try count(store, "SELECT COUNT(*) FROM read_progress WHERE server_id = ?"), 1)
         XCTAssertEqual(try count(store, "SELECT COUNT(*) FROM collection_series WHERE server_id = ?"), 2)
-        XCTAssertEqual(try count(store, "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ?"), 0)
+        // The queued upload survives on purpose: a deletion inferred from an id
+        // sweep can be a pagination artefact, and a lost user action cannot be
+        // re-derived. Discarding it is the upload phase's call to make.
+        XCTAssertEqual(
+            try store.dbQueue.read { db in
+                try String.fetchOne(
+                    db,
+                    sql: "SELECT mutation_type FROM pending_mutations WHERE server_id = ?",
+                    arguments: ["srv"]
+                )
+            },
+            "READ_PROGRESS"
+        )
         XCTAssertEqual(try count(store, "SELECT COUNT(*) FROM thumbnails WHERE server_id = ?"), 0)
         XCTAssertEqual(covers, ["/tmp/b.png"])
         // Tombstones: the series plus its 3 cascaded books.
