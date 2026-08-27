@@ -432,27 +432,53 @@ interrupt_scenario = {
             },
         },
         {
+            # Reconcile is interrupted mid-sweep too: the series step has by
+            # then already propagated the remote deletions, and the books
+            # cursor must point at the series that was never fetched.
+            "label": "a reconcile sweep dies inside the books step, at a series boundary",
+            "action": "reconcile",
+            "snapshot": "s2",
+            "trigger": "manual_refresh",
+            "fault": {"kind": "network", "entity": "books", "afterPages": 3},
+            "expectSuccess": False,
+            "expect": {
+                "failedEntities": ["books"],
+                "cursors": {"books": "series=series-5|page=0"},
+                "requests": {"series": 1, "books": 3, "collections": 0},
+            },
+        },
+        {
+            "label": "the next sweep resumes at that series and finishes converging",
+            "action": "reconcile",
+            "snapshot": "s2",
+            "trigger": "network_recovered",
+            "expect": {
+                "mirror": "s2",
+                "requests": {"books": 1},
+            },
+        },
+        {
             "label": "the library is browsable offline: a fully failing transport loses nothing",
             "action": "reconcile",
             "snapshot": "s3",
             "trigger": "network_recovered",
             "fault": {"kind": "network", "entity": None, "afterPages": 0},
             "expectSuccess": False,
-            "expect": {"mirror": "s3", "failedEntities": ["libraries"], "rollupError": True},
+            "expect": {"mirror": "s2", "failedEntities": ["libraries"], "rollupError": True},
         },
         {
             "label": "network is back and the server now serves a different library: reconcile converges",
             "action": "reconcile",
-            "snapshot": "s2",
+            "snapshot": "s3",
             "trigger": "network_recovered",
-            "expect": {"mirror": "s2"},
+            "expect": {"mirror": "s3"},
         },
         {
             "label": "one more sweep confirms the mirror is stable (SSE never worked)",
             "action": "reconcile",
-            "snapshot": "s2",
+            "snapshot": "s3",
             "trigger": "sse_reconnected",
-            "expect": {"mirror": "s2", "clean": True},
+            "expect": {"mirror": "s3", "clean": True},
         },
     ],
 }

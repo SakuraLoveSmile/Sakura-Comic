@@ -300,6 +300,18 @@ async fn sync_books(
                 page += 1;
             }
             index += 1;
+            // Checkpoint the series boundary too: a run interrupted at the next
+            // series' first page would otherwise restart from the top.
+            if let Some(next) = series_ids.get(index) {
+                let conn = store::open(db_path).map_err(db_err)?;
+                sync_state::checkpoint_entity(
+                    &conn,
+                    server_id,
+                    sync_state::ENTITY_BOOKS,
+                    &book_cursor(next, 0),
+                )
+                .map_err(db_err)?;
+            }
         }
         Ok((written, pages, progress))
     })

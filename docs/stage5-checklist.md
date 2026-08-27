@@ -14,9 +14,9 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ## 验收结果
 
 ```bash
-bash scripts/e2e_stage5.sh        # 场景重放 12/12 PASS（无需网络，双端同一份 JSON）
+bash scripts/e2e_stage5.sh        # 场景重放 14/14 PASS（无需网络，双端同一份 JSON）
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 98 / Swift 85（1 skip=live）/ Flutter 24
+                                  # → ALL GREEN：Rust 103 / Swift 85（1 skip=live）/ Flutter 24
 ```
 
 > **未在本机执行的半程**：`stage5_smoke` 的真实服务器链路（Bootstrap → Reconcile →
@@ -98,7 +98,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 | 新增 Book | s1（`book-3-3` 进已有 series、`book-4-*` 进新 series）→ `books_added == 4` |
 | 修改 Metadata | s1 改 series-1 的 summary/genres/tags → 快照比对覆盖归一化表 |
 | App 离线后重新上线 | interrupt 步 3（全量故障，镜像不变）→ 步 4（恢复后收敛到 s2） |
-| 同步中途失败后恢复 | interrupt 步 1/2（series 第 2 页故障 → 游标续跑）+ 步 3/4（**Books 扫到某个 series 的中途**故障，游标 `series=<id>|page=1` → 重启从该 series 该页续跑，最终镜像 == s3） |
+| 同步中途失败后恢复 | **Bootstrap**：步 1/2（series 第 2 页故障 → 游标续跑）、步 3/4（Books 扫到某 series 中途故障，游标 `series=<id>|page=1` → 从该页续跑）；**Reconcile**：步 5/6（Books 在 series 边界被打断，游标 `series=series-5|page=0` → 下一轮只再请求 1 次 books 即完成收敛） |
 | 最终 SQLite == Komga | 每步 `diff_mirror`；收敛后再扫一次 `clean == true` |
 
 `bash scripts/e2e_stage5.sh` 的 `--scenario` 半程在无网络条件下跑完全部步骤；
@@ -108,16 +108,18 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 
 ## 覆盖测试
 
-- **Rust（98 通过）**：`sync::scenario`（两个共享场景 10 步全绿）、`sync::full`（镜像完整性 /
-  fresh 幂等 / 已完成步骤不再重镜）、`store::sync_state`（按实体独立、失败保留游标、
-  多服务器隔离）、`store::prune`（级联 / 作用域内 book prune / 墓碑读写）、
+- **Rust（103 通过）**：`sync::scenario`（两个共享场景 14 步全绿）、`sync::full`（镜像完整性 /
+  fresh 幂等 / 已完成步骤不再重镜）、
+  `sync::reconcile`（节流：后台触发在 60s 窗口内不扫、显式触发永远扫、时间戳缺失或
+  不可解析时宁可重扫；五种触发名双向映射）、`store::sync_state`（按实体独立、
+  失败保留游标、多服务器隔离）、`store::prune`（级联 / 作用域内 book prune / 墓碑读写）、
   `ffi::application`（删除传播打到磁盘文件）、schema v6 迁移
 - **Flutter（24 通过，含新增 6 项）**：`test/sync_triggers_test.dart`（冷启动分叉 Bootstrap/Reconcile、
   回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、对账失败仍可用）
 - **Swift（85 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
   `PruneStoreTests`、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）
-- **Smoke**：`stage5_smoke --scenario` 12/12 PASS
+- **Smoke**：`stage5_smoke --scenario` 14/14 PASS
 - **UI 构建**：ComicApp iOS + macOS scheme BUILD SUCCEEDED；flutter analyze 0 issues
 - **删除传播落盘**：Reconcile 摘要携带真实封面路径（`Pruned.coverPaths` 两端一致），
   Apple 侧 `LibraryViewModel.reconcile` 逐个 `cache.remove(...)`，Android 侧由

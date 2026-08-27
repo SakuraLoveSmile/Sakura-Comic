@@ -428,6 +428,18 @@ async fn reconcile_books(
                 page += 1;
             }
             index += 1;
+            // Same series-boundary checkpoint as Bootstrap: an interrupted
+            // sweep resumes at the next series instead of restarting.
+            if let Some(next) = series_ids.get(index) {
+                let conn = store::open(db_path).map_err(db_err)?;
+                sync_state::checkpoint_entity(
+                    &conn,
+                    server_id,
+                    sync_state::ENTITY_BOOKS,
+                    &crate::sync::full::book_cursor(next, 0),
+                )
+                .map_err(db_err)?;
+            }
         }
         let conn = store::open(db_path).map_err(db_err)?;
         let pruned =
@@ -651,4 +663,104 @@ async fn reconcile_read_progress(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::open_in_memory;
+    use chrono::Duration;
+
+    fn state_with_last_sync(age_secs: i64) -> Connection {
+        let conn = open_in_memory().unwrap();
+        sync_state::touch_successful_sync(&conn, "srv-1").unwrap();
+        // Backdate the rollup stamp so the throttle window is deterministic.
+        let stamp = (Utc::now() - Duration::seconds(age_secs))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        conn.execute(
+            "UPDATE sync_state SET last_sync_at = ?1 WHERE server_id = ?2 AND entity_type = ?3",
+            rusqlite::params![stamp, "srv-1", sync_state::ENTITY_FULL],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn never_synced_always_runs() {
+        let conn = open_in_memory().unwrap();
+        for trigger in [
+            ReconcileTrigger::AppLaunch,
+            ReconcileTrigger::DidBecomeActive,
+            ReconcileTrigger::ManualRefresh,
+        ] {
+            assert!(
+                should_reconcile(&conn, "srv-1", trigger, Utc::now()).unwrap(),
+                "{trigger:?} must run when nothing has ever synced"
+            );
+        }
+    }
+
+    #[test]
+    fn background_triggers_are_throttled() {
+        let conn = state_with_last_sync(10);
+        assert!(
+            !should_reconcile(&conn, "srv-1", ReconcileTrigger::AppLaunch, Utc::now()).unwrap()
+        );
+        assert!(!should_reconcile(
+            &conn,
+            "srv-1",
+            ReconcileTrigger::DidBecomeActive,
+            Utc::now()
+        )
+        .unwrap());
+        // Past the window they run again.
+        let conn = state_with_last_sync(MIN_RECONCILE_INTERVAL_SECS + 5);
+        assert!(should_reconcile(&conn, "srv-1", ReconcileTrigger::AppLaunch, Utc::now()).unwrap());
+    }
+
+    #[test]
+    fn explicit_triggers_bypass_the_throttle() {
+        let conn = state_with_last_sync(0);
+        for trigger in [
+            ReconcileTrigger::ManualRefresh,
+            ReconcileTrigger::NetworkRecovered,
+            ReconcileTrigger::SseReconnected,
+        ] {
+            assert!(
+                should_reconcile(&conn, "srv-1", trigger, Utc::now()).unwrap(),
+                "{trigger:?} must always sweep: correctness cannot wait out a window"
+            );
+        }
+    }
+
+    #[test]
+    fn unparseable_stamp_re_syncs_rather_than_staying_stale() {
+        let conn = state_with_last_sync(5);
+        conn.execute(
+            "UPDATE sync_state SET last_sync_at = 'not-a-timestamp'
+             WHERE server_id = 'srv-1' AND entity_type = 'full'",
+            [],
+        )
+        .unwrap();
+        assert!(should_reconcile(&conn, "srv-1", ReconcileTrigger::AppLaunch, Utc::now()).unwrap());
+    }
+
+    #[test]
+    fn trigger_names_round_trip() {
+        for (name, trigger) in [
+            ("app_launch", ReconcileTrigger::AppLaunch),
+            ("did_become_active", ReconcileTrigger::DidBecomeActive),
+            ("network_recovered", ReconcileTrigger::NetworkRecovered),
+            ("sse_reconnected", ReconcileTrigger::SseReconnected),
+            ("manual_refresh", ReconcileTrigger::ManualRefresh),
+        ] {
+            assert_eq!(ReconcileTrigger::parse(name), trigger);
+            assert_eq!(trigger.as_str(), name);
+        }
+        // Unknown names land on the always-run choice.
+        assert_eq!(
+            ReconcileTrigger::parse("?"),
+            ReconcileTrigger::ManualRefresh
+        );
+    }
 }
