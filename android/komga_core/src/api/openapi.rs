@@ -27,14 +27,16 @@ pub struct Endpoint {
     pub summary: String,
 }
 
-fn spec() -> Value {
-    serde_json::from_str(SPEC).expect("the OpenAPI snapshot must parse")
+fn spec() -> &'static Value {
+    // Parsed once: the helpers below are called per field per fixture entity,
+    // and re-reading a 180 KB document each time made the gate take ~19 seconds.
+    static DOCUMENT: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    DOCUMENT.get_or_init(|| serde_json::from_str(SPEC).expect("the OpenAPI snapshot must parse"))
 }
 
 /// Look up `GET path` in the snapshot; `None` when the server has no such route.
 pub fn endpoint(path: &str, method: &str) -> Option<Endpoint> {
-    let document = spec();
-    let operation = document["paths"].get(path)?.get(method)?;
+    let operation = spec()["paths"].get(path)?.get(method)?;
     Some(Endpoint {
         path: path.to_string(),
         method: method.to_string(),
@@ -49,8 +51,7 @@ pub fn endpoint(path: &str, method: &str) -> Option<Endpoint> {
 /// Find the documented path a concrete URL maps onto, matching `{param}`
 /// segments against the actual values.
 pub fn documented_path(concrete_path: &str) -> Option<String> {
-    let document = spec();
-    let paths = document["paths"].as_object()?;
+    let paths = spec()["paths"].as_object()?;
     let wanted: Vec<&str> = concrete_path
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -76,8 +77,7 @@ pub fn documented_path(concrete_path: &str) -> Option<String> {
 
 /// The `$ref`ed schema name of a `200 application/json` response.
 pub fn response_schema(path: &str, method: &str) -> Option<String> {
-    let document = spec();
-    let node = document["paths"].get(path)?;
+    let node = spec()["paths"].get(path)?;
     let schema = node[method]["responses"]["200"]["content"]["application/json"]["schema"].clone();
     let reference = schema["$ref"].as_str()?;
     Some(reference.rsplit('/').next()?.to_string())
@@ -107,8 +107,7 @@ pub fn field_is_nullable(schema: &str, field: &str) -> Option<bool> {
 }
 
 pub fn field_is_required(schema: &str, field: &str) -> Option<bool> {
-    let document = spec();
-    let node = document["components"]["schemas"].get(schema)?;
+    let node = spec()["components"]["schemas"].get(schema)?;
     Some(
         node["required"]
             .as_array()?
@@ -270,6 +269,140 @@ mod decode_tests {
                      property — it would silently decode to None/default"
                 );
             }
+        }
+    }
+
+    /// Walk a "list of pages" and audit every entity inside it.
+    fn audit_pages(
+        pages: Option<&Vec<Value>>,
+        schema: &str,
+        label: &str,
+        snapshot: &str,
+        problems: &mut Vec<String>,
+    ) {
+        for page in pages.cloned().unwrap_or_default() {
+            for item in page.as_array().cloned().unwrap_or_default() {
+                audit_object(schema, label, snapshot, &item, problems);
+            }
+        }
+    }
+
+    /// Assert every Komga-required property the client reads is present in one
+    /// fixture entity, then descend into nested objects it models too.
+    fn audit_object(
+        schema: &str,
+        label: &str,
+        snapshot: &str,
+        item: &Value,
+        problems: &mut Vec<String>,
+    ) {
+        let Some(object) = item.as_object() else {
+            return;
+        };
+        let Some(fields) = DECODED_FIELDS
+            .iter()
+            .find(|(modelled, _)| *modelled == schema)
+            .map(|(_, fields)| *fields)
+        else {
+            return;
+        };
+        let name = object
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("(no id)");
+        for field in fields {
+            if !field_is_required(schema, field).unwrap_or(false) {
+                continue;
+            }
+            if !object.contains_key(*field) {
+                problems.push(format!(
+                    "{label} {snapshot}/{name}: {schema}.{field} is required by Komga and \
+                     read by the client, but the fixture omits it"
+                ));
+            }
+        }
+        let children: &[(&str, &str)] = match schema {
+            "SeriesDto" => &[
+                ("metadata", "SeriesMetadataDto"),
+                ("booksMetadata", "BookMetadataAggregationDto"),
+            ],
+            "BookDto" => &[
+                ("metadata", "BookMetadataDto"),
+                ("media", "MediaDto"),
+                ("readProgress", "ReadProgressDto"),
+            ],
+            _ => &[],
+        };
+        for (key, child_schema) in children {
+            let Some(child) = object.get(*key) else {
+                continue;
+            };
+            let nested = format!("{label}.{key}");
+            if child.is_object() {
+                audit_object(child_schema, &nested, snapshot, child, problems);
+            } else if let Some(list) = child.as_array() {
+                for entry in list {
+                    audit_object(child_schema, &nested, snapshot, entry, problems);
+                }
+            }
+        }
+    }
+
+    /// The shared scenario fixtures must not be looser than a real response,
+    /// otherwise the contract battery can pass on data the server never sends.
+    #[test]
+    fn fixtures_are_as_strict_as_the_real_server() {
+        for file in [
+            include_str!("../../../../specs/contracts/fixtures/sync/scenario-reconcile.json"),
+            include_str!("../../../../specs/contracts/fixtures/sync/scenario-interrupt.json"),
+        ] {
+            let scenario: Value = serde_json::from_str(file).unwrap();
+            let mut problems: Vec<String> = Vec::new();
+            for snap in scenario["snapshots"].as_array().unwrap() {
+                let id = snap["id"].as_str().unwrap_or("?").to_string();
+                audit_pages(
+                    snap["series"].as_array(),
+                    "SeriesDto",
+                    "series",
+                    &id,
+                    &mut problems,
+                );
+                audit_pages(
+                    snap["collections"].as_array(),
+                    "CollectionDto",
+                    "collection",
+                    &id,
+                    &mut problems,
+                );
+                audit_pages(
+                    snap["readlists"].as_array(),
+                    "ReadListDto",
+                    "readlist",
+                    &id,
+                    &mut problems,
+                );
+                audit_pages(
+                    snap["onDeck"].as_array(),
+                    "BookDto",
+                    "on-deck book",
+                    &id,
+                    &mut problems,
+                );
+                for library in snap["libraries"].as_array().cloned().unwrap_or_default() {
+                    audit_object("LibraryDto", "library", &id, &library, &mut problems);
+                }
+                if let Some(map) = snap["books"].as_object() {
+                    for pages in map.values() {
+                        audit_pages(pages.as_array(), "BookDto", "book", &id, &mut problems);
+                    }
+                }
+            }
+            assert!(
+                problems.is_empty(),
+                "{}: the fixtures are looser than a real Komga response:\n{}",
+                scenario["name"].as_str().unwrap_or("?"),
+                problems.join("\n")
+            );
         }
     }
 
