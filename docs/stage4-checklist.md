@@ -15,8 +15,12 @@ FullSync（Series → Books → Collections → Readlists → Progress → Cover
 
 ```bash
 bash scripts/verify.sh        # cargo fmt/clippy/test + swift build/test + flutter analyze/test 全绿
-bash scripts/e2e_stage4.sh    # fixture 电池 28/28 PASS → 离线重放 25/25 PASS（无服务器）
+bash scripts/e2e_stage4.sh    # fixture 电池 30/30 PASS → 离线重放 27/27 PASS（无服务器）
 ```
+
+> `verify.sh` 的 Flutter 分支依赖 `flutter` 在 PATH 上（本机安装位置示例：
+> `export PATH="$HOME/flutter/bin:$PATH"`）。不在 PATH 上时该分支会直接失败退出，
+> 不要把「没跑」当成「跑过」。
 
 真实服务器链路（需 API Key，同步 → 无凭据离线重放同一数据库）：
 ```bash
@@ -25,7 +29,7 @@ export KOMGA_API_KEY=your-api-key
 bash scripts/e2e_stage4.sh
 ```
 
-## SQLite Schema v4（双端 DDL 镜像）
+## SQLite Schema v5（双端 DDL 镜像）
 
 | 变更 | Rust | Swift |
 | --- | --- | --- |
@@ -34,13 +38,15 @@ bash scripts/e2e_stage4.sh
 | 完整元数据列（reading_direction/language/age_rating/title_sort/total_book_count、book number/number_sort/isbn/release_date） | ✅ | ✅ |
 | v3→v4 列迁移（PRAGMA table_info 守卫的 ALTER）+ FTS 形状重建 | ✅ | ✅（`Schema.migrate(db:)`）|
 | 服务器作用域 FTS5（server_id UNINDEXED）+ fts_rowid 增量维护 | ✅ `store/fts.rs` | ✅ `KomgaStore+MediaLibrary.swift::FTS` |
+| v5：libraries.root / libraries.unavailable（DTO 本来就带，之前入库被丢弃） | ✅ `V5_ALTER_STATEMENTS` | ✅ `Schema.v5AlterStatements` |
 
 ## Library
 
 | 能力 | Android (Rust + Flutter) | Apple (Swift) |
 | --- | --- | --- |
-| 列表（含 Series 计数） | `library_counts`（LEFT JOIN 聚合）→ 书架顶部 chips「全部 / Manga Main 2 / Webtoons 1」 | ✅ `libraryCounts` → LibraryView libraryChips |
-| 详情 / 切换 | 图书馆 chip 筛选 → `query_series(library_id)`；服务器切换沿用 Servers 入口 | ✅ 同构（chip → querySeries(libraryID:)） |
+| 列表 | 书架 AppBar「图书馆」→ `LibrariesScreen`：每库 name + 本地 series/book/已读 计数 + 根路径 + 不可用标记（`library_counts` 相关子查询聚合） | ✅ 同构（`LibrariesListView`，`store.libraryCounts`） |
+| 详情 | `LibraryDetailScreen`：统计块 + 阅读进度条 + root + 可用性 + 本库内 FTS 搜索 + 该库 Series 封面墙（分页「加载更多」，点进 Series 详情） | ✅ `LibraryDetailView`（`store.libraryDetail` + `librarySeries` 分页墙） |
+| 切换 | ① 书架 chips「全部 / Manga Main 2 / Webtoons 1」；② 列表/详情内「设为书架筛选」→ 回书架并带上 `library_id`；③ 服务器切换沿用 Servers 入口 | ✅ 同构（chips + `model.selectLibrary(id:)`；服务器切换在 `serverMenu`） |
 
 ## Series
 
@@ -89,16 +95,20 @@ bash scripts/e2e_stage4.sh
 
 ## 覆盖测试
 
-- **Rust（86 通过）**：books/collections/readlists/read_progress store、FTS 转义与增量维护、
-  query 层（搜索/筛选/排序/分页/阅读状态分区/多服务器隔离）、FullSync fixture 全链路与幂等、
+- **Rust（87 通过）**：books/collections/readlists/read_progress store、FTS 转义与增量维护、
+  query 层（搜索/筛选/排序/分页/阅读状态分区/多服务器隔离、library_counts + library_detail
+  聚合与库内计数隔离）、FullSync fixture 全链路与幂等、
   facade（详情/Outbox/书封面回填/删除级联）、API 解码共享 fixtures
 - **Swift（65 通过，1 skip=live）**：新增 MediaLibraryStoreTests —— 共享 fixtures 解码、
-  v3→v4 迁移（旧 FTS 形状重建 + user_version=4）、FullSync 种子（3/7/2/2/4）、
-  本地查询电池（搜索/筛选/排序/分页/详情/阅读状态分区/Outbox/合集/书单/继续阅读/filter options）
-- **Flutter（17 通过）**：既有 11 项全绿（封面墙磁盘渲染/演示墙/服务器管理链路）+
-  新增 6 项（搜索触发 FTS 查询、库 chips 筛选、继续阅读架渲染、合集 Tab 导航成员墙、
-  书单 Tab 保序列表、Series 详情元数据 + 标记已读写 Outbox）
-- **Smoke**：`stage4_smoke --fixture` 28/28 PASS；`--offline` 重放 25/25 PASS（零网络路径）
+  v3→v4/v5 迁移（旧 FTS 形状重建 + libraries.root/unavailable 落表 + user_version=5）、
+  FullSync 种子（3/7/2/2/4）、
+  本地查询电池（搜索/筛选/排序/分页/详情/阅读状态分区/Outbox/合集/书单/继续阅读/filter options/
+  Library 列表计数与详情一致）
+- **Flutter（18 通过）**：既有 11 项全绿（封面墙磁盘渲染/演示墙/服务器管理链路）+
+  新增 7 项（搜索触发 FTS 查询、库 chips 筛选、继续阅读架渲染、合集 Tab 导航成员墙、
+  书单 Tab 保序列表、Series 详情元数据 + 标记已读写 Outbox、
+  图书馆列表 → Library 详情（统计/根路径/本库封面墙）→ 设为书架筛选）
+- **Smoke**：`stage4_smoke --fixture` 30/30 PASS；`--offline` 重放 27/27 PASS（零网络路径）
 - **UI 构建**：ComicApp iOS/macOS scheme BUILD SUCCEEDED；flutter analyze 0 issues
 
 ## 已知边界

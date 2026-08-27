@@ -11,6 +11,8 @@ pub struct LibraryRow {
     pub server_id: String,
     pub remote_id: String,
     pub name: String,
+    pub root: Option<String>,
+    pub unavailable: bool,
 }
 
 fn row_to_library(row: &Row) -> rusqlite::Result<LibraryRow> {
@@ -18,6 +20,8 @@ fn row_to_library(row: &Row) -> rusqlite::Result<LibraryRow> {
         server_id: row.get("server_id")?,
         remote_id: row.get("remote_id")?,
         name: row.get("name")?,
+        root: row.get("root")?,
+        unavailable: row.get::<_, i64>("unavailable")? != 0,
     })
 }
 
@@ -30,9 +34,18 @@ pub fn save_libraries_batch(
     let mut written = 0;
     for library in libraries {
         conn.execute(
-            "INSERT INTO libraries (server_id, remote_id, name) VALUES (?1, ?2, ?3)
-             ON CONFLICT(server_id, remote_id) DO UPDATE SET name = excluded.name",
-            params![server_id, library.id, library.name],
+            "INSERT INTO libraries (server_id, remote_id, name, root, unavailable)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(server_id, remote_id)
+             DO UPDATE SET name = excluded.name, root = excluded.root,
+                           unavailable = excluded.unavailable",
+            params![
+                server_id,
+                library.id,
+                library.name,
+                library.root,
+                library.unavailable.unwrap_or(false) as i64
+            ],
         )?;
         written += 1;
     }
