@@ -248,6 +248,57 @@ public enum ReconcileSync {
         return (false, knownStamp != stamp)
     }
 
+    /// Does this book need writing at all? New or edited metadata always does;
+    /// otherwise only a read-progress change does — the server never bumps the
+    /// book's own `lastModified` for one (mirror of Rust `needs_write`). The
+    /// normalisation matches what the upsert would store.
+    static func needsWrite(
+        added: Bool,
+        changed: Bool,
+        remote: ReadProgressDTO?,
+        stored: (page: Int64?, completed: Bool, serverUpdatedAt: String?)?
+    ) -> Bool {
+        if added || changed { return true }
+        guard let remote else { return false }
+        guard let stored else { return true }
+        return stored.page != remote.page.map(Int64.init)
+            || stored.completed != (remote.completed ?? false)
+            || stored.serverUpdatedAt != remote.lastModified
+    }
+
+    /// Did the mirrored series columns move? `booksCount` and the read counters
+    /// change without Komga touching `series.lastModified`, so comparing the
+    /// stamp alone would miss them (mirror of Rust `series_projection`).
+    static func countersMoved(
+        stored: (
+            lastModified: String?, booksCount: Int?, booksReadCount: Int?,
+            booksUnreadCount: Int?, booksInProgressCount: Int?
+        )?,
+        remote: SeriesDTO
+    ) -> Bool {
+        guard let stored else { return true }
+        return stored.lastModified != remote.lastModified
+            || stored.booksCount != remote.booksCount
+            || stored.booksReadCount != remote.booksReadCount
+            || stored.booksUnreadCount != remote.booksUnreadCount
+            || stored.booksInProgressCount != remote.booksInProgressCount
+    }
+
+    /// Members live in their own table and can be edited without a new
+    /// `lastModifiedDate`, so they have to be compared too (mirror of Rust
+    /// `members_moved`; membership is an unordered set).
+    static func membersMoved(stored: [String]?, remoteSeriesIDs: [String]) -> Bool {
+        guard let stored else { return !remoteSeriesIDs.isEmpty }
+        return stored != remoteSeriesIDs.sorted()
+    }
+
+    /// The same check for a readlist, where the order of the books is itself
+    /// the data (mirror of Rust `books_moved`).
+    static func booksMoved(stored: [String]?, remoteBookIDs: [String]) -> Bool {
+        guard let stored else { return !remoteBookIDs.isEmpty }
+        return stored != remoteBookIDs
+    }
+
     // MARK: - Steps
 
     private static func reconcileLibraries(
@@ -287,6 +338,7 @@ public enum ReconcileSync {
         }
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.series) {
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.series)
+            let projected = try store.localSeriesProjection(serverID: serverID)
             var remote = seeded
             var tally = ReconcileStepTally()
             var page = try store.resumeCursor(serverID: serverID, entityType: SyncEntity.series)
@@ -296,15 +348,27 @@ public enum ReconcileSync {
                     PageRequest(page: page, size: fullSyncPageSize)
                 )
                 let last = response.last
+                let ids = response.content.map(\.id)
+                var dirty: [SeriesDTO] = []
                 for series in response.content {
                     let (added, changed) = classify(known, id: series.id, stamp: series.lastModified)
                     tally.seriesAdded += added ? 1 : 0
                     tally.seriesChanged += changed ? 1 : 0
-                    // A re-appearing id is not deleted any more.
-                    try store.clearTombstone(serverID: serverID, entityType: SyncEntity.series, remoteID: series.id)
-                    remote.insert(series.id)
+                    if added || changed
+                        || countersMoved(stored: projected[series.id], remote: series)
+                    {
+                        dirty.append(series)
+                    }
                 }
-                tally.seriesUpserted += try store.upsertSeriesBatch(serverID: serverID, series: response.content)
+                // A converged library costs a read sweep, not a page of upserts
+                // that each rewrite their FTS row as well.
+                if !dirty.isEmpty {
+                    tally.seriesUpserted += try store.upsertSeriesBatch(serverID: serverID, series: dirty)
+                }
+                // A re-appearing id is not deleted any more.
+                try store.clearTombstones(serverID: serverID, entityType: SyncEntity.series, remoteIDs: ids)
+                // The delete diff still sees every id the sweep scanned, dirty or not.
+                remote.formUnion(ids)
                 tally.pagesSwept += 1
                 if !last {
                     try store.checkpointEntity(
@@ -339,6 +403,7 @@ public enum ReconcileSync {
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.books) {
             let seriesIDs = try store.localIDs(serverID: serverID, entityType: SyncEntity.series)
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.books)
+            let stored = try store.localReadProgress(serverID: serverID)
             // seriesID → remote book ids (the scoped prune input).
             var swept: [String: Set<String>] = [:]
             var tally = ReconcileStepTally()
@@ -369,14 +434,26 @@ public enum ReconcileSync {
                         request: PageRequest(page: page, size: fullSyncPageSize)
                     )
                     let last = response.last
+                    let ids = response.content.map(\.id)
+                    var dirty: [BookDTO] = []
                     for book in response.content {
                         let (added, changed) = classify(known, id: book.id, stamp: book.lastModified)
                         tally.booksAdded += added ? 1 : 0
                         tally.booksChanged += changed ? 1 : 0
-                        try store.clearTombstone(serverID: serverID, entityType: SyncEntity.books, remoteID: book.id)
-                        entry.insert(book.id)
+                        if needsWrite(
+                            added: added, changed: changed,
+                            remote: book.readProgress, stored: stored[book.id]
+                        ) {
+                            dirty.append(book)
+                        }
                     }
-                    tally.booksUpserted += try store.upsertBooksBatch(serverID: serverID, books: response.content)
+                    // A converged library costs a read sweep, not thousands of
+                    // redundant upserts (each of which also rewrites its FTS row).
+                    if !dirty.isEmpty {
+                        tally.booksUpserted += try store.upsertBooksBatch(serverID: serverID, books: dirty)
+                    }
+                    try store.clearTombstones(serverID: serverID, entityType: SyncEntity.books, remoteIDs: ids)
+                    entry.formUnion(ids)
                     tally.pagesSwept += 1
                     if !last {
                         try store.checkpointEntity(
@@ -422,6 +499,7 @@ public enum ReconcileSync {
         }
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.collections) {
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.collections)
+            let members = try store.localCollectionMembers(serverID: serverID)
             var remote = seeded
             var tally = ReconcileStepTally()
             var page = try store.resumeCursor(serverID: serverID, entityType: SyncEntity.collections)
@@ -431,20 +509,29 @@ public enum ReconcileSync {
                     request: PageRequest(page: page, size: fullSyncPageSize)
                 )
                 let last = response.last
+                let ids = response.content.map(\.id)
+                var dirty: [CollectionDTO] = []
                 for collection in response.content {
                     let (added, changed) = classify(
                         known, id: collection.id, stamp: collection.lastModifiedDate
                     )
                     tally.collectionsAdded += added ? 1 : 0
                     tally.collectionsChanged += changed ? 1 : 0
-                    remote.insert(collection.id)
-                    try store.clearTombstone(
-                        serverID: serverID, entityType: SyncEntity.collections, remoteID: collection.id
+                    if added || changed
+                        || membersMoved(stored: members[collection.id], remoteSeriesIDs: collection.seriesIds ?? [])
+                    {
+                        dirty.append(collection)
+                    }
+                }
+                if !dirty.isEmpty {
+                    tally.collectionsUpserted += try store.upsertCollectionsBatch(
+                        serverID: serverID, collections: dirty
                     )
                 }
-                tally.collectionsUpserted += try store.upsertCollectionsBatch(
-                    serverID: serverID, collections: response.content
+                try store.clearTombstones(
+                    serverID: serverID, entityType: SyncEntity.collections, remoteIDs: ids
                 )
+                remote.formUnion(ids)
                 tally.pagesSwept += 1
                 if !last {
                     try store.checkpointEntity(
@@ -479,6 +566,7 @@ public enum ReconcileSync {
         }
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.readlists) {
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.readlists)
+            let storedBooks = try store.localReadlistBooks(serverID: serverID)
             var remote = seeded
             var tally = ReconcileStepTally()
             var page = try store.resumeCursor(serverID: serverID, entityType: SyncEntity.readlists)
@@ -488,20 +576,31 @@ public enum ReconcileSync {
                     request: PageRequest(page: page, size: fullSyncPageSize)
                 )
                 let last = response.last
+                let ids = response.content.map(\.id)
+                var dirty: [ReadListDTO] = []
                 for readlist in response.content {
                     let (added, changed) = classify(
                         known, id: readlist.id, stamp: readlist.lastModifiedDate
                     )
                     tally.readlistsAdded += added ? 1 : 0
                     tally.readlistsChanged += changed ? 1 : 0
-                    remote.insert(readlist.id)
-                    try store.clearTombstone(
-                        serverID: serverID, entityType: SyncEntity.readlists, remoteID: readlist.id
+                    if added || changed
+                        || booksMoved(
+                            stored: storedBooks[readlist.id], remoteBookIDs: readlist.bookIds ?? []
+                        )
+                    {
+                        dirty.append(readlist)
+                    }
+                }
+                if !dirty.isEmpty {
+                    tally.readlistsUpserted += try store.upsertReadlistsBatch(
+                        serverID: serverID, readlists: dirty
                     )
                 }
-                tally.readlistsUpserted += try store.upsertReadlistsBatch(
-                    serverID: serverID, readlists: response.content
+                try store.clearTombstones(
+                    serverID: serverID, entityType: SyncEntity.readlists, remoteIDs: ids
                 )
+                remote.formUnion(ids)
                 tally.pagesSwept += 1
                 if !last {
                     try store.checkpointEntity(

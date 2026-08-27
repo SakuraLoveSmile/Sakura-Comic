@@ -391,16 +391,84 @@ public extension KomgaStore {
         serverUpdatedAt: String?,
         in db: GRDB.Database
     ) throws {
+        // Mirror of Rust `read_progress::sync_write_for`: a sweep must never
+        // overwrite reading state the user produced offline while its upload
+        // is still queued.
+        let keepPending = try syncWriteAllows(db, serverID: serverID, bookID: bookID, serverUpdatedAt: serverUpdatedAt)
+        guard let keepPending else { return }
         try db.execute(
             sql: """
             INSERT INTO read_progress (server_id, book_id, page, completed, server_updated_at, mutation_pending)
-            VALUES (?, ?, ?, ?, ?, 0)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(server_id, book_id) DO UPDATE SET
               page = excluded.page, completed = excluded.completed,
-              server_updated_at = excluded.server_updated_at, mutation_pending = 0
+              server_updated_at = excluded.server_updated_at, mutation_pending = excluded.mutation_pending
             """,
-            arguments: [serverID, bookID, page, completed, serverUpdatedAt]
+            arguments: [
+                serverID, bookID, page, completed, serverUpdatedAt,
+                // 1 keeps a queued local mutation alive alongside the new value.
+                keepPending ? 1 : 0,
+            ]
         )
+    }
+
+    /// Returns nil when the write must be skipped, otherwise whether the row
+    /// keeps `mutation_pending = 1`.
+    ///
+    /// Rules come from
+    /// `specs/contracts/fixtures/read-progress/offline-priority.json`:
+    /// an unuploaded explicit mark outranks any remote passive value, and a
+    /// queued passive progress is only replaced by a strictly newer server
+    /// stamp — in which case the queue entry survives, because dropping it here
+    /// would silently discard an action the server never saw.
+    private func syncWriteAllows(
+        _ db: GRDB.Database,
+        serverID: String,
+        bookID: String,
+        serverUpdatedAt: String?
+    ) throws -> Bool? {
+        let pending = try String.fetchOne(
+            db,
+            sql: """
+            SELECT mutation_type FROM pending_mutations
+             WHERE server_id = ? AND entity_id = ?
+               AND mutation_type IN ('MARK_READ', 'MARK_UNREAD', 'READ_PROGRESS')
+             ORDER BY created_at DESC LIMIT 1
+            """,
+            arguments: [serverID, bookID]
+        )
+        switch pending {
+        case "MARK_READ", "MARK_UNREAD":
+            return nil
+        case "READ_PROGRESS":
+            let local = try String.fetchOne(
+                db,
+                sql: """
+                SELECT local_updated_at FROM read_progress
+                 WHERE server_id = ? AND book_id = ?
+                """,
+                arguments: [serverID, bookID]
+            )
+            guard let local else { return true }
+            guard let remote = serverUpdatedAt,
+                  let remoteDate = Self.timestampDate(remote),
+                  let localDate = Self.timestampDate(local)
+            else {
+                // Nothing to compare against: keep what the user did.
+                return false
+            }
+            return remoteDate > localDate ? true : nil
+        default:
+            return false
+        }
+    }
+
+    /// RFC 3339 with or without fractional seconds.
+    private static func timestampDate(_ text: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: text) { return date }
+        return ISO8601DateFormatter().date(from: text)
     }
 
     /// Local page update: local row + READ_PROGRESS outbox row.

@@ -183,4 +183,35 @@ final class PruneStoreTests: XCTestCase {
         XCTAssertTrue(try store.deleteServer(id: "srv"))
         XCTAssertEqual(try store.countTombstones(serverID: "srv"), 0)
     }
+
+    /// The whole-page clear the sweeps use (mirror of Rust `clear_tombstones`).
+    func testBatchedTombstoneClearOnlyTouchesTheIdsTheSweepSaw() throws {
+        let store = try KomgaStore()
+        // A steady-state sweep has nothing to clear, and says so with one probe.
+        XCTAssertFalse(try store.hasTombstones(serverID: "srv", entityType: SyncEntity.series))
+        try store.clearTombstones(
+            serverID: "srv", entityType: SyncEntity.series,
+            remoteIDs: ["series-1", "series-2"]
+        )
+        try store.clearTombstones(serverID: "srv", entityType: SyncEntity.series, remoteIDs: [])
+
+        for id in ["series-1", "series-2", "series-3"] {
+            try store.recordTombstone(
+                serverID: "srv", entityType: SyncEntity.series, remoteID: id,
+                cause: DeletionCause.reconcile
+            )
+        }
+        XCTAssertTrue(try store.hasTombstones(serverID: "srv", entityType: SyncEntity.series))
+        // Another entity type — or another server — is not answered by these.
+        XCTAssertFalse(try store.hasTombstones(serverID: "srv", entityType: SyncEntity.books))
+        XCTAssertFalse(try store.hasTombstones(serverID: "other", entityType: SyncEntity.series))
+
+        // One page saw two of them: those come back, the third stays deleted.
+        try store.clearTombstones(
+            serverID: "srv", entityType: SyncEntity.series, remoteIDs: ["series-1", "series-2"]
+        )
+        let left = try store.listTombstones(serverID: "srv", entityType: SyncEntity.series)
+        XCTAssertEqual(left.map(\.remoteID), ["series-3"])
+        XCTAssertTrue(try store.hasTombstones(serverID: "srv", entityType: SyncEntity.series))
+    }
 }

@@ -61,6 +61,110 @@ public extension KomgaStore {
         }
     }
 
+    /// `bookID → (page, completed, server_updated_at)` currently stored, so a
+    /// sweep can tell "the server says what we already have" from a real
+    /// progress change (which does *not* bump the book's own lastModified).
+    /// Mirror of Rust `reconcile::local_progress`.
+    func localReadProgress(
+        serverID: String
+    ) throws -> [String: (page: Int64?, completed: Bool, serverUpdatedAt: String?)] {
+        try dbQueue.read { db in
+            var stored: [String: (page: Int64?, completed: Bool, serverUpdatedAt: String?)] = [:]
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                SELECT book_id, page, completed, server_updated_at FROM read_progress WHERE server_id = ?
+                """,
+                arguments: [serverID]
+            ) {
+                let bookID: String = row["book_id"]
+                let page: Int64? = row["page"]
+                let completed: Int? = row["completed"]
+                let serverUpdatedAt: String? = row["server_updated_at"]
+                stored[bookID] = (page: page, completed: (completed ?? 0) != 0, serverUpdatedAt: serverUpdatedAt)
+            }
+            return stored
+        }
+    }
+
+    /// The mirrored series columns a sweep can compare against. `booksCount`
+    /// and the read counters move without Komga ever touching
+    /// `series.lastModified`, so the stamp alone would miss them (mirror of Rust
+    /// `local_series_projection`).
+    func localSeriesProjection(serverID: String) throws -> [String: (
+        lastModified: String?, booksCount: Int?, booksReadCount: Int?,
+        booksUnreadCount: Int?, booksInProgressCount: Int?
+    )] {
+        try dbQueue.read { db in
+            var projected: [String: (
+                lastModified: String?, booksCount: Int?, booksReadCount: Int?,
+                booksUnreadCount: Int?, booksInProgressCount: Int?
+            )] = [:]
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                SELECT remote_id, last_modified, books_count, books_read_count,
+                       books_unread_count, books_in_progress_count
+                  FROM series WHERE server_id = ?
+                """,
+                arguments: [serverID]
+            ) {
+                let remoteID: String = row["remote_id"]
+                let lastModified: String? = row["last_modified"]
+                let booksCount: Int? = row["books_count"]
+                let booksReadCount: Int? = row["books_read_count"]
+                let booksUnreadCount: Int? = row["books_unread_count"]
+                let booksInProgressCount: Int? = row["books_in_progress_count"]
+                projected[remoteID] = (
+                    lastModified: lastModified, booksCount: booksCount,
+                    booksReadCount: booksReadCount, booksUnreadCount: booksUnreadCount,
+                    booksInProgressCount: booksInProgressCount
+                )
+            }
+            return projected
+        }
+    }
+
+    /// `collectionID → members` as currently mirrored. Membership is a set, so
+    /// both sides are compared sorted (mirror of Rust `local_collection_members`).
+    func localCollectionMembers(serverID: String) throws -> [String: [String]] {
+        try dbQueue.read { db in
+            var members: [String: [String]] = [:]
+            for row in try Row.fetchAll(
+                db,
+                sql: "SELECT collection_id, series_id FROM collection_series WHERE server_id = ?",
+                arguments: [serverID]
+            ) {
+                let collectionID: String = row["collection_id"]
+                let seriesID: String = row["series_id"]
+                members[collectionID, default: []].append(seriesID)
+            }
+            for collectionID in Array(members.keys) { members[collectionID]?.sort() }
+            return members
+        }
+    }
+
+    /// `readlistID → books` in mirrored order — a readlist is ordered, so the
+    /// sequence itself is the data (mirror of Rust `local_readlist_books`).
+    func localReadlistBooks(serverID: String) throws -> [String: [String]] {
+        try dbQueue.read { db in
+            var books: [String: [String]] = [:]
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                SELECT readlist_id, book_id FROM readlist_books WHERE server_id = ?
+                 ORDER BY readlist_id, position
+                """,
+                arguments: [serverID]
+            ) {
+                let readlistID: String = row["readlist_id"]
+                let bookID: String = row["book_id"]
+                books[readlistID, default: []].append(bookID)
+            }
+            return books
+        }
+    }
+
     // MARK: Tombstones
 
     /// Record that an entity is gone. Idempotent (re-deleting refreshes the
@@ -75,6 +179,31 @@ public extension KomgaStore {
             try recordTombstone(
                 db, serverID: serverID, entityType: entityType, remoteID: remoteID, cause: cause
             )
+        }
+    }
+
+    /// True when one server/entity type has any tombstone at all. A
+    /// steady-state sweep has none, and checking once beats issuing
+    /// `remoteIDs.count` deletes (mirror of Rust `has_tombstones`).
+    func hasTombstones(serverID: String, entityType: String) throws -> Bool {
+        try dbQueue.read { db in
+            try hasTombstones(db, serverID: serverID, entityType: entityType)
+        }
+    }
+
+    /// Clear the tombstones of the ids one sweep page saw. Cheap by design: a
+    /// steady-state sweep has no tombstone at all, and that is answered with a
+    /// single `EXISTS` query instead of one delete per id (mirror of Rust
+    /// `clear_tombstones`).
+    func clearTombstones(serverID: String, entityType: String, remoteIDs: [String]) throws {
+        guard !remoteIDs.isEmpty else { return }
+        try dbQueue.write { db in
+            guard try hasTombstones(db, serverID: serverID, entityType: entityType) else { return }
+            for remoteID in remoteIDs {
+                try clearTombstone(
+                    db, serverID: serverID, entityType: entityType, remoteID: remoteID
+                )
+            }
         }
     }
 
@@ -369,6 +498,18 @@ private extension KomgaStore {
             """,
             arguments: [serverID, entityType, remoteID, Self.rfc3339Text(Date()), cause]
         )
+    }
+
+    func hasTombstones(
+        _ db: GRDB.Database, serverID: String, entityType: String
+    ) throws -> Bool {
+        try Bool.fetchOne(
+            db,
+            sql: """
+            SELECT EXISTS(SELECT 1 FROM deleted_entities WHERE server_id = ? AND entity_type = ?)
+            """,
+            arguments: [serverID, entityType]
+        ) ?? false
     }
 
     func clearTombstone(
