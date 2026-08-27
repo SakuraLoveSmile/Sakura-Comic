@@ -46,6 +46,7 @@ fn section(title: &str) {
 
 struct Args {
     scenario: bool,
+    reconcile_only: bool,
     offline: bool,
     base_url: Option<String>,
     api_key: Option<String>,
@@ -57,6 +58,7 @@ fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
     let mut parsed = Args {
         scenario: false,
+        reconcile_only: false,
         offline: false,
         base_url: None,
         api_key: None,
@@ -67,6 +69,7 @@ fn parse_args() -> Args {
     while i < args.len() {
         match args[i].as_str() {
             "--scenario" => parsed.scenario = true,
+            "--reconcile-only" => parsed.reconcile_only = true,
             "--offline" => parsed.offline = true,
             "--base-url" => {
                 i += 1;
@@ -213,7 +216,8 @@ fn main() {
     if args.db.is_empty() {
         panic!("--db PATH is required");
     }
-    if Path::new(&args.db).exists() && !args.offline {
+    // A chain of runs shares one database: only a bootstrap run resets it.
+    if Path::new(&args.db).exists() && !args.offline && !args.reconcile_only {
         std::fs::remove_file(&args.db).ok();
     }
     let app = App::new(&args.db);
@@ -235,6 +239,55 @@ fn main() {
     )
     .expect("client");
 
+    if args.reconcile_only {
+        section("Reconcile Sync only: the server changed underneath a mirrored library");
+        let reconcile = runtime
+            .block_on(app.reconcile(
+                args.server_id.clone(),
+                base_url.clone(),
+                api_key.clone(),
+                ReconcileTrigger::ManualRefresh.as_str().to_string(),
+            ))
+            .expect("reconcile");
+        println!(
+            "  series +{}/~{}/-{} books +{}/~{}/-{} collections -{} readlists -{}",
+            reconcile.series_added,
+            reconcile.series_changed,
+            reconcile.series_removed,
+            reconcile.books_added,
+            reconcile.books_changed,
+            reconcile.books_removed,
+            reconcile.collections_removed,
+            reconcile.readlists_removed
+        );
+        verify_against_server(&app, &runtime, &client, &args.server_id);
+        // Delete propagation over real HTTP must also leave tombstones behind.
+        if reconcile.series_removed
+            + reconcile.books_removed
+            + reconcile.collections_removed
+            + reconcile.readlists_removed
+            > 0
+        {
+            let tombstones = app
+                .tombstones(&args.server_id, "series")
+                .expect("tombstone read");
+            check(
+                "deleted series left tombstones",
+                !tombstones.is_empty() && tombstones.iter().all(|t| t.cause == "reconcile"),
+                &format!(
+                    "{} series tombstones: {:?}",
+                    tombstones.len(),
+                    tombstones
+                        .iter()
+                        .map(|tombstone| tombstone.remote_id.clone())
+                        .collect::<Vec<_>>()
+                ),
+            );
+        }
+        run_offline(&app, &args.server_id);
+        finish();
+        return;
+    }
     // 1. Bootstrap Sync — ordered, paged, checkpointed.
     section("Bootstrap Sync: Libraries → Series → Books → Collections → Readlists → Progress");
     let summary = runtime

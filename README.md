@@ -180,9 +180,12 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   （新建 / 修改 / 删除 Series、新增 Book、改 Metadata、离线后重连、同步中途失败恢复），
   每步比对「本地 SQLite == 服务器快照」+ 墓碑 + `sync_state` + 请求次数；
   两个场景都标注 `"sse": "disabled"`
+- **真实 HTTP 回环验收**：`komga_fixture_server` 用真实 TCP 提供同一批快照（可在客户端
+  运行期间切换），把注入式 fetcher 测不到的 `KomgaClient` 路径（URL、`X-API-Key`、
+  `page`/`size` 切片、分页信封、错误映射）也纳入自动验收
 - **验收**：
   ```bash
-  bash scripts/e2e_stage5.sh          # 场景重放（无需网络）+ 可选真实服务器链路
+  bash scripts/e2e_stage5.sh          # 场景重放 → 真实 HTTP 回环 → 真实服务器(需 Key) → Swift 同契约
   bash scripts/verify.sh
   ```
   真实服务器链路（Bootstrap → Reconcile → 逐 series 校验镜像 == 服务器 → 再扫一次 clean）：

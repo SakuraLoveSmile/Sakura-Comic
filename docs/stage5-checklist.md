@@ -14,15 +14,30 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ## 验收结果
 
 ```bash
-bash scripts/e2e_stage5.sh        # 场景重放 14/14 PASS（无需网络，双端同一份 JSON）
+bash scripts/e2e_stage5.sh        # 4 步：场景重放 14/14 → 真实 HTTP 回环 → 真实服务器（需 Key）→ Swift 同契约
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
                                   # → ALL GREEN：Rust 103 / Swift 85（1 skip=live）/ Flutter 26
 ```
 
-> **未在本机执行的半程**：`stage5_smoke` 的真实服务器链路（Bootstrap → Reconcile →
-> 逐 series 本地计数 == 服务器 `totalElements` → 二次扫描 clean）需要 `KOMGA_API_KEY`。
-> 本环境只能访问到 `http://192.168.0.69:25600`（未带凭据返回 401），密钥不在仓库里，
-> 因此这一半**尚未跑过**，需要持有 Key 时执行：
+### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
+
+注入 fetcher 的测试绕过了 `KomgaClient` 本身。这个二进制把同一批快照用真实 TCP
+提供出来（`--snapshot-file` 每请求重读，脚本 `echo s1 > snapshot` 就能「在客户端运行
+期间改掉服务器」），于是走的是真正的 HTTP 路径：URL 构造
+（`/api/v1/series/{id}/books`）、`X-API-Key` 头、`page`/`size` 切片、Spring Data 分页
+信封、状态码到错误模型的映射。链路：
+
+| 步骤 | 断言 |
+| --- | --- |
+| 无凭据 / 错 Key / 正确 Key | 401 / 401 / 200（证明客户端真的把配置的密钥发出去了） |
+| Bootstrap + Reconcile（s0） | 13/13 PASS：libraries=2 series=3 books=7 collections=2 readlists=2，逐 series 本地计数 == 服务器 `totalElements`，二次扫描 `clean=true` |
+| 服务器变成 s1 → `--reconcile-only` | 10/10 PASS：series +2/~2、books +4，镜像 == 服务器 |
+| 服务器变成 s2 → `--reconcile-only` | 11/11 PASS：series -1、books -2、collections -1、readlists -1，且**留下 `cause=reconcile` 的墓碑** |
+| 断网离线重放 | 无凭据可读：无游标残留、无孤儿 Book、FTS 命中 |
+
+> **仍未执行的半程**：第 3 步（真实 Komga 服务器）需要 `KOMGA_API_KEY`。本环境能连到
+> `http://192.168.0.69:25600`（未带凭据 401），密钥不在仓库里，所以那一半**没跑过**。
+> 它和第 2 步跑的是同一套断言，只是将回环服务器换成真服务器：
 > `export KOMGA_BASE_URL=... KOMGA_API_KEY=... && bash scripts/e2e_stage5.sh`。
 > 不要把「没跑」当成「跑过」。
 
