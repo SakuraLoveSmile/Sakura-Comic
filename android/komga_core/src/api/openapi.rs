@@ -92,6 +92,201 @@ pub fn schema_properties(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The properties a client struct decodes as **mandatory** (no `Option`, no
+/// `#[serde(default)]`). If Komga ever makes one of these absent or nullable,
+/// decoding fails and the sweep dies halfway through — so the server's own
+/// document must keep saying `required` and non-nullable.
+const MANDATORY_FIELDS: &[(&str, &[&str])] = &[
+    ("SeriesDto", &["id", "libraryId", "name"]),
+    ("SeriesMetadataDto", &["title"]),
+    ("BookDto", &["id", "seriesId", "name"]),
+    ("BookMetadataDto", &["title"]),
+    ("CollectionDto", &["id", "name"]),
+    ("ReadListDto", &["id", "name"]),
+    ("LibraryDto", &["id", "name", "root"]),
+];
+
+/// Every property the client reads from each schema, mandatory or optional.
+/// Anything here that the server does not document would silently decode to
+/// `None`/default forever, so the mismatch has to be a deliberate exception.
+const DECODED_FIELDS: &[(&str, &[&str])] = &[
+    (
+        "SeriesDto",
+        &[
+            "id",
+            "libraryId",
+            "name",
+            "created",
+            "lastModified",
+            "booksCount",
+            "booksReadCount",
+            "booksUnreadCount",
+            "booksInProgressCount",
+            "booksMetadata",
+            "metadata",
+        ],
+    ),
+    (
+        "SeriesMetadataDto",
+        &[
+            "title",
+            "status",
+            "summary",
+            "publisher",
+            "genres",
+            "tags",
+            "readingDirection",
+            "language",
+            "ageRating",
+            // authors is deliberately NOT here: see
+            // `series_authors_come_from_the_aggregation`.
+        ],
+    ),
+    (
+        "BookDto",
+        &[
+            "id",
+            "seriesId",
+            "seriesTitle",
+            "name",
+            "number",
+            "oneshot",
+            "created",
+            "lastModified",
+            "sizeBytes",
+            "media",
+            "metadata",
+            "readProgress",
+        ],
+    ),
+    ("MediaDto", &["mediaType", "pagesCount"]),
+    (
+        "BookMetadataDto",
+        &[
+            "title",
+            "number",
+            "numberSort",
+            "summary",
+            "isbn",
+            "releaseDate",
+            "authors",
+            "tags",
+        ],
+    ),
+    ("ReadProgressDto", &["page", "completed", "lastModified"]),
+    (
+        "CollectionDto",
+        &[
+            "id",
+            "name",
+            "ordered",
+            "filtered",
+            "seriesIds",
+            "createdDate",
+            "lastModifiedDate",
+        ],
+    ),
+    (
+        "ReadListDto",
+        &[
+            "id",
+            "name",
+            "summary",
+            "ordered",
+            "filtered",
+            "bookIds",
+            "createdDate",
+            "lastModifiedDate",
+        ],
+    ),
+    ("LibraryDto", &["id", "name", "root", "unavailable"]),
+    ("BookMetadataAggregationDto", &["authors", "tags"]),
+    ("AuthorDto", &["name", "role"]),
+];
+
+/// Is this property documented as non-nullable by the server?
+pub fn field_is_nullable(schema: &str, field: &str) -> Option<bool> {
+    let property = spec()["components"]["schemas"]
+        .get(schema)?
+        .get("properties")?
+        .get(field)?
+        .clone();
+    match &property["type"] {
+        Value::Array(types) => Some(types.iter().any(|t| t.as_str() == Some("null"))),
+        Value::String(_) => Some(false),
+        _ => None,
+    }
+}
+
+pub fn field_is_required(schema: &str, field: &str) -> Option<bool> {
+    let document = spec();
+    let node = document["components"]["schemas"].get(schema)?;
+    Some(
+        node["required"]
+            .as_array()?
+            .iter()
+            .any(|item| item.as_str() == Some(field)),
+    )
+}
+
+pub fn schema_has_field(schema: &str, field: &str) -> bool {
+    spec()["components"]["schemas"]
+        .get(schema)
+        .map(|node| node["properties"].get(field).is_some())
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    #[test]
+    fn fields_we_require_are_required_by_the_server() {
+        for (schema, fields) in MANDATORY_FIELDS {
+            for field in *fields {
+                assert_eq!(
+                    field_is_required(schema, field),
+                    Some(true),
+                    "{schema}.{field} is decoded as mandatory but the server does not \
+                     document it as required — a response without it would abort a sweep"
+                );
+                assert_eq!(
+                    field_is_nullable(schema, field),
+                    Some(false),
+                    "{schema}.{field} can be null according to the server, but the client \
+                     decodes it as a non-optional value"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fields_we_read_exist_on_the_server() {
+        for (schema, fields) in DECODED_FIELDS {
+            for field in *fields {
+                assert!(
+                    schema_has_field(schema, field),
+                    "the client reads {schema}.{field}, but the server documents no such \
+                     property — it would silently decode to None/default"
+                );
+            }
+        }
+    }
+
+    /// Series-level authors are read from `booksMetadata` (the aggregation),
+    /// because `SeriesMetadataDto` has no `authors` field. If Komga ever adds
+    /// one, this test says so instead of us reading the wrong source forever.
+    #[test]
+    fn series_authors_come_from_the_aggregation() {
+        assert!(
+            !schema_has_field("SeriesMetadataDto", "authors"),
+            "SeriesMetadataDto now has authors — check whether the mirror should read \
+             series authors from there instead of booksMetadata"
+        );
+        assert!(schema_has_field("BookMetadataAggregationDto", "authors"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

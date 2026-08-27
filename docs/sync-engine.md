@@ -132,6 +132,13 @@ App 被强杀前未上传的进度仍在 Outbox，下次启动继续上传。
   哪天再调用一个新废弃端点，测试会直接失败
 - 分页信封的字段必须与客户端解码的字段互相覆盖（上游改名会立刻暴露，而不是被 serde 静默忽略）
 - URL 构造器拼出来的路径必须能匹配到文档里的（含 `{param}` 模板）路径
+- **解码安全**：客户端当作必填来解码的字段（`SeriesDto.id/libraryId/name`、
+  `BookDto.id/seriesId/name`、`BookMetadataDto.title`、`CollectionDto.id/name`、
+  `ReadListDto.id/name`、`LibraryDto.id/name/root`、`SeriesMetadataDto.title`）必须在
+  文档里既是 `required` 又不可为 null —— 否则一次真实响应就会让整个 sweep 半途炸掉；
+  反过来，客户端读取的每个属性都必须真的存在于文档中（否则它会永远静默解成 None）。
+  一个例外是刻意记下来的：`SeriesMetadataDto` **没有** `authors`，所以 series 的作者取自
+  `booksMetadata` 聚合 —— 测试钉住这点，Komga 哪天补上该字段时会提醒我们重新选择来源
 
 Komga 对 deprecated 的处理是「下一个大版本移除」，所以这既是文档检查也是迁移提醒：
 真要跟上 Komga 2.x，得把这两个端点换成 POST 搜索端点，而那是必须在真实服务器上验证的
