@@ -16,7 +16,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ```bash
 bash scripts/e2e_stage5.sh        # 场景重放 14/14 PASS（无需网络，双端同一份 JSON）
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 103 / Swift 85（1 skip=live）/ Flutter 24
+                                  # → ALL GREEN：Rust 103 / Swift 85（1 skip=live）/ Flutter 26
 ```
 
 > **未在本机执行的半程**：`stage5_smoke` 的真实服务器链路（Bootstrap → Reconcile →
@@ -51,7 +51,7 @@ v6 `sync_state`：主键 `(server_id, entity_type)`，字段
 | --- | --- | --- |
 | App 启动 | Flutter `SeriesGridScreen._maybeAutoSync`（已镜像过 → `app_launch`；从未镜像 → Bootstrap 续跑）；SwiftUI `LibraryView.initialLoad` → `model.syncLibrary(.appLaunch)` 同样的分叉 | 是（60s） |
 | App 回到前台 | Flutter `WidgetsBindingObserver.didChangeAppLifecycleState(.resumed)` → `did_become_active`；SwiftUI `.onChange(of: scenePhase) == .active` | 是（60s） |
-| 网络恢复 | Apple：`NWPathMonitor` 由不可达转可达 → `networkRecovered`（`LibraryViewModel.startSyncTriggers`）；Flutter 壳无连通性插件，该时刻由回前台触发覆盖（`network_recovered` 在核心与场景测试中均已实现/验证） | 否 |
+| 网络恢复 | Apple：`NWPathMonitor` 由不可达转可达 → `networkRecovered`（`LibraryViewModel.startSyncTriggers`）。Flutter：壳里没有连通性插件，改用**有界重试**探测同一台服务器——失败的同步会被安排成 15s / 60s / 300s 三次 `network_recovered` 重试，成功即视为恢复并清空阶梯（`SeriesGridScreen._scheduleRecoveryRetry`） | 否 |
 | SSE 重连 | `sse_reconnected` 触发名已接，走完整 Reconcile（事件流本身属下一阶段） | 否 |
 | 用户手动刷新 | Flutter `RefreshIndicator`（下拉）→ `manual_refresh`；SwiftUI `.refreshable` → `model.reconcile(.manualRefresh)` | 否 |
 
@@ -114,8 +114,9 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
   不可解析时宁可重扫；五种触发名双向映射）、`store::sync_state`（按实体独立、
   失败保留游标、多服务器隔离）、`store::prune`（级联 / 作用域内 book prune / 墓碑读写）、
   `ffi::application`（删除传播打到磁盘文件）、schema v6 迁移
-- **Flutter（24 通过，含新增 6 项）**：`test/sync_triggers_test.dart`（冷启动分叉 Bootstrap/Reconcile、
-  回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、对账失败仍可用）
+- **Flutter（26 通过，含新增 8 项）**：`test/sync_triggers_test.dart`（冷启动分叉
+  Bootstrap/Reconcile、回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、
+  对账失败仍可用、失败后按 `network_recovered` 重试并在成功时停止、重试次数有上界）
 - **Swift（85 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
   `PruneStoreTests`、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）

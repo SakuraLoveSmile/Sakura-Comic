@@ -49,6 +49,18 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   bool _autoSynced = false;
   SyncStatus _syncStatus = const SyncStatus();
 
+  /// Offline recovery. The shell has no connectivity plugin, so "the network
+  /// came back" is detected the honest way: retry a sweep that failed, on a
+  /// bounded backoff, and let the first success *be* the recovery moment
+  /// (`network_recovered`).
+  static const List<Duration> _recoveryDelays = [
+    Duration(seconds: 15),
+    Duration(seconds: 60),
+    Duration(seconds: 300),
+  ];
+  Timer? _recoveryTimer;
+  int _recoveryAttempt = 0;
+
   // Stage 4 query state (全部本地：SQLite).
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
@@ -83,9 +95,19 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     }
   }
 
+  /// Schedules the next recovery attempt after a sweep failed offline.
+  void _scheduleRecoveryRetry() {
+    if (_recoveryAttempt >= _recoveryDelays.length) return;
+    _recoveryTimer?.cancel();
+    _recoveryTimer = Timer(_recoveryDelays[_recoveryAttempt++], () {
+      _reconcile('network_recovered');
+    });
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recoveryTimer?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -193,6 +215,9 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     try {
       final report = await widget.repository.reconcileActiveServer(trigger: trigger);
       await _load();
+      // Reaching the server again ends the recovery ladder.
+      _recoveryTimer?.cancel();
+      _recoveryAttempt = 0;
       if (!mounted || report == null) return;
       if (announce) {
         ScaffoldMessenger.of(context)
@@ -200,8 +225,10 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       }
     } catch (e) {
       // An unreachable server must never take the shelf down with it: the
-      // local mirror keeps serving (and `sync_state` says what failed).
+      // local mirror keeps serving (and `sync_state` says what failed), and
+      // the sweep is retried as the network-recovery trigger.
       await _loadSyncStatus();
+      _scheduleRecoveryRetry();
       if (!mounted) return;
       if (announce) {
         ScaffoldMessenger.of(context)
@@ -227,6 +254,8 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
             .showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (e) {
+      await _loadSyncStatus();
+      _scheduleRecoveryRetry();
       if (!mounted) return;
       if (announce) {
         ScaffoldMessenger.of(context)
