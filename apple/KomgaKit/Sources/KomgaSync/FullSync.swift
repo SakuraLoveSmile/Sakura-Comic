@@ -315,6 +315,15 @@ public enum FullSync {
                     page += 1
                 }
                 index += 1
+                // Checkpoint the series boundary too: a run interrupted at the
+                // next series' first page would otherwise restart from the top.
+                if let next = seriesIDs.dropFirst(index).first {
+                    try store.checkpointEntity(
+                        serverID: serverID,
+                        entityType: SyncEntity.books,
+                        cursor: bookCursor(seriesID: next, page: 0)
+                    )
+                }
             }
             return (written, pages, progress)
         }

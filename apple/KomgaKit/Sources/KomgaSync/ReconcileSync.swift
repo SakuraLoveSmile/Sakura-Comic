@@ -390,6 +390,15 @@ public enum ReconcileSync {
                 }
                 swept[seriesID] = entry
                 index += 1
+                // Same series-boundary checkpoint as Bootstrap: an interrupted
+                // sweep resumes at the next series instead of restarting.
+                if let next = seriesIDs.dropFirst(index).first {
+                    try store.checkpointEntity(
+                        serverID: serverID,
+                        entityType: SyncEntity.books,
+                        cursor: FullSync.bookCursor(seriesID: next, page: 0)
+                    )
+                }
             }
             let removed = try store.pruneBooksForSweptSeries(
                 serverID: serverID, swept: swept, cause: DeletionCause.reconcile
