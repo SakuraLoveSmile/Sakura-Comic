@@ -499,6 +499,214 @@ private struct BookListRow: View {
         }
     }
 }
+
+// MARK: - Library list (Library 列表 / 切换)
+
+struct LibrariesListView: View {
+    @ObservedObject var model: LibraryViewModel
+
+    var body: some View {
+        List {
+            Button {
+                model.selectLibrary(id: nil)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("全部 Series").font(.headline)
+                        Text(
+                            "共 \(model.libraries.reduce(0) { $0 + $1.seriesCount }) 个 Series · \(model.libraries.reduce(0) { $0 + $1.bookCount }) 本书"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if model.selectedLibraryID == nil {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            ForEach(model.libraries, id: \.remoteID) { lib in
+                NavigationLink {
+                    LibraryDetailView(libraryID: lib.remoteID, model: model)
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(lib.name).font(.headline)
+                            Text("\(lib.seriesCount) Series · \(lib.bookCount) Books · 已读 \(lib.readCount)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let root = lib.root, !root.isEmpty {
+                                Text(root)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if lib.unavailable {
+                                Text("不可用").font(.caption2).foregroundStyle(.red)
+                            }
+                        }
+                        Spacer()
+                        if model.selectedLibraryID == lib.remoteID {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("图书馆")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .overlay {
+            if model.libraries.isEmpty {
+                Text("尚未同步任何 Library").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - Library detail (Library 详情)
+
+struct LibraryDetailView: View {
+    let libraryID: String
+    @ObservedObject var model: LibraryViewModel
+
+    @State private var detail: LibraryCountRecord?
+    @State private var items: [SeriesRecord] = []
+    @State private var total = 0
+    @State private var search = ""
+    @State private var errorMessage: String?
+
+    private let pageSize = 50
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let detail {
+                    stats(detail)
+                }
+                if let errorMessage {
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                }
+                TextField("在此库中搜索（本地 FTS）…", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: search) { _, _ in reload() }
+                seriesWall
+                if items.count < total {
+                    Button("加载更多（\(items.count) / \(total)）") { loadNextPage() }
+                        .font(.footnote)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle(detail?.name ?? "Library")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            Button("设为书架筛选") { model.selectLibrary(id: libraryID) }
+        }
+        .task { load() }
+    }
+
+    private func stats(_ lib: LibraryCountRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 16) {
+                statTile("Series", lib.seriesCount)
+                statTile("Books", lib.bookCount)
+                statTile("已读", lib.readCount)
+            }
+            if lib.bookCount > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: Double(lib.readCount), total: Double(lib.bookCount))
+                    Text("阅读进度 \(lib.readCount) / \(lib.bookCount)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let root = lib.root, !root.isEmpty {
+                Label(root, systemImage: "folder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if lib.unavailable {
+                Label("服务端标记为不可用", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            Divider()
+        }
+    }
+
+    private func statTile(_ title: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)").font(.title3.bold())
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var seriesWall: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 120), spacing: 12)],
+            spacing: 12
+        ) {
+            ForEach(items) { item in
+                NavigationLink {
+                    SeriesDetailView(seriesID: item.remoteID, model: model)
+                } label: {
+                    SeriesCell(record: item, data: model.covers[item.remoteID])
+                        .task { await model.refreshCover(item) }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func load() {
+        do {
+            detail = try model.libraryDetail(id: libraryID)
+        } catch {
+            errorMessage = "读取 Library 失败：\(error.localizedDescription)"
+        }
+        reload()
+    }
+
+    private func reload() {
+        do {
+            let page = try model.librarySeries(
+                id: libraryID,
+                search: search.isEmpty ? nil : search,
+                limit: pageSize,
+                offset: 0
+            )
+            items = page.items
+            total = page.total
+            errorMessage = nil
+        } catch {
+            errorMessage = "查询失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func loadNextPage() {
+        do {
+            let page = try model.librarySeries(
+                id: libraryID,
+                search: search.isEmpty ? nil : search,
+                limit: pageSize,
+                offset: items.count
+            )
+            items += page.items
+            total = page.total
+        } catch {
+            errorMessage = "分页失败：\(error.localizedDescription)"
+        }
+    }
+}
+
 #if canImport(UIKit)
 import UIKit
 private func platformImage(_ data: Data?) -> Image? {

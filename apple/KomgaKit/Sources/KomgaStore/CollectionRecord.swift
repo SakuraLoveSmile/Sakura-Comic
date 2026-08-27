@@ -223,15 +223,31 @@ public struct FilterOptions: Sendable, Equatable {
     public let statuses: [String]
 }
 
-/// Library rows with their local series counts.
+/// One library with its local counts — the Library 列表 / 详情 row.
 public struct LibraryCountRecord: Sendable, Equatable {
 
-    public init(remoteID: String, name: String, seriesCount: Int) {
+    public init(
+        remoteID: String,
+        name: String,
+        root: String? = nil,
+        unavailable: Bool = false,
+        seriesCount: Int,
+        bookCount: Int = 0,
+        readCount: Int = 0
+    ) {
         self.remoteID = remoteID
         self.name = name
+        self.root = root
+        self.unavailable = unavailable
         self.seriesCount = seriesCount
+        self.bookCount = bookCount
+        self.readCount = readCount
     }
     public let remoteID: String
     public let name: String
+    public let root: String?
+    public let unavailable: Bool
     public let seriesCount: Int
+    public let bookCount: Int
+    public let readCount: Int
 }

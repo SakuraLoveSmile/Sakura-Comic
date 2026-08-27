@@ -6,7 +6,7 @@
 //! tables, and the results come back with their total for pagination.
 
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 
 use crate::store::books::{row_to_book, BookRow, BOOK_SELECT};
 use crate::store::fts::fts_match_query;
@@ -397,36 +397,70 @@ pub fn readlist_books_page(
     Ok(BookPageResult { items, total })
 }
 
-// MARK: - Library counts
+// MARK: - Library list / detail
 
-/// One library row with its local series count (Library 列表/详情).
+/// One library row with its local counts (Library 列表/详情).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryCountRow {
     pub remote_id: String,
     pub name: String,
+    pub root: Option<String>,
+    pub unavailable: bool,
     pub series_count: i64,
+    pub book_count: i64,
+    pub read_count: i64,
 }
 
+/// Correlated subqueries rather than joins, so the three counts stay
+/// independent of each other's row multiplication.
+const LIBRARY_STATS_SQL: &str = "SELECT l.remote_id, l.name, l.root, l.unavailable,
+           (SELECT COUNT(*) FROM series s
+             WHERE s.server_id = l.server_id AND s.library_id = l.remote_id) AS series_count,
+           (SELECT COUNT(*) FROM books b
+             JOIN series s2 ON s2.server_id = b.server_id AND s2.remote_id = b.series_id
+             WHERE s2.server_id = l.server_id AND s2.library_id = l.remote_id) AS book_count,
+           (SELECT COUNT(*) FROM books b
+             JOIN series s3 ON s3.server_id = b.server_id AND s3.remote_id = b.series_id
+             JOIN read_progress rp ON rp.server_id = b.server_id AND rp.book_id = b.remote_id
+             WHERE s3.server_id = l.server_id AND s3.library_id = l.remote_id
+               AND rp.completed = 1) AS read_count
+       FROM libraries l";
+
+fn read_library_stats(row: &Row) -> rusqlite::Result<LibraryCountRow> {
+    Ok(LibraryCountRow {
+        remote_id: row.get("remote_id")?,
+        name: row.get("name")?,
+        root: row.get("root")?,
+        unavailable: row.get::<_, i64>("unavailable")? != 0,
+        series_count: row.get("series_count")?,
+        book_count: row.get("book_count")?,
+        read_count: row.get("read_count")?,
+    })
+}
+
+/// Every library of one server with its counts — the Library 列表.
 pub fn library_counts(
     conn: &Connection,
     server_id: &str,
 ) -> rusqlite::Result<Vec<LibraryCountRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT l.remote_id, l.name, COUNT(s.remote_id) AS series_count
-           FROM libraries l
-           LEFT JOIN series s ON s.server_id = l.server_id AND s.library_id = l.remote_id
-          WHERE l.server_id = ?1
-          GROUP BY l.remote_id, l.name
-          ORDER BY l.name COLLATE NOCASE",
-    )?;
-    let rows = stmt.query_map(params![server_id], |row: &Row| {
-        Ok(LibraryCountRow {
-            remote_id: row.get("remote_id")?,
-            name: row.get("name")?,
-            series_count: row.get("series_count")?,
-        })
-    })?;
+    let mut stmt = conn.prepare(&format!(
+        "{LIBRARY_STATS_SQL} WHERE l.server_id = ?1 ORDER BY l.name COLLATE NOCASE"
+    ))?;
+    let rows = stmt.query_map(params![server_id], read_library_stats)?;
     rows.collect()
+}
+
+/// A single library by id — the Library 详情. Same SQL, extra filter.
+pub fn library_detail(
+    conn: &Connection,
+    server_id: &str,
+    library_id: &str,
+) -> rusqlite::Result<Option<LibraryCountRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "{LIBRARY_STATS_SQL} WHERE l.server_id = ?1 AND l.remote_id = ?2"
+    ))?;
+    stmt.query_row(params![server_id, library_id], read_library_stats)
+        .optional()
 }
 
 #[cfg(test)]
@@ -775,7 +809,7 @@ mod tests {
                     id: "lib-1".into(),
                     name: "Manga Main".into(),
                     root: "/manga".into(),
-                    unavailable: None,
+                    unavailable: Some(true),
                 },
                 crate::model::server::Library {
                     id: "lib-2".into(),
@@ -791,7 +825,68 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].name, "Manga Main");
         assert_eq!(rows[0].series_count, 2);
+        assert_eq!(rows[0].root.as_deref(), Some("/manga"));
+        assert!(rows[0].unavailable);
         assert_eq!(rows[1].name, "Webtoons");
         assert_eq!(rows[1].series_count, 1);
+        assert!(!rows[1].unavailable);
+
+        let detail = library_detail(&conn, "server-1", "lib-1")
+            .unwrap()
+            .expect("lib-1 exists");
+        assert_eq!(detail.remote_id, "lib-1");
+        assert_eq!(detail.series_count, 2);
+        assert_eq!(detail.root.as_deref(), Some("/manga"));
+        assert!(detail.unavailable);
+        assert!(library_detail(&conn, "server-1", "nope").unwrap().is_none());
+        // Another server's library id must not resolve here.
+        assert!(library_detail(&conn, "server-1", "lib-9")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn library_detail_counts_read_books_from_progress() {
+        use crate::model::book::{Book, Media};
+        use crate::store::books::save_books_batch;
+
+        let conn = open_in_memory().unwrap();
+        seed(&conn);
+        let book = |id: &str| Book {
+            id: id.into(),
+            series_id: "s1".into(),
+            series_title: Some("One Piece".into()),
+            name: id.into(),
+            number: Some(1),
+            oneshot: false,
+            media: Some(Media {
+                media_type: Some("image".into()),
+                pages_count: Some(10),
+            }),
+            metadata: None,
+            read_progress: None,
+            created: None,
+            last_modified: None,
+            size_bytes: None,
+        };
+        save_books_batch(&conn, "server-1", &[book("b1"), book("b2")]).unwrap();
+        crate::store::read_progress::mark_read(&conn, "server-1", "b1").unwrap();
+
+        crate::store::libraries::save_libraries_batch(
+            &conn,
+            "server-1",
+            &[crate::model::server::Library {
+                id: "lib-1".into(),
+                name: "Manga Main".into(),
+                root: "/manga".into(),
+                unavailable: Some(false),
+            }],
+        )
+        .unwrap();
+        let detail = library_detail(&conn, "server-1", "lib-1")
+            .unwrap()
+            .expect("lib-1");
+        assert_eq!(detail.book_count, 2);
+        assert_eq!(detail.read_count, 1);
     }
 }

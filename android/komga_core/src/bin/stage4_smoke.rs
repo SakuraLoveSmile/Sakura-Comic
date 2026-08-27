@@ -123,13 +123,21 @@ fn main() {
     // ---- The offline battery: every call below is SQLite-only. ----
     println!("\n═══ OFFLINE MEDIA LIBRARY BATTERY (network disconnected) ═══");
 
-    // Libraries: 列表 + 切换 (per-library counts).
-    section("Library 列表 / 切换");
+    // Libraries: 列表 + 详情 + 切换 (per-library counts).
+    section("Library 列表 / 详情 / 切换");
     let libs = app
         .library_counts(&server_id)
         .unwrap_or_else(|e| panic!("library_counts: {e}"));
     for lib in &libs {
-        println!("  library {} ({} series)", lib.name, lib.series_count);
+        println!(
+            "  library {} — {} series / {} books / {} read (root={}, unavailable={})",
+            lib.name,
+            lib.series_count,
+            lib.book_count,
+            lib.read_count,
+            lib.root.as_deref().unwrap_or("-"),
+            lib.unavailable
+        );
     }
     if !libs.is_empty() {
         check(
@@ -137,11 +145,12 @@ fn main() {
             true,
             &format!("{} libraries", libs.len()),
         );
+        let first = &libs[0];
         let wall = app
             .query_series(
                 &server_id,
                 None,
-                Some(libs[0].remote_id.clone()),
+                Some(first.remote_id.clone()),
                 None,
                 None,
                 None,
@@ -151,10 +160,42 @@ fn main() {
                 0,
             )
             .unwrap_or_else(|e| panic!("query_series by library: {e}"));
+        let foreign = wall
+            .items
+            .iter()
+            .filter(|s| s.library_id != first.remote_id)
+            .count();
         check(
-            "library filter returns series",
-            wall.total >= 0 && !wall.items.is_empty() || wall.total == 0,
-            &format!("library '{}' → {} series", libs[0].name, wall.total),
+            "library filter is scoped to that library",
+            foreign == 0 && wall.total as usize <= first.series_count as usize,
+            &format!(
+                "library '{}' → {} series (count says {}), {} foreign",
+                first.name, wall.total, first.series_count, foreign
+            ),
+        );
+        let detail = app
+            .library_detail(&server_id, &first.remote_id)
+            .unwrap_or_else(|e| panic!("library_detail: {e}"))
+            .unwrap_or_else(|| panic!("library_detail({}) returned none", first.remote_id));
+        check(
+            "library detail matches list row + carries metadata",
+            detail.name == first.name
+                && detail.series_count == first.series_count
+                && detail.book_count == first.book_count
+                && !detail.root.as_deref().unwrap_or("").is_empty(),
+            &format!(
+                "{} — root={}, {} books",
+                detail.name,
+                detail.root.as_deref().unwrap_or("-"),
+                detail.book_count
+            ),
+        );
+        check(
+            "unknown library id resolves to none",
+            app.library_detail(&server_id, "__definitely_missing__")
+                .unwrap_or_else(|e| panic!("library_detail: {e}"))
+                .is_none(),
+            "no row",
         );
     } else {
         check("library list non-empty", false, "no libraries mirrored");
