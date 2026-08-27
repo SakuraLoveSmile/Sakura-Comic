@@ -120,6 +120,23 @@ mutation_type / payload / created_at / retry_count / last_error。
 阅读中禁止每翻一页就请求：Page → Local DB → debounce/throttle → PATCH。
 App 被强杀前未上传的进度仍在 Outbox，下次启动继续上传。
 
+## API 一致性门禁（`api/openapi.rs`）
+
+同步引擎依赖 5 个列表端点，而 Komga 的 OpenAPI 文档（从运行中的服务器导出）就是它们
+的存废事实。四条测试把它们钉住：
+
+- 引擎调用的每个路径都必须在文档里存在
+- 被标记 deprecated 的端点必须显式记录在允许清单里 —— 我们**目前**依赖
+  `GET /api/v1/series` 与 `GET /api/v1/series/{id}/books`，两者在 1.26.3 已废弃
+  （未废弃的后继是 `POST /api/v1/series/list` / `POST /api/v1/books/list`）。
+  哪天再调用一个新废弃端点，测试会直接失败
+- 分页信封的字段必须与客户端解码的字段互相覆盖（上游改名会立刻暴露，而不是被 serde 静默忽略）
+- URL 构造器拼出来的路径必须能匹配到文档里的（含 `{param}` 模板）路径
+
+Komga 对 deprecated 的处理是「下一个大版本移除」，所以这既是文档检查也是迁移提醒：
+真要跟上 Komga 2.x，得把这两个端点换成 POST 搜索端点，而那是必须在真实服务器上验证的
+传输层改动。
+
 ## 验收：共享场景重放
 
 `specs/contracts/fixtures/sync/*.json`（由 `scripts/gen_stage5_fixtures.py` 生成）
