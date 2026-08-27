@@ -15,6 +15,12 @@ Stage 5 起 Bootstrap 是**可中断恢复**的按序步骤引擎（`sync::full`
 - 强制重镜像：`StartAt::Fresh`（清空游标）
 - 共享场景：`fixtures/sync/scenario-reconcile.json`、`fixtures/sync/scenario-interrupt.json`
   （由 `scripts/gen_stage5_fixtures.py` 生成；双端读同一份）
+- 比对深度：不止 id 集合。每一步都逐字段比对 series 的名称/状态/lastModified/四个阅读计数、
+  归一化 genres 与 summary、book 的标题/summary/tags/numberSort/pagesCount/lastModified、
+  合集成员、书单保序成员、阅读进度集合、FTS 行数、library 的 root+unavailable，
+  以及无孤儿 Book、墓碑集合、`sync_state` 状态与每步请求次数
+- 「时间戳不动、内容会变」的场景必须单独覆盖：s5 改书metadata（同时推进 lastModified）、
+  s6 只推进 series 的阅读计数而**不**推进 lastModified
 
 Stage 4 的完整媒体库镜像（FullSync）：
 - Series / Books / Collections / Readlists 均以 size=100 分页拉取至 `last=true`，
