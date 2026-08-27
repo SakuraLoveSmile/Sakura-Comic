@@ -111,5 +111,10 @@ name/status/lastModified、genres/summary 归一化表、book title、合集/书
 同一批 JSON 驱动 Rust（`sync::scenario`）与 Swift（`SyncScenarioTests`）两端。
 
 ```bash
-bash scripts/e2e_stage5.sh            # 场景重放总是跑；设置 env 后追加真实服务器链路
+bash scripts/e2e_stage5.sh            # 场景重放 → 真实 HTTP 回环 → 真实服务器(需 env) → Swift
 ```
+
+回环那一步用 `komga_fixture_server`（`android/komga_core/src/bin/`）：同一个 Komga 形状
+的 HTTP 服务（`/api/v1/series/{id}/books`、`X-API-Key` 认证、按 `page`/`size` 切片、
+Spring Data 分页信封），提供同一批快照，且**每个请求重读快照名文件**，所以脚本可以在
+客户端运行期间改掉服务器内容。它检验的是 `KomgaClient` 本身而不是注入的 fetcher。
