@@ -5,6 +5,12 @@
 - 所有表的主键为 `(server_id, remote_id)`；read_progress 为 `(server_id, book_id)`；
   app_state 为 `(key)` 单值状态表
 - Apple：GRDB；Android(Rust)：rusqlite（Flutter 不直接访问数据库）
+- 连接设置（两端一致）：`foreign_keys=ON`、`journal_mode=WAL`、
+  `synchronous=NORMAL`、`temp_store=MEMORY`、`cache_size=8MB`。
+  这是可随时从服务器重建的镜像库，不该为每条语句 fsync；WAL 下进程崩溃仍不丢已提交事务
+- 打开已建好且 `user_version` 已是当前版本的库，迁移直接短路返回一次 PRAGMA 查询：
+  同步引擎每页开一次连接（`Connection` 不能跨 await 持有），规模测试里
+  1000 series / 20000 books 一次扫描要开上千次连接
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
 - 当前 Schema 版本：**v6**（v2 新增 `app_state`；v3 新增 `thumbnails`；
   v4 新增归一化筛选表 / 成员关系表 / 完整元数据列 / 服务器作用域 FTS；
