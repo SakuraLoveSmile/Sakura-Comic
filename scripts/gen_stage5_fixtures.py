@@ -72,6 +72,9 @@ def new_series(sid, library_id, name, status, last_modified, genres, tags, summa
         "created": "2025-01-01T00:00:00Z",
         "lastModified": last_modified,
         "booksCount": books_count,
+        "booksReadCount": 0,
+        "booksUnreadCount": books_count,
+        "booksInProgressCount": 0,
         "booksMetadata": {"authors": [{"name": "New Author", "role": "writer"}], "tags": tags},
         "metadata": {
             "title": name,

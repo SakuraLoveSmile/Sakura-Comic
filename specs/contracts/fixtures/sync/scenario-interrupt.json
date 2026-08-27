@@ -10,12 +10,14 @@
         {
           "id": "lib-1",
           "name": "Manga Main",
-          "root": "/manga"
+          "root": "/manga",
+          "unavailable": false
         },
         {
           "id": "lib-2",
           "name": "Webtoons",
-          "root": "/webtoons"
+          "root": "/webtoons",
+          "unavailable": false
         }
       ],
       "series": [
@@ -760,12 +762,14 @@
         {
           "id": "lib-1",
           "name": "Manga Main",
-          "root": "/manga"
+          "root": "/manga",
+          "unavailable": false
         },
         {
           "id": "lib-2",
           "name": "Webtoons",
-          "root": "/webtoons"
+          "root": "/webtoons",
+          "unavailable": false
         }
       ],
       "series": [
@@ -913,6 +917,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-02-03T00:00:00Z",
             "booksCount": 2,
+            "booksReadCount": 0,
+            "booksUnreadCount": 2,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -955,6 +962,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-02-04T00:00:00Z",
             "booksCount": 1,
+            "booksReadCount": 0,
+            "booksUnreadCount": 1,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -1432,12 +1442,14 @@
         {
           "id": "lib-1",
           "name": "Manga Main",
-          "root": "/manga"
+          "root": "/manga",
+          "unavailable": false
         },
         {
           "id": "lib-2",
           "name": "Webtoons",
-          "root": "/webtoons"
+          "root": "/webtoons",
+          "unavailable": false
         }
       ],
       "series": [
@@ -1449,6 +1461,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-01T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -1490,6 +1505,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-01T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -1533,6 +1551,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-02T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -1574,6 +1595,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-02T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -1617,6 +1641,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-03T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -1658,6 +1685,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-03T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -2436,12 +2466,14 @@
         {
           "id": "lib-1",
           "name": "Manga Main",
-          "root": "/manga"
+          "root": "/manga",
+          "unavailable": false
         },
         {
           "id": "lib-2",
           "name": "Webtoons",
-          "root": "/webtoons"
+          "root": "/webtoons",
+          "unavailable": false
         }
       ],
       "series": [
@@ -2453,6 +2485,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-01T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {
@@ -2494,6 +2529,9 @@
             "created": "2025-01-01T00:00:00Z",
             "lastModified": "2025-03-01T00:00:00Z",
             "booksCount": 4,
+            "booksReadCount": 0,
+            "booksUnreadCount": 4,
+            "booksInProgressCount": 0,
             "booksMetadata": {
               "authors": [
                 {

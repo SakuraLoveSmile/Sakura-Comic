@@ -2,11 +2,13 @@
   {
     "id": "lib-1",
     "name": "Manga Main",
-    "root": "/manga"
+    "root": "/manga",
+    "unavailable": false
   },
   {
     "id": "lib-2",
     "name": "Webtoons",
-    "root": "/webtoons"
+    "root": "/webtoons",
+    "unavailable": false
   }
 ]
