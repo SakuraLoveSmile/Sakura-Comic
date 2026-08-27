@@ -858,6 +858,171 @@ mod tests {
     use chrono::Duration;
     use serde_json::json;
 
+    /// Multi-server isolation at the sync-engine level: two servers holding the
+    /// *same* remote ids (which is exactly what the shared fixtures produce), one
+    /// of them losing a series. The other server's mirrored rows, progress,
+    /// covers, search index and sync bookkeeping must not move at all.
+    #[tokio::test]
+    async fn a_delete_for_one_server_never_touches_another() {
+        use crate::store::thumbnails;
+        use crate::sync::full::{full_sync_from, FixtureLibraryFetcher, StartAt};
+        use crate::sync::scenario::server_from_snapshot;
+
+        let db = temp_db();
+        for server in ["A", "B"] {
+            full_sync_from(&db, server, &FixtureLibraryFetcher {}, StartAt::Fresh)
+                .await
+                .unwrap();
+        }
+        {
+            let conn = crate::store::open(&db).unwrap();
+            crate::store::read_progress::upsert_local_read_progress(
+                &conn, "B", "book-1-1", 21, false,
+            )
+            .unwrap();
+            thumbnails::record_thumbnail(
+                &conn,
+                "B",
+                "series-1",
+                "series",
+                "/tmp/other-server-cover.png",
+                5,
+            )
+            .unwrap();
+        }
+
+        // Server A drops series-3 (and its books + membership); B is unchanged.
+        let scenario: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../specs/contracts/fixtures/sync/scenario-reconcile.json"
+        ))
+        .unwrap();
+        let mut snapshot = scenario["snapshots"][0].clone();
+        snapshot["series"][0]
+            .as_array_mut()
+            .unwrap()
+            .retain(|item| item["id"] != "series-3");
+        let books = snapshot["books"].as_object_mut().unwrap();
+        books.remove("series-3");
+        for collection in snapshot["collections"][0].as_array_mut().unwrap() {
+            if let Some(ids) = collection["seriesIds"].as_array_mut() {
+                ids.retain(|id| id != "series-3");
+            }
+        }
+        let server = server_from_snapshot(&snapshot.to_string()).unwrap();
+        let summary = reconcile(&db, "A", &server, ReconcileTrigger::ManualRefresh)
+            .await
+            .unwrap();
+        assert_eq!(summary.series_removed, 1, "A mirrored the deletion");
+
+        let conn = crate::store::open(&db).unwrap();
+        let count = |sql: &str, server: &str| -> i64 {
+            conn.query_row(sql, rusqlite::params![server], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            count("SELECT COUNT(*) FROM series WHERE server_id = ?1", "A"),
+            2
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM books WHERE server_id = ?1", "A"),
+            5
+        );
+
+        // B: still the complete library, with its own progress and cover.
+        assert_eq!(
+            count("SELECT COUNT(*) FROM series WHERE server_id = ?1", "B"),
+            3,
+            "another server's series must survive"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM books WHERE server_id = ?1", "B"),
+            7
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM series_metadata WHERE server_id = ?1",
+                "B"
+            ),
+            3
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM collection_series WHERE server_id = ?1",
+                "B"
+            ),
+            3
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM readlists WHERE server_id = ?1", "B"),
+            2
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM readlist_books WHERE server_id = ?1",
+                "B"
+            ),
+            5
+        );
+        assert_eq!(
+            count(
+                "SELECT page FROM read_progress WHERE server_id = ?1 AND book_id = 'book-1-1'",
+                "B"
+            ),
+            21,
+            "B's offline progress must not be swept away"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM thumbnails WHERE server_id = ?1", "B"),
+            1,
+            "B's cover record must survive"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM series_fts WHERE server_id = ?1", "B"),
+            3,
+            "B's search index must survive"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM book_fts WHERE server_id = ?1", "B"),
+            7
+        );
+
+        // Tombstones and sync_state are per server too.
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM deleted_entities WHERE server_id = ?1",
+                "A"
+            ),
+            3,
+            "series-3 plus its two books; none of them belong to B"
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM deleted_entities WHERE server_id = ?1",
+                "B"
+            ),
+            0
+        );
+        let b_states = sync_state::list_entity_states(&conn, "B").unwrap();
+        assert!(
+            b_states.iter().all(|state| state.sync_cursor.is_none()),
+            "B's cursors belong to B's own sweeps"
+        );
+        assert!(b_states
+            .iter()
+            .all(|state| state.sync_status == sync_state::STATUS_IDLE));
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ?1",
+                rusqlite::params!["B"],
+                |row| row.get(0)
+            )
+            .unwrap(),
+            1,
+            "B's queued upload is untouched"
+        );
+        drop(conn);
+        cleanup(&db);
+    }
     fn temp_db() -> String {
         let dir = std::env::temp_dir().join(format!("komga_reconcile_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
