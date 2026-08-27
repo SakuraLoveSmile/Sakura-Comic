@@ -226,4 +226,66 @@ final class PruneStoreTests: XCTestCase {
         XCTAssertEqual(left.map(\.remoteID), ["series-3"])
         XCTAssertTrue(try store.hasTombstones(serverID: "srv", entityType: SyncEntity.series))
     }
+
+    /// Multi-server isolation: two servers holding the *same* remote ids (which
+    /// is what the shared fixtures produce). Pruning one server's deleted series
+    /// must leave the other server's rows, search index, progress, covers and
+    /// queued uploads exactly where they were.
+    func testPruneForOneServerNeverTouchesAnother() throws {
+        let store = try KomgaStore()
+        let seriesPage: SeriesPageDTO = try load("series-page.json")
+        let books: [String: BookPageDTO] = try load("books-by-series.json")
+        let collections: CollectionPageDTO = try load("collections-page.json")
+        let readlists: ReadListPageDTO = try load("readlists-page.json")
+        for server in ["A", "B"] {
+            _ = try store.upsertSeriesBatch(serverID: server, series: seriesPage.content)
+            for page in books.values {
+                _ = try store.upsertBooksBatch(serverID: server, books: page.content)
+            }
+            _ = try store.upsertCollectionsBatch(serverID: server, collections: collections.content)
+            _ = try store.upsertReadlistsBatch(serverID: server, readlists: readlists.content)
+        }
+        try store.setReadProgress(serverID: "B", bookID: "book-1-1", page: 21, completed: false)
+        try store.upsertThumbnail(ThumbnailRecord(
+            serverID: "B", remoteID: "series-1", variant: ThumbnailRecord.variantSeries,
+            localPath: "/tmp/other-server-cover.png", sizeBytes: 5
+        ))
+        let keep: Set<String> = ["series-1", "series-2"]
+        let pruned = try store.prune(
+            serverID: "A", entityType: SyncEntity.series, remoteIDs: keep,
+            cause: DeletionCause.reconcile
+        )
+        XCTAssertEqual(pruned.ids, ["series-3"])
+
+        func on(_ server: String, _ sql: String) throws -> Int {
+            try store.dbQueue.read { db in
+                try Int.fetchOne(db, sql: sql, arguments: [server]) ?? 0
+            }
+        }
+
+        XCTAssertEqual(try on("A", "SELECT COUNT(*) FROM series WHERE server_id = ?"), 2)
+        XCTAssertEqual(try on("A", "SELECT COUNT(*) FROM books WHERE server_id = ?"), 5)
+
+        // B: the whole library is still there.
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM series WHERE server_id = ?"), 3)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM books WHERE server_id = ?"), 7)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM series_metadata WHERE server_id = ?"), 3)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM collection_series WHERE server_id = ?"), 3)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM readlists WHERE server_id = ?"), 2)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM readlist_books WHERE server_id = ?"), 5)
+        XCTAssertEqual(
+            try on("B", "SELECT page FROM read_progress WHERE server_id = ? AND book_id = 'book-1-1'"),
+            21,
+            "B's offline progress must survive A's prune"
+        )
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM thumbnails WHERE server_id = ?"), 1)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM series_fts WHERE server_id = ?"), 3)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM book_fts WHERE server_id = ?"), 7)
+        // setReadProgress queued this for B; A's prune must not consume it.
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ?"), 1)
+
+        // Tombstones belong to the server that lost the entity, and to nobody else.
+        XCTAssertEqual(try on("A", "SELECT COUNT(*) FROM deleted_entities WHERE server_id = ?"), 3)
+        XCTAssertEqual(try on("B", "SELECT COUNT(*) FROM deleted_entities WHERE server_id = ?"), 0)
+    }
 }

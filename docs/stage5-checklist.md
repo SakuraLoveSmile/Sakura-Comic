@@ -17,7 +17,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 bash scripts/e2e_stage5.sh        # 场景 16/16 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
 KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 111 / Swift 98（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 112 / Swift 99（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -168,7 +168,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 - **Flutter（26 通过，含新增 8 项）**：`test/sync_triggers_test.dart`（冷启动分叉
   Bootstrap/Reconcile、回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、
   对账失败仍可用、失败后按 `network_recovered` 重试并在成功时停止、重试次数有上界）
-- **Swift（98 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
+- **Swift（99 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
   `PruneStoreTests`、`ReadProgressSyncTests`（离线进度保护，含直接读共享 fixture 的一条）、
   `ScaleSyncTests`（300×20 规模镜像 + 幂等对账）、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）
