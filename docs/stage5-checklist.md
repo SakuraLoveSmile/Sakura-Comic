@@ -17,7 +17,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 bash scripts/e2e_stage5.sh        # 场景 16/16 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
 KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 116 / Swift 99（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 119 / Swift 99（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -190,6 +190,10 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
    `POST /api/v1/books/list`（带搜索 body）。换端点是传输层改动，必须在真实服务器上
    验证，所以本阶段不动，只把它钉成显式清单：将来任何新调用到废弃端点的代码都会让
    测试失败。
+   核对结果里的好消息：客户端**必填解码**的字段（id/name/libraryId/seriesId/root 等）在
+   文档里全都是 `required` + 非 nullable，客户端读取的每个属性也确实存在 —— 也就是说
+   真实响应不会把一次 sweep 解到一半炸掉。唯一例外是刻意记录的：`SeriesMetadataDto` 没有
+   `authors`，series 作者取自 `booksMetadata` 聚合，测试把这个来源钉住了。
 2. **`/sse/v1/events` 在文档里根本不存在**（整个 spec 没有任何 `/sse*` 路由）。
    这大概率是 SpringDoc 不导出 `text/event-stream`，但也可能是路径不对 ——
    已在 `specs/events/komga-sse-events.md` 标注「未经验证」，接入 SSE 之前必须实测。
