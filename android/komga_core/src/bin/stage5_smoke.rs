@@ -27,6 +27,8 @@ use komga_core::store;
 use komga_core::store::sync_state;
 use komga_core::sync::reconcile::ReconcileTrigger;
 use komga_core::sync::scenario;
+use serde_json::{json, Value};
+use std::time::Instant;
 
 static FAILURES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static CHECKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -47,6 +49,7 @@ fn section(title: &str) {
 struct Args {
     scenario: bool,
     reconcile_only: bool,
+    scale: Option<(usize, usize)>,
     offline: bool,
     base_url: Option<String>,
     api_key: Option<String>,
@@ -58,6 +61,7 @@ fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
     let mut parsed = Args {
         scenario: false,
+        scale: None,
         reconcile_only: false,
         offline: false,
         base_url: None,
@@ -70,6 +74,13 @@ fn parse_args() -> Args {
         match args[i].as_str() {
             "--scenario" => parsed.scenario = true,
             "--reconcile-only" => parsed.reconcile_only = true,
+            "--scale" => {
+                i += 1;
+                let series = args[i].parse().expect("--scale takes <SERIES> <BOOKS_PER>");
+                i += 1;
+                let books = args[i].parse().expect("--scale takes <SERIES> <BOOKS_PER>");
+                parsed.scale = Some((series, books));
+            }
             "--offline" => parsed.offline = true,
             "--base-url" => {
                 i += 1;
@@ -88,7 +99,7 @@ fn parse_args() -> Args {
                 parsed.server_id = args[i].clone();
             }
             "--help" | "-h" => {
-                println!("usage: stage5_smoke --scenario | (--base-url URL --api-key KEY) [--offline] --db PATH --server-id ID");
+                println!("usage: stage5_smoke --scenario | --scale SERIES BOOKS_PER | (--base-url URL --api-key KEY [--reconcile-only]) [--offline] --db PATH --server-id ID");
                 std::process::exit(0);
             }
             other => panic!("unknown arg: {other}"),
@@ -206,8 +217,167 @@ fn run_offline(app: &App, server_id: &str) {
     );
 }
 
+/// Synthesise a Komga-shaped snapshot of `series` series, each with
+/// `books_per` books — the shape the scripted server and fixture server speak.
+fn synthetic_snapshot(series: usize, books_per: usize) -> Value {
+    let mut series_items: Vec<Value> = Vec::new();
+    let mut books = serde_json::Map::new();
+    for index in 0..series {
+        let id = format!("series-{index:06}");
+        series_items.push(json!({
+            "id": id,
+            "libraryId": "lib-1",
+            "name": format!("Scale Series {index}"),
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-01-02T00:00:00Z",
+            "booksCount": books_per,
+            "metadata": {
+                "title": format!("Scale Series {index}"),
+                "status": "ONGOING",
+                "summary": "Synthetic series used to measure the sync engine.",
+                "genres": ["Scale"],
+                "tags": ["Synthetic"],
+                "authors": [],
+            },
+        }));
+        let items: Vec<Value> = (0..books_per)
+            .map(|book| {
+                json!({
+                    "id": format!("{id}-book-{book:03}"),
+                    "seriesId": id,
+                    "name": format!("Scale Series {index} #{book}"),
+                    "number": book + 1,
+                    "created": "2025-01-01T00:00:00Z",
+                    "lastModified": "2025-01-02T00:00:00Z",
+                    "media": { "mediaType": "CBZ", "pagesCount": 24 },
+                })
+            })
+            .collect();
+        books.insert(id, json!([items]));
+    }
+    // 100 series per page, so the sweep really is paged.
+    let pages: Vec<Value> = series_items.chunks(100).map(|chunk| json!(chunk)).collect();
+    json!({
+        "id": "scale",
+        "libraries": [{ "id": "lib-1", "name": "Scale", "root": "/scale" }],
+        "series": pages,
+        "books": books,
+        "collections": [[]],
+        "readlists": [[]],
+        "onDeck": [[]],
+    })
+}
+
+/// A bounded scale sweep. "长期运行可靠" needs a measured number rather than an
+/// assumption: bootstrap a large library, then reconcile it twice and prove the
+/// mirror is already correct, so the cost of a steady-state sweep is on record.
+fn run_scale(series: usize, books_per: usize) {
+    let total_books = series * books_per;
+    section(&format!(
+        "Scale sweep: {series} series / {total_books} books (scripted server, no network)"
+    ));
+    let dir = std::env::temp_dir().join(format!("komga_scale_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("comic.sqlite").to_string_lossy().into_owned();
+    let app = App::new(&db);
+    let snapshot = synthetic_snapshot(series, books_per);
+    let server = scenario::server_from_snapshot(&snapshot.to_string()).expect("snapshot");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    let started = Instant::now();
+    let summary = runtime
+        .block_on(app.full_sync_with(&server, "scale"))
+        .expect("bootstrap");
+    let bootstrapped = started.elapsed();
+    check(
+        "bootstrap mirrored everything",
+        summary.series == series && summary.books == total_books,
+        &format!(
+            "{}/{} series, {}/{} books in {}ms",
+            summary.series,
+            series,
+            summary.books,
+            total_books,
+            bootstrapped.as_millis()
+        ),
+    );
+
+    let started = Instant::now();
+    let first = runtime
+        .block_on(app.reconcile_with(&server, "scale", "manual_refresh"))
+        .expect("reconcile");
+    let first_elapsed = started.elapsed();
+    check(
+        "reconcile of a converged mirror changes nothing",
+        first.clean && first.total_mutations() == 0,
+        &format!(
+            "{}ms, mutations={}",
+            first_elapsed.as_millis(),
+            first.total_mutations()
+        ),
+    );
+
+    let started = Instant::now();
+    let second = runtime
+        .block_on(app.reconcile_with(&server, "scale", "did_become_active"))
+        .expect("second reconcile");
+    let second_elapsed = started.elapsed();
+    check(
+        "steady-state sweep stays clean",
+        second.clean,
+        &format!("{}ms", second_elapsed.as_millis()),
+    );
+
+    let conn = store::open(&db).expect("open db");
+    let stored: Vec<i64> = [
+        "SELECT COUNT(*) FROM series WHERE server_id = ?1",
+        "SELECT COUNT(*) FROM books WHERE server_id = ?1",
+        "SELECT COUNT(*) FROM book_fts WHERE server_id = ?1",
+    ]
+    .iter()
+    .map(|sql| {
+        conn.query_row(sql, rusqlite::params!["scale"], |row| row.get(0))
+            .unwrap()
+    })
+    .collect();
+    let orphans: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM books b WHERE b.server_id = ?1 AND NOT EXISTS
+               (SELECT 1 FROM series s WHERE s.server_id = b.server_id AND s.remote_id = b.series_id)",
+            rusqlite::params!["scale"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    check(
+        "SQLite holds the whole library, index included",
+        stored[0] == series as i64
+            && stored[1] == total_books as i64
+            && stored[2] == total_books as i64
+            && orphans == 0,
+        &format!(
+            "series={} books={} book_fts={} orphans={}",
+            stored[0], stored[1], stored[2], orphans
+        ),
+    );
+    println!(
+        "  wall time {}ms total: bootstrap {}ms, reconcile {}ms + {}ms",
+        (bootstrapped + first_elapsed + second_elapsed).as_millis(),
+        bootstrapped.as_millis(),
+        first_elapsed.as_millis(),
+        second_elapsed.as_millis()
+    );
+    drop(conn);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn main() {
     let args = parse_args();
+    if let Some((series, books_per)) = args.scale {
+        run_scale(series, books_per);
+        finish();
+        return;
+    }
     if args.scenario {
         run_scenarios();
         finish();
