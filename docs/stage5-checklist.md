@@ -14,7 +14,8 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ## 验收结果
 
 ```bash
-bash scripts/e2e_stage5.sh        # 4 步：场景重放 14/14 → 真实 HTTP 回环 → 真实服务器（需 Key）→ Swift 同契约
+bash scripts/e2e_stage5.sh        # 场景 14/14 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
+KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
                                   # → ALL GREEN：Rust 111 / Swift 98（1 skip=live）/ Flutter 26
 ```
@@ -34,9 +35,16 @@ bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + f
 | 服务器变成 s1 → `--reconcile-only` | 10/10 PASS：series +2/~2、books +4，镜像 == 服务器 |
 | 服务器变成 s2 → `--reconcile-only` | 11/11 PASS：series -1、books -2、collections -1、readlists -1，且**留下 `cause=reconcile` 的墓碑** |
 | 断网离线重放 | 无凭据可读：无游标残留、无孤儿 Book、FTS 命中 |
+| 凭据被拒（`--auth-failure`） | 11/11 PASS：报 `authentication failed` → `sync_status=error` + `last_error`；镜像一行不多一行不少（前后计数相同）；书架照常可读；下一次健康扫描 `clean=true` 且失败标记被清除 |
 
-> **仍未执行的半程**：第 3 步（真实 Komga 服务器）需要 `KOMGA_API_KEY`。本环境能连到
-> `http://192.168.0.69:25600`（未带凭据 401），密钥不在仓库里，所以那一半**没跑过**。
+**这一项已经在你的真实 Komga 上跑过**：`KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh`
+的第 3a/4 步用一个**故意错误的 key** 打真实服务器（只读 GET，真实 Komga 回 401），
+断言全部通过 —— 不需要谁的凭据，也已经在该服务器上验证过真实 HTTP 语义（真实 401
+→ 统一错误模型 → sync_state → 镜像不变 → 恢复）。
+
+> **仍未执行的半程**：第 3b 步（真实 Komga 上的完整 Bootstrap + Reconcile 一致性）
+> 需要 `KOMGA_API_KEY`。本环境能连到 `http://192.168.0.69:25600`（未带凭据 401），
+> 密钥不在仓库里，所以那一半**没跑过**（3a 认证失败那半已在真实服务器上跑过）。
 > 它和第 2 步跑的是同一套断言，只是将回环服务器换成真服务器：
 > `export KOMGA_BASE_URL=... KOMGA_API_KEY=... && bash scripts/e2e_stage5.sh`。
 > 不要把「没跑」当成「跑过」。
