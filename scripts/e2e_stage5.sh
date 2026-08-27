@@ -88,13 +88,32 @@ echo s2 > "$WORK/snapshot"
 run_loopback --reconcile-only
 (cd "$CORE" && "${SMOKE[@]}" --offline --db "$LOOP_DB" --server-id loopback)
 
+# A rejected credential has to fail safely: error recorded, mirror untouched,
+# still browsable, healed by the next healthy sweep. Deterministic here, because
+# the fixture server answers 401 for any key but the configured one.
+(cd "$CORE" && "${SMOKE[@]}" --auth-failure \
+  --db /tmp/comic-stage5-auth.sqlite --server-id authfail \
+  --base-url "http://127.0.0.1:$PORT")
+rm -f /tmp/comic-stage5-auth.sqlite
+
+if [[ -n "${KOMGA_BASE_URL:-}" ]]; then
+  # Read-only probe of the real server with a deliberately wrong key: proves the
+  # auth-failure path against actual Komga behaviour (it answers 401) without
+  # needing anybody's credential.
+  echo "== 3a/4 Real server: a rejected credential must fail safely =="
+  (cd "$CORE" && "${SMOKE[@]}" --auth-failure \
+    --db /tmp/comic-stage5-auth-real.sqlite --server-id real-authfail \
+    --base-url "$KOMGA_BASE_URL")
+  rm -f /tmp/comic-stage5-auth-real.sqlite
+fi
+
 if [[ -n "${KOMGA_BASE_URL:-}" && -n "${KOMGA_API_KEY:-}" ]]; then
-  echo "== 3/4 Live: Bootstrap + Reconcile + mirror == Komga =="
+  echo "== 3b/4 Live: Bootstrap + Reconcile + mirror == Komga =="
   (cd "$CORE" && "${SMOKE[@]}" \
     --db "$DB" --server-id "$SERVER_ID" \
     --base-url "$KOMGA_BASE_URL" --api-key "$KOMGA_API_KEY")
 
-  echo "== 3b/4 Live replay WITHOUT credentials (断网 = 本地库浏览) =="
+  echo "== 3c/4 Live replay WITHOUT credentials (断网 = 本地库浏览) =="
   (cd "$CORE" && "${SMOKE[@]}" \
     --offline --db "$DB" --server-id "$SERVER_ID")
 else

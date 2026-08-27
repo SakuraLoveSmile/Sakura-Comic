@@ -600,7 +600,7 @@ pub fn mirrored_series_ids(db_path: &str, server_id: &str) -> Result<Vec<String>
 /// Fixture-backed fetcher for offline runs and the demo mode: serves the
 /// shared library fixtures (single-page everything, no network). The demo
 /// server (`bootstrap_demo`) and the stage4/stage5 smoke both use it.
-pub(crate) struct FixtureLibraryFetcher {}
+pub struct FixtureLibraryFetcher {}
 
 impl FixtureLibraryFetcher {
     pub(crate) fn series_page() -> SeriesPage {

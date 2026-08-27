@@ -25,6 +25,7 @@ use komga_core::api::series::{KomgaClient, PageRequest};
 use komga_core::ffi::application::App;
 use komga_core::store;
 use komga_core::store::sync_state;
+use komga_core::sync::full::FixtureLibraryFetcher;
 use komga_core::sync::reconcile::ReconcileTrigger;
 use komga_core::sync::scenario;
 use serde_json::{json, Value};
@@ -50,6 +51,7 @@ struct Args {
     scenario: bool,
     reconcile_only: bool,
     scale: Option<(usize, usize)>,
+    auth_failure: bool,
     offline: bool,
     base_url: Option<String>,
     api_key: Option<String>,
@@ -62,6 +64,7 @@ fn parse_args() -> Args {
     let mut parsed = Args {
         scenario: false,
         scale: None,
+        auth_failure: false,
         reconcile_only: false,
         offline: false,
         base_url: None,
@@ -74,6 +77,7 @@ fn parse_args() -> Args {
         match args[i].as_str() {
             "--scenario" => parsed.scenario = true,
             "--reconcile-only" => parsed.reconcile_only = true,
+            "--auth-failure" => parsed.auth_failure = true,
             "--scale" => {
                 i += 1;
                 let series = args[i].parse().expect("--scale takes <SERIES> <BOOKS_PER>");
@@ -371,8 +375,125 @@ fn run_scale(series: usize, books_per: usize) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A rejected credential must fail *safely*: the sweep reports an
+/// authentication error, records it in `sync_state`, changes nothing on disk,
+/// leaves the library browsable — and the next healthy sweep converges as usual.
+/// Runs against any base URL: the loopback fixture server (deterministic 401) or
+/// a real Komga, which answers 401 without a valid key.
+fn run_auth_failure(app: &App, server_id: &str, base_url: &str) {
+    section("A rejected credential must fail safely and then heal");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime
+        .block_on(app.full_sync_with(&FixtureLibraryFetcher {}, server_id))
+        .expect("seed mirror from the shared fixtures");
+
+    let conn = store::open(app.db_path()).expect("open db");
+    let before: Vec<i64> = ["series", "books", "collections", "readlists"]
+        .iter()
+        .map(|table| {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE server_id = ?1"),
+                rusqlite::params![server_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        })
+        .collect();
+    drop(conn);
+    println!(
+        "  mirrored before the failed sweep: series={} books={} collections={} readlists={}",
+        before[0], before[1], before[2], before[3]
+    );
+
+    // Never a real credential: this mode exists precisely to be rejected.
+    let outcome = runtime.block_on(app.reconcile(
+        server_id.to_string(),
+        base_url.to_string(),
+        "stage5-deliberately-wrong-key".to_string(),
+        ReconcileTrigger::ManualRefresh.as_str().to_string(),
+    ));
+    let message = match outcome {
+        Ok(summary) => {
+            check(
+                "the sweep must be rejected",
+                false,
+                &format!("succeeded: {summary:?}"),
+            );
+            return;
+        }
+        Err(error) => error.to_string(),
+    };
+    check(
+        "rejected as an authentication failure",
+        message.contains("authentication"),
+        &message,
+    );
+
+    let conn = store::open(app.db_path()).expect("open db");
+    let after: Vec<i64> = ["series", "books", "collections", "readlists"]
+        .iter()
+        .map(|table| {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE server_id = ?1"),
+                rusqlite::params![server_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        })
+        .collect();
+    check(
+        "nothing was mirrored or deleted by the failed sweep",
+        before == after,
+        &format!("before {before:?} after {after:?}"),
+    );
+    let rollup = sync_state::get_sync_state(&conn, server_id)
+        .ok()
+        .flatten()
+        .expect("rollup row");
+    check(
+        "sync_state records the failure",
+        rollup.sync_status == sync_state::STATUS_ERROR && rollup.last_error.is_some(),
+        &format!(
+            "status={} error={:?}",
+            rollup.sync_status, rollup.last_error
+        ),
+    );
+    drop(conn);
+
+    run_offline(app, server_id);
+
+    let healthy = runtime
+        .block_on(app.reconcile_with(&FixtureLibraryFetcher {}, server_id, "network_recovered"))
+        .expect("reconcile against a healthy server");
+    check(
+        "the next healthy sweep converges again",
+        healthy.clean,
+        &format!("clean={} pages={}", healthy.clean, healthy.pages_swept),
+    );
+    let conn = store::open(app.db_path()).expect("open db");
+    let rollup = sync_state::get_sync_state(&conn, server_id)
+        .ok()
+        .flatten()
+        .expect("rollup row");
+    check(
+        "the recorded failure is cleared by the successful sweep",
+        rollup.sync_status == sync_state::STATUS_IDLE && rollup.last_error.is_none(),
+        &format!(
+            "status={} error={:?}",
+            rollup.sync_status, rollup.last_error
+        ),
+    );
+}
+
 fn main() {
     let args = parse_args();
+    if args.auth_failure {
+        let app = App::new(&args.db);
+        let base_url = args.base_url.expect("--base-url for --auth-failure");
+        run_auth_failure(&app, &args.server_id, &base_url);
+        finish();
+        return;
+    }
     if let Some((series, books_per)) = args.scale {
         run_scale(series, books_per);
         finish();
@@ -387,7 +508,7 @@ fn main() {
         panic!("--db PATH is required");
     }
     // A chain of runs shares one database: only a bootstrap run resets it.
-    if Path::new(&args.db).exists() && !args.offline && !args.reconcile_only {
+    if Path::new(&args.db).exists() && !args.offline && !args.reconcile_only && !args.auth_failure {
         std::fs::remove_file(&args.db).ok();
     }
     let app = App::new(&args.db);
