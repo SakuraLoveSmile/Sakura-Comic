@@ -474,9 +474,64 @@ public enum SyncScenario {
         }
 
         for book in allSnapshotBooks(snap) {
-            let title = try? store.bookDetail(serverID: serverID, bookID: book.id)?.title
-            if title != book.name {
-                problems.append("book \(book.id): title local \(String(describing: title)) != server \(book.name)")
+            guard let detail = try? store.bookDetail(serverID: serverID, bookID: book.id) else {
+                problems.append("book \(book.id): missing locally")
+                continue
+            }
+            if detail.title != book.name {
+                problems.append("book \(book.id): title local \(detail.title) != server \(book.name)")
+            }
+            // Metadata edits land in book_metadata / book_tags: a sweep that
+            // skips unchanged books still has to keep these in sync.
+            let wantSummary = book.metadata?.summary
+            if detail.summary != wantSummary {
+                problems.append("book \(book.id): summary local \(String(describing: detail.summary)) != server \(String(describing: wantSummary))")
+            }
+            let wantTags = (book.metadata?.tags ?? []).sorted()
+            if detail.tags.sorted() != wantTags {
+                problems.append("book \(book.id): tags local \(detail.tags.sorted()) != server \(wantTags)")
+            }
+            if detail.pagesCount != book.media?.pagesCount.map(Int64.init) {
+                problems.append("book \(book.id): pagesCount local \(String(describing: detail.pagesCount)) != server \(String(describing: book.media?.pagesCount))")
+            }
+            let wantNumberSort = book.metadata?.numberSort
+            if detail.numberSort != wantNumberSort {
+                problems.append("book \(book.id): numberSort local \(String(describing: detail.numberSort)) != server \(String(describing: wantNumberSort))")
+            }
+            if detail.lastModified != book.lastModified {
+                problems.append("book \(book.id): lastModified local \(String(describing: detail.lastModified)) != server \(String(describing: book.lastModified))")
+            }
+        }
+
+        // Series counters move when a book is read elsewhere, without Komga
+        // touching series.lastModified — the projection comparison must catch it.
+        for series in snap.series.flatMap({ $0 }) {
+            guard let detail = try? store.seriesDetail(serverID: serverID, seriesID: series.id) else { continue }
+            let want = (
+                series.booksCount, series.booksReadCount,
+                series.booksUnreadCount, series.booksInProgressCount
+            )
+            let got = (
+                detail.booksCount, detail.booksReadCount,
+                detail.booksUnreadCount, detail.booksInProgressCount
+            )
+            if got != want {
+                problems.append("series \(series.id): counters local \(got) != server \(want)")
+            }
+        }
+
+        // Libraries carry root + availability, which the Library screens show.
+        for library in snap.libraries {
+            let stored = try? store.libraryDetail(serverID: serverID, libraryID: library.id)
+            guard let stored else {
+                problems.append("library \(library.id): missing locally")
+                continue
+            }
+            if stored.root != library.root {
+                problems.append("library \(library.id): root local \(String(describing: stored.root)) != server \(library.root)")
+            }
+            if stored.unavailable != (library.unavailable ?? false) {
+                problems.append("library \(library.id): unavailable local \(stored.unavailable) != server \(library.unavailable ?? false)")
             }
         }
 

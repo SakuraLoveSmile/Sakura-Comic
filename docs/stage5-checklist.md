@@ -14,7 +14,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ## 验收结果
 
 ```bash
-bash scripts/e2e_stage5.sh        # 场景 14/14 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
+bash scripts/e2e_stage5.sh        # 场景 16/16 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
 KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
                                   # → ALL GREEN：Rust 111 / Swift 98（1 skip=live）/ Flutter 26
@@ -143,10 +143,10 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 | 修改 Series | 同上：`series_changed == 2`（改名 / 状态） |
 | 删除 Series | reconcile s1→s2：`series_removed == 1` + 级联 + 墓碑 |
 | 新增 Book | s1（`book-3-3` 进已有 series、`book-4-*` 进新 series）→ `books_added == 4` |
-| 修改 Metadata | s1 改 series-1 的 summary/genres/tags → 快照比对覆盖归一化表 |
+| 修改 Metadata | **s5**：服务器改一本书的 summary / tags / numberSort / pagesCount，并搬走一个 library 的 root（+ unavailable）→ 逐字段镜像；**s1** 改 series 的 summary/genres/tags |
 | App 离线后重新上线 | interrupt 步 3（全量故障，镜像不变）→ 步 4（恢复后收敛到 s2） |
 | 同步中途失败后恢复 | **Bootstrap**：步 1/2（series 第 2 页故障 → 游标续跑）、步 3/4（Books 扫到某 series 中途故障，游标 `series=<id>|page=1` → 从该页续跑）；**Reconcile**：步 5/6（Books 在 series 边界被打断，游标 `series=series-5|page=0` → 下一轮只再请求 1 次 books 即完成收敛） |
-| 最终 SQLite == Komga | 每步 `diff_mirror`；收敛后再扫一次 `clean == true` |
+| 最终 SQLite == Komga | 每步 `diff_mirror` —— 比对深度：series 名称/状态/lastModified/四个阅读计数、归一化 genres 与 summary、book 标题/summary/tags/numberSort/pagesCount/lastModified、合集成员、书单保序成员、阅读进度集合、FTS 行数、library root+unavailable、无孤儿 Book、墓碑集合、`sync_state` 与请求次数；收敛后再扫一次 `clean == true` |
 
 `bash scripts/e2e_stage5.sh` 的 `--scenario` 半程在无网络条件下跑完全部步骤；
 `stage5_smoke` 的 live 半程（提供 `KOMGA_BASE_URL` / `KOMGA_API_KEY` 时）额外校验
@@ -155,7 +155,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 
 ## 覆盖测试
 
-- **Rust（111 通过）**：`sync::scenario`（两个共享场景 14 步全绿）、`sync::full`（镜像完整性 /
+- **Rust（111 通过）**：`sync::scenario`（两个共享场景 16 步全绿）、`sync::full`（镜像完整性 /
   fresh 幂等 / 已完成步骤不再重镜）、
   `store::read_progress`（离线进度保护 + 共享 fixture 契约）、
   `store::books::a_failed_page_write_rolls_back_the_whole_page`（一页一个事务：
@@ -172,7 +172,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
   `PruneStoreTests`、`ReadProgressSyncTests`（离线进度保护，含直接读共享 fixture 的一条）、
   `ScaleSyncTests`（300×20 规模镜像 + 幂等对账）、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）
-- **Smoke**：`stage5_smoke --scenario` 14/14 PASS
+- **Smoke**：`stage5_smoke --scenario` 16/16 PASS
 - **UI 构建**：ComicApp iOS + macOS scheme BUILD SUCCEEDED；flutter analyze 0 issues
 - **删除传播落盘**：Reconcile 摘要携带真实封面路径（`Pruned.coverPaths` 两端一致），
   Apple 侧 `LibraryViewModel.reconcile` 逐个 `cache.remove(...)`，Android 侧由

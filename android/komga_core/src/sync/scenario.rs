@@ -510,17 +510,120 @@ pub fn diff_mirror(db_path: &str, server_id: &str, snap: &Snapshot) -> Vec<Strin
     }
 
     for book in all_snapshot_books(snap) {
-        let title: Option<String> = conn
+        let mirrored: Option<(String, Option<i64>, Option<f64>)> = conn
             .query_row(
-                "SELECT title FROM books WHERE server_id = ?1 AND remote_id = ?2",
+                "SELECT title, pages_count, number_sort FROM books
+                 WHERE server_id = ?1 AND remote_id = ?2",
                 rusqlite::params![server_id, book.id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .ok();
-        if title.as_deref() != Some(book.name.as_str()) {
+        let want_number_sort = book.metadata.as_ref().and_then(|m| m.number_sort);
+        let want_pages = book.media.as_ref().and_then(|m| m.pages_count);
+        match mirrored {
+            None => problems.push(format!("book {}: missing locally", book.id)),
+            Some((title, pages, number_sort)) => {
+                if title != book.name {
+                    problems.push(format!(
+                        "book {}: title local {title:?} != server {:?}",
+                        book.id, book.name
+                    ));
+                }
+                // Metadata edits land in book_metadata / book_tags; a sweep that
+                // skips "unchanged" books has to keep them in sync anyway.
+                let summary: Option<String> = conn
+                    .query_row(
+                        "SELECT summary FROM book_metadata WHERE server_id = ?1 AND book_id = ?2",
+                        rusqlite::params![server_id, book.id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let want_summary = book.metadata.as_ref().and_then(|m| m.summary.clone());
+                if summary != want_summary {
+                    problems.push(format!(
+                        "book {}: summary local {summary:?} != server {want_summary:?}",
+                        book.id
+                    ));
+                }
+                let tags: Vec<String> = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT tag FROM book_tags WHERE server_id = ?1 AND book_id = ?2 ORDER BY tag",
+                        )
+                        .unwrap();
+                    stmt.query_map(rusqlite::params![server_id, book.id], |r| r.get(0))
+                        .unwrap()
+                        .collect::<rusqlite::Result<_>>()
+                        .unwrap()
+                };
+                let want_tags = book
+                    .metadata
+                    .as_ref()
+                    .map(|m| sorted(&m.tags))
+                    .unwrap_or_default();
+                if tags != want_tags {
+                    problems.push(format!(
+                        "book {}: tags local {tags:?} != server {want_tags:?}",
+                        book.id
+                    ));
+                }
+                if pages != want_pages {
+                    problems.push(format!(
+                        "book {}: pagesCount local {pages:?} != server {want_pages:?}",
+                        book.id
+                    ));
+                }
+                if number_sort != want_number_sort {
+                    problems.push(format!(
+                        "book {}: numberSort local {number_sort:?} != server {want_number_sort:?}",
+                        book.id
+                    ));
+                }
+            }
+        }
+    }
+
+    // Series counters move when a book is read elsewhere, without Komga
+    // touching series.lastModified — the projection comparison must catch it.
+    for series in snap.series.iter().flat_map(|p| p.iter()) {
+        let counters: Option<Counters> = conn
+            .query_row(
+                "SELECT books_count, books_read_count, books_unread_count, books_in_progress_count
+                 FROM series WHERE server_id = ?1 AND remote_id = ?2",
+                rusqlite::params![server_id, series.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .ok();
+        let want = (
+            series.books_count,
+            series.books_read_count,
+            series.books_unread_count,
+            series.books_in_progress_count,
+        );
+        if counters != Some(want) {
             problems.push(format!(
-                "book {}: title local {title:?} != server {:?}",
-                book.id, book.name
+                "series {}: counters local {:?} != server {:?}",
+                series.id, counters, want
+            ));
+        }
+    }
+
+    // Libraries carry root + availability, shown on the Library screens.
+    for library in &snap.libraries {
+        let stored: Option<(Option<String>, i64)> = conn
+            .query_row(
+                "SELECT root, unavailable FROM libraries WHERE server_id = ?1 AND remote_id = ?2",
+                rusqlite::params![server_id, library.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        let want_unavailable = library.unavailable.unwrap_or(false) as i64;
+        if stored != Some((Some(library.root.clone()), want_unavailable))
+            && stored != Some((None, want_unavailable))
+        {
+            problems.push(format!(
+                "library {}: local {:?} != server root {:?}",
+                library.id, stored, library.root
             ));
         }
     }
@@ -632,6 +735,9 @@ pub fn diff_mirror(db_path: &str, server_id: &str, snap: &Snapshot) -> Vec<Strin
     }
     problems
 }
+
+/// The four mirrored reading counters of a series.
+type Counters = (Option<i64>, Option<i64>, Option<i64>, Option<i64>);
 
 /// Every book the snapshot serves, across series and pages.
 fn all_snapshot_books(snap: &Snapshot) -> Vec<&Book> {

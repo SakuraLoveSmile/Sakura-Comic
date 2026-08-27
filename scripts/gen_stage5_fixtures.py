@@ -309,13 +309,48 @@ def count(snap, key, nested=False):
     return sum(len(p) for p in snap[key])
 
 
+# ---------------------------------------------------------------------------
+# s5 — the server edits a book's metadata and a library's root, the two things
+# the earlier snapshots only ever created or deleted.
+# ---------------------------------------------------------------------------
+S5 = copy.deepcopy(S2)
+S5['id'] = 's5'
+for book in S5['books']['series-1'][0]:
+    if book['id'] == 'book-1-1':
+        book['lastModified'] = '2025-02-10T00:00:00Z'
+        book['metadata']['summary'] = 'Re-scanned summary: the romance arc begins.'
+        book['metadata']['tags'] = ['Manga', 'Pirate', 'Reprint']
+        book['metadata']['numberSort'] = 1.5
+        book['media']['pagesCount'] = 48
+S5['libraries'] = copy.deepcopy(S2['libraries'])
+S5['libraries'][1]['root'] = '/mnt/webtoons-moved'
+S5['libraries'][1]['unavailable'] = True
+
+# ---------------------------------------------------------------------------
+# s6 — reading happened on another device: the derived series counters move
+# while `series.lastModified` stays exactly where it was.
+# ---------------------------------------------------------------------------
+S6 = copy.deepcopy(S2)
+S6['id'] = 's6'
+for page in S6['series']:
+    for series in page:
+        if series['id'] == 'series-1':
+            series['booksReadCount'] = 2
+            series['booksUnreadCount'] = 0
+            series['booksInProgressCount'] = 1
+            # deliberately NOT touched: this is the whole point of the step
+            assert 'lastModified' in series
+
+ALL = {s['id']: s for s in (S0, S1, S2, S3, S5, S6)}
+
+
 reconcile_scenario = {
     "name": "stage5-reconcile",
     "description": "Bootstrap + Reconcile with SSE completely unavailable: every "
     "remote add / change / delete is healed by an id sweep alone.",
     "sse": "disabled",
     "serverId": "stage5",
-    "snapshots": [S0, S1, S2],
+    "snapshots": [S0, S1, S2, S5, S6],
     "steps": [
         {
             "label": "bootstrap mirrors s0 (Libraries → Series → Books → Collections → Readlists → Progress)",
@@ -363,6 +398,23 @@ reconcile_scenario = {
             "snapshot": "s2",
             "trigger": "app_launch",
             "expect": {"mirror": "s2", "clean": True, "tallies": {"series_removed": 0, "books_removed": 0}},
+        },
+        {
+            "label": "book metadata edit + library move are mirrored field by field",
+            "action": "reconcile",
+            "snapshot": "s5",
+            "trigger": "manual_refresh",
+            "expect": {
+                "mirror": "s5",
+                "tallies": {"books_changed": 1},
+            },
+        },
+        {
+            "label": "another device finished a book: series counters move, lastModified does not",
+            "action": "reconcile",
+            "snapshot": "s6",
+            "trigger": "did_become_active",
+            "expect": {"mirror": "s6"},
         },
         {
             "label": "series comes back under the same id: its tombstone is cleared",
@@ -505,7 +557,7 @@ with open(os.path.join(OUT, "scenario-interrupt.json"), "w", encoding="utf-8") a
     json.dump(interrupt_scenario, handle, indent=2, ensure_ascii=False)
     handle.write("\n")
 
-for snap in (S0, S1, S2, S3):
+for snap in (S0, S1, S2, S3, S5, S6):
     print(f"{snap['id']}: libraries={count(snap,'libraries')} series={count(snap,'series')} "
           f"books={count(snap,'books')} collections={count(snap,'collections')} "
           f"readlists={count(snap,'readlists')} seriesPages={len(snap['series'])}")

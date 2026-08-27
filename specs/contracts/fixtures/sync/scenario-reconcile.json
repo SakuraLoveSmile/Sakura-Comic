@@ -2409,6 +2409,1352 @@
       ]
     },
     {
+      "id": "s5",
+      "libraries": [
+        {
+          "id": "lib-1",
+          "name": "Manga Main",
+          "root": "/manga"
+        },
+        {
+          "id": "lib-2",
+          "name": "Webtoons",
+          "root": "/mnt/webtoons-moved",
+          "unavailable": true
+        }
+      ],
+      "series": [
+        [
+          {
+            "id": "series-1",
+            "libraryId": "lib-1",
+            "name": "One Piece",
+            "url": "http://komga.local/api/v1/series/series-1",
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-02-01T00:00:00Z",
+            "fileLastModified": "2025-01-02T00:00:00Z",
+            "booksCount": 3,
+            "booksReadCount": 1,
+            "booksUnreadCount": 2,
+            "booksInProgressCount": 1,
+            "oneshot": false,
+            "deleted": false,
+            "booksMetadata": {
+              "summary": "A pirate adventure.",
+              "summaryNumber": "104",
+              "releaseDate": "1997-07-19",
+              "authors": [
+                {
+                  "name": "Eiichiro Oda",
+                  "role": "STORY_ART"
+                }
+              ],
+              "tags": [
+                "Pirate"
+              ],
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z"
+            },
+            "metadata": {
+              "title": "One Piece",
+              "titleLock": false,
+              "titleSort": "One Piece",
+              "titleSortLock": false,
+              "status": "ENDED",
+              "statusLock": true,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z",
+              "summary": "Rewritten synopsis after a metadata scan.",
+              "publisher": "Shueisha",
+              "publisherLock": false,
+              "readingDirection": "LEFT_TO_RIGHT",
+              "readingDirectionLock": false,
+              "ageRating": "MATURE",
+              "ageRatingLock": false,
+              "language": "ja",
+              "languageLock": false,
+              "totalBookCount": 3,
+              "totalBookCountLock": false,
+              "genres": [
+                "Adventure",
+                "Action"
+              ],
+              "genresLock": false,
+              "tags": [
+                "Pirate",
+                "Reprint"
+              ],
+              "tagsLock": false,
+              "links": [],
+              "linksLock": false,
+              "alternateTitles": [],
+              "alternateTitlesLock": false,
+              "sharingLabels": [],
+              "sharingLabelsLock": false
+            }
+          },
+          {
+            "id": "series-2",
+            "libraryId": "lib-1",
+            "name": "Berserk (Final Arc)",
+            "url": "http://komga.local/api/v1/series/series-2",
+            "created": "2025-01-03T00:00:00Z",
+            "lastModified": "2025-02-02T00:00:00Z",
+            "fileLastModified": "2025-01-04T00:00:00Z",
+            "booksCount": 2,
+            "booksReadCount": 1,
+            "booksUnreadCount": 1,
+            "booksInProgressCount": 0,
+            "oneshot": false,
+            "deleted": false,
+            "booksMetadata": {
+              "summary": "Dark fantasy.",
+              "summaryNumber": "42",
+              "releaseDate": "1989-08-12",
+              "authors": [
+                {
+                  "name": "Kentaro Miura",
+                  "role": "STORY_ART"
+                }
+              ],
+              "tags": [
+                "Dark"
+              ],
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z"
+            },
+            "metadata": {
+              "title": "Berserk (Final Arc)",
+              "titleLock": false,
+              "titleSort": "Berserk",
+              "titleSortLock": false,
+              "status": "ENTERED",
+              "statusLock": true,
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z",
+              "summary": "Berserk is a dark fantasy manga following the swordsman Guts.",
+              "publisher": "Hakusensha",
+              "publisherLock": false,
+              "readingDirection": "RIGHT_TO_LEFT",
+              "readingDirectionLock": false,
+              "ageRating": "ADULT",
+              "ageRatingLock": false,
+              "language": "ja",
+              "languageLock": false,
+              "totalBookCount": 2,
+              "totalBookCountLock": false,
+              "genres": [
+                "Dark Fantasy",
+                "Action"
+              ],
+              "genresLock": false,
+              "tags": [
+                "Manga",
+                "Seinen"
+              ],
+              "tagsLock": false,
+              "links": [],
+              "linksLock": false,
+              "alternateTitles": [],
+              "alternateTitlesLock": false,
+              "sharingLabels": [],
+              "sharingLabelsLock": false
+            }
+          },
+          {
+            "id": "series-4",
+            "libraryId": "lib-2",
+            "name": "Chainsaw Man",
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-02-03T00:00:00Z",
+            "booksCount": 2,
+            "booksMetadata": {
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "tags": [
+                "Devil"
+              ]
+            },
+            "metadata": {
+              "title": "Chainsaw Man",
+              "status": "ONGOING",
+              "summary": "A devils-hunter duo.",
+              "publisher": "Shueisha",
+              "genres": [
+                "Action",
+                "Horror"
+              ],
+              "tags": [
+                "Devil"
+              ],
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "readingDirection": "rightToLeft",
+              "language": "ja",
+              "ageRating": "Everyone",
+              "firstBook": null
+            }
+          },
+          {
+            "id": "series-5",
+            "libraryId": "lib-2",
+            "name": "Spy x Family",
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-02-04T00:00:00Z",
+            "booksCount": 1,
+            "booksMetadata": {
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "tags": [
+                "Spy"
+              ]
+            },
+            "metadata": {
+              "title": "Spy x Family",
+              "status": "HIATUS",
+              "summary": "A fake family with real secrets.",
+              "publisher": "Shueisha",
+              "genres": [
+                "Comedy",
+                "Action"
+              ],
+              "tags": [
+                "Spy"
+              ],
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "readingDirection": "rightToLeft",
+              "language": "ja",
+              "ageRating": "Everyone",
+              "firstBook": null
+            }
+          }
+        ]
+      ],
+      "books": {
+        "series-1": [
+          [
+            {
+              "id": "book-1-1",
+              "seriesId": "series-1",
+              "seriesTitle": "One Piece",
+              "libraryId": "lib-1",
+              "name": "One Piece #1",
+              "number": 1,
+              "oneshot": false,
+              "size": "12.3 MB",
+              "sizeBytes": 12897485,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 48,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "One Piece #1",
+                "titleLock": false,
+                "number": "1",
+                "numberLock": false,
+                "numberSort": 1.5,
+                "numberSortLock": false,
+                "releaseDate": "1997-07-19",
+                "releaseDateLock": false,
+                "summary": "Re-scanned summary: the romance arc begins.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Eiichiro Oda",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Pirate",
+                  "Reprint"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-01T00:00:00Z",
+                "lastModified": "2025-01-02T00:00:00Z"
+              },
+              "readProgress": {
+                "page": 20,
+                "completed": true,
+                "created": "2025-01-10T00:00:00Z",
+                "lastModified": "2025-01-10T00:00:00Z",
+                "deviceId": "fixture",
+                "deviceName": "Fixture",
+                "readDate": "2025-01-10T00:00:00Z"
+              },
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-02-10T00:00:00Z",
+              "fileLastModified": "2025-01-02T00:00:00Z",
+              "fileHash": "hash-1-1",
+              "url": "http://komga.local/api/v1/books/book-1-1",
+              "deleted": false
+            },
+            {
+              "id": "book-1-2",
+              "seriesId": "series-1",
+              "seriesTitle": "One Piece",
+              "libraryId": "lib-1",
+              "name": "One Piece #2",
+              "number": 2,
+              "oneshot": false,
+              "size": "11.9 MB",
+              "sizeBytes": 12478073,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 20,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "One Piece #2",
+                "titleLock": false,
+                "number": "2",
+                "numberLock": false,
+                "numberSort": 2.0,
+                "numberSortLock": false,
+                "releaseDate": "1997-09-04",
+                "releaseDateLock": false,
+                "summary": "Buggy the Clown appears.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Eiichiro Oda",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Pirate"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-01T00:00:00Z",
+                "lastModified": "2025-01-02T00:00:00Z"
+              },
+              "readProgress": {
+                "page": 12,
+                "completed": false,
+                "created": "2025-01-11T00:00:00Z",
+                "lastModified": "2025-01-11T00:00:00Z",
+                "deviceId": "fixture",
+                "deviceName": "Fixture",
+                "readDate": "2025-01-11T00:00:00Z"
+              },
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z",
+              "fileLastModified": "2025-01-02T00:00:00Z",
+              "fileHash": "hash-1-2",
+              "url": "http://komga.local/api/v1/books/book-1-2",
+              "deleted": false
+            }
+          ]
+        ],
+        "series-2": [
+          [
+            {
+              "id": "book-2-1",
+              "seriesId": "series-2",
+              "seriesTitle": "Berserk",
+              "libraryId": "lib-1",
+              "name": "Berserk #1",
+              "number": 1,
+              "oneshot": false,
+              "size": "18.1 MB",
+              "sizeBytes": 18979206,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Berserk #1",
+                "titleLock": false,
+                "number": "1",
+                "numberLock": false,
+                "numberSort": 1.0,
+                "numberSortLock": false,
+                "releaseDate": "1989-08-12",
+                "releaseDateLock": false,
+                "summary": "The Black Swordsman.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Kentaro Miura",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Dark"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-03T00:00:00Z",
+                "lastModified": "2025-01-04T00:00:00Z"
+              },
+              "readProgress": {
+                "page": 24,
+                "completed": true,
+                "created": "2025-01-12T00:00:00Z",
+                "lastModified": "2025-01-12T00:00:00Z",
+                "deviceId": "fixture",
+                "deviceName": "Fixture",
+                "readDate": "2025-01-12T00:00:00Z"
+              },
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z",
+              "fileLastModified": "2025-01-04T00:00:00Z",
+              "fileHash": "hash-2-1",
+              "url": "http://komga.local/api/v1/books/book-2-1",
+              "deleted": false
+            },
+            {
+              "id": "book-2-2",
+              "seriesId": "series-2",
+              "seriesTitle": "Berserk",
+              "libraryId": "lib-1",
+              "name": "Berserk #2",
+              "number": 2,
+              "oneshot": false,
+              "size": "17.6 MB",
+              "sizeBytes": 18454938,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Berserk #2",
+                "titleLock": false,
+                "number": "2",
+                "numberLock": false,
+                "numberSort": 2.0,
+                "numberSortLock": false,
+                "releaseDate": "1989-12-01",
+                "releaseDateLock": false,
+                "summary": "The Brand of Sacrifice.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Kentaro Miura",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Dark"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-03T00:00:00Z",
+                "lastModified": "2025-01-04T00:00:00Z"
+              },
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z",
+              "fileLastModified": "2025-01-04T00:00:00Z",
+              "fileHash": "hash-2-2",
+              "url": "http://komga.local/api/v1/books/book-2-2",
+              "deleted": false
+            }
+          ]
+        ],
+        "series-4": [
+          [
+            {
+              "id": "book-4-2",
+              "seriesId": "series-4",
+              "seriesTitle": "Chainsaw Man",
+              "name": "Chainsaw Man #2",
+              "number": 2,
+              "oneshot": false,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-02-03T00:00:00Z",
+              "sizeBytes": 100000,
+              "media": {
+                "mediaType": "CBZ",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Chainsaw Man #2",
+                "number": "2",
+                "numberSort": 2.0,
+                "summary": "",
+                "authors": [],
+                "tags": [],
+                "isbn": "",
+                "releaseDate": null
+              },
+              "readProgress": null
+            }
+          ]
+        ],
+        "series-5": [
+          [
+            {
+              "id": "book-5-1",
+              "seriesId": "series-5",
+              "seriesTitle": "Spy x Family",
+              "name": "Spy x Family #1",
+              "number": 1,
+              "oneshot": false,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-02-04T00:00:00Z",
+              "sizeBytes": 100000,
+              "media": {
+                "mediaType": "CBZ",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Spy x Family #1",
+                "number": "1",
+                "numberSort": 1.0,
+                "summary": "",
+                "authors": [],
+                "tags": [],
+                "isbn": "",
+                "releaseDate": null
+              },
+              "readProgress": null
+            }
+          ]
+        ]
+      },
+      "collections": [
+        [
+          {
+            "id": "col-1",
+            "name": "Favorites",
+            "ordered": false,
+            "filtered": false,
+            "seriesIds": [
+              "series-1",
+              "series-3",
+              "series-4"
+            ],
+            "createdDate": "2025-01-07T00:00:00Z",
+            "lastModifiedDate": "2025-01-08T00:00:00Z"
+          },
+          {
+            "id": "col-3",
+            "name": "New Hits",
+            "ordered": true,
+            "filtered": false,
+            "seriesIds": [
+              "series-4",
+              "series-5"
+            ],
+            "createdDate": "2025-01-01T00:00:00Z",
+            "lastModifiedDate": "2025-02-06T00:00:00Z"
+          }
+        ]
+      ],
+      "readlists": [
+        [
+          {
+            "id": "rl-1",
+            "name": "Weekend Manga",
+            "summary": "Reading list for relaxed weekend reading.",
+            "ordered": true,
+            "filtered": false,
+            "bookIds": [
+              "book-1-1",
+              "book-1-2",
+              "book-2-1"
+            ],
+            "createdDate": "2025-01-09T00:00:00Z",
+            "lastModifiedDate": "2025-01-10T00:00:00Z"
+          },
+          {
+            "id": "rl-3",
+            "name": "New Series Run",
+            "summary": "",
+            "ordered": false,
+            "filtered": false,
+            "bookIds": [
+              "book-4-1",
+              "book-4-2",
+              "book-5-1"
+            ],
+            "createdDate": "2025-01-01T00:00:00Z",
+            "lastModifiedDate": "2025-02-06T00:00:00Z"
+          }
+        ]
+      ],
+      "onDeck": [
+        [
+          {
+            "id": "book-1-2",
+            "seriesId": "series-1",
+            "seriesTitle": "One Piece",
+            "libraryId": "lib-1",
+            "name": "One Piece #2",
+            "number": 2,
+            "oneshot": false,
+            "size": "11.9 MB",
+            "sizeBytes": 12478073,
+            "media": {
+              "mediaType": "application/pdf",
+              "pagesCount": 20,
+              "status": "READY"
+            },
+            "metadata": {
+              "title": "One Piece #2",
+              "titleLock": false,
+              "number": "2",
+              "numberLock": false,
+              "numberSort": 2.0,
+              "numberSortLock": false,
+              "releaseDate": "1997-09-04",
+              "releaseDateLock": false,
+              "summary": "Buggy the Clown appears.",
+              "summaryLock": false,
+              "authors": [
+                {
+                  "name": "Eiichiro Oda",
+                  "role": "STORY_ART"
+                }
+              ],
+              "authorsLock": false,
+              "tags": [
+                "Manga",
+                "Pirate"
+              ],
+              "tagsLock": false,
+              "isbn": null,
+              "isbnLock": false,
+              "links": [],
+              "linksLock": false,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z"
+            },
+            "readProgress": {
+              "page": 12,
+              "completed": false,
+              "created": "2025-01-11T00:00:00Z",
+              "lastModified": "2025-01-11T00:00:00Z",
+              "deviceId": "fixture",
+              "deviceName": "Fixture",
+              "readDate": "2025-01-11T00:00:00Z"
+            },
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-01-02T00:00:00Z",
+            "fileLastModified": "2025-01-02T00:00:00Z",
+            "fileHash": "hash-1-2",
+            "url": "http://komga.local/api/v1/books/book-1-2",
+            "deleted": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "s6",
+      "libraries": [
+        {
+          "id": "lib-1",
+          "name": "Manga Main",
+          "root": "/manga"
+        },
+        {
+          "id": "lib-2",
+          "name": "Webtoons",
+          "root": "/webtoons"
+        }
+      ],
+      "series": [
+        [
+          {
+            "id": "series-1",
+            "libraryId": "lib-1",
+            "name": "One Piece",
+            "url": "http://komga.local/api/v1/series/series-1",
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-02-01T00:00:00Z",
+            "fileLastModified": "2025-01-02T00:00:00Z",
+            "booksCount": 3,
+            "booksReadCount": 2,
+            "booksUnreadCount": 0,
+            "booksInProgressCount": 1,
+            "oneshot": false,
+            "deleted": false,
+            "booksMetadata": {
+              "summary": "A pirate adventure.",
+              "summaryNumber": "104",
+              "releaseDate": "1997-07-19",
+              "authors": [
+                {
+                  "name": "Eiichiro Oda",
+                  "role": "STORY_ART"
+                }
+              ],
+              "tags": [
+                "Pirate"
+              ],
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z"
+            },
+            "metadata": {
+              "title": "One Piece",
+              "titleLock": false,
+              "titleSort": "One Piece",
+              "titleSortLock": false,
+              "status": "ENDED",
+              "statusLock": true,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z",
+              "summary": "Rewritten synopsis after a metadata scan.",
+              "publisher": "Shueisha",
+              "publisherLock": false,
+              "readingDirection": "LEFT_TO_RIGHT",
+              "readingDirectionLock": false,
+              "ageRating": "MATURE",
+              "ageRatingLock": false,
+              "language": "ja",
+              "languageLock": false,
+              "totalBookCount": 3,
+              "totalBookCountLock": false,
+              "genres": [
+                "Adventure",
+                "Action"
+              ],
+              "genresLock": false,
+              "tags": [
+                "Pirate",
+                "Reprint"
+              ],
+              "tagsLock": false,
+              "links": [],
+              "linksLock": false,
+              "alternateTitles": [],
+              "alternateTitlesLock": false,
+              "sharingLabels": [],
+              "sharingLabelsLock": false
+            }
+          },
+          {
+            "id": "series-2",
+            "libraryId": "lib-1",
+            "name": "Berserk (Final Arc)",
+            "url": "http://komga.local/api/v1/series/series-2",
+            "created": "2025-01-03T00:00:00Z",
+            "lastModified": "2025-02-02T00:00:00Z",
+            "fileLastModified": "2025-01-04T00:00:00Z",
+            "booksCount": 2,
+            "booksReadCount": 1,
+            "booksUnreadCount": 1,
+            "booksInProgressCount": 0,
+            "oneshot": false,
+            "deleted": false,
+            "booksMetadata": {
+              "summary": "Dark fantasy.",
+              "summaryNumber": "42",
+              "releaseDate": "1989-08-12",
+              "authors": [
+                {
+                  "name": "Kentaro Miura",
+                  "role": "STORY_ART"
+                }
+              ],
+              "tags": [
+                "Dark"
+              ],
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z"
+            },
+            "metadata": {
+              "title": "Berserk (Final Arc)",
+              "titleLock": false,
+              "titleSort": "Berserk",
+              "titleSortLock": false,
+              "status": "ENTERED",
+              "statusLock": true,
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z",
+              "summary": "Berserk is a dark fantasy manga following the swordsman Guts.",
+              "publisher": "Hakusensha",
+              "publisherLock": false,
+              "readingDirection": "RIGHT_TO_LEFT",
+              "readingDirectionLock": false,
+              "ageRating": "ADULT",
+              "ageRatingLock": false,
+              "language": "ja",
+              "languageLock": false,
+              "totalBookCount": 2,
+              "totalBookCountLock": false,
+              "genres": [
+                "Dark Fantasy",
+                "Action"
+              ],
+              "genresLock": false,
+              "tags": [
+                "Manga",
+                "Seinen"
+              ],
+              "tagsLock": false,
+              "links": [],
+              "linksLock": false,
+              "alternateTitles": [],
+              "alternateTitlesLock": false,
+              "sharingLabels": [],
+              "sharingLabelsLock": false
+            }
+          },
+          {
+            "id": "series-4",
+            "libraryId": "lib-2",
+            "name": "Chainsaw Man",
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-02-03T00:00:00Z",
+            "booksCount": 2,
+            "booksMetadata": {
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "tags": [
+                "Devil"
+              ]
+            },
+            "metadata": {
+              "title": "Chainsaw Man",
+              "status": "ONGOING",
+              "summary": "A devils-hunter duo.",
+              "publisher": "Shueisha",
+              "genres": [
+                "Action",
+                "Horror"
+              ],
+              "tags": [
+                "Devil"
+              ],
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "readingDirection": "rightToLeft",
+              "language": "ja",
+              "ageRating": "Everyone",
+              "firstBook": null
+            }
+          },
+          {
+            "id": "series-5",
+            "libraryId": "lib-2",
+            "name": "Spy x Family",
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-02-04T00:00:00Z",
+            "booksCount": 1,
+            "booksMetadata": {
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "tags": [
+                "Spy"
+              ]
+            },
+            "metadata": {
+              "title": "Spy x Family",
+              "status": "HIATUS",
+              "summary": "A fake family with real secrets.",
+              "publisher": "Shueisha",
+              "genres": [
+                "Comedy",
+                "Action"
+              ],
+              "tags": [
+                "Spy"
+              ],
+              "authors": [
+                {
+                  "name": "New Author",
+                  "role": "writer"
+                }
+              ],
+              "readingDirection": "rightToLeft",
+              "language": "ja",
+              "ageRating": "Everyone",
+              "firstBook": null
+            }
+          }
+        ]
+      ],
+      "books": {
+        "series-1": [
+          [
+            {
+              "id": "book-1-1",
+              "seriesId": "series-1",
+              "seriesTitle": "One Piece",
+              "libraryId": "lib-1",
+              "name": "One Piece #1",
+              "number": 1,
+              "oneshot": false,
+              "size": "12.3 MB",
+              "sizeBytes": 12897485,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 20,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "One Piece #1",
+                "titleLock": false,
+                "number": "1",
+                "numberLock": false,
+                "numberSort": 1.0,
+                "numberSortLock": false,
+                "releaseDate": "1997-07-19",
+                "releaseDateLock": false,
+                "summary": "Romance Dawn: the beginning of Luffy's adventure.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Eiichiro Oda",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Pirate"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-01T00:00:00Z",
+                "lastModified": "2025-01-02T00:00:00Z"
+              },
+              "readProgress": {
+                "page": 20,
+                "completed": true,
+                "created": "2025-01-10T00:00:00Z",
+                "lastModified": "2025-01-10T00:00:00Z",
+                "deviceId": "fixture",
+                "deviceName": "Fixture",
+                "readDate": "2025-01-10T00:00:00Z"
+              },
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z",
+              "fileLastModified": "2025-01-02T00:00:00Z",
+              "fileHash": "hash-1-1",
+              "url": "http://komga.local/api/v1/books/book-1-1",
+              "deleted": false
+            },
+            {
+              "id": "book-1-2",
+              "seriesId": "series-1",
+              "seriesTitle": "One Piece",
+              "libraryId": "lib-1",
+              "name": "One Piece #2",
+              "number": 2,
+              "oneshot": false,
+              "size": "11.9 MB",
+              "sizeBytes": 12478073,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 20,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "One Piece #2",
+                "titleLock": false,
+                "number": "2",
+                "numberLock": false,
+                "numberSort": 2.0,
+                "numberSortLock": false,
+                "releaseDate": "1997-09-04",
+                "releaseDateLock": false,
+                "summary": "Buggy the Clown appears.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Eiichiro Oda",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Pirate"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-01T00:00:00Z",
+                "lastModified": "2025-01-02T00:00:00Z"
+              },
+              "readProgress": {
+                "page": 12,
+                "completed": false,
+                "created": "2025-01-11T00:00:00Z",
+                "lastModified": "2025-01-11T00:00:00Z",
+                "deviceId": "fixture",
+                "deviceName": "Fixture",
+                "readDate": "2025-01-11T00:00:00Z"
+              },
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z",
+              "fileLastModified": "2025-01-02T00:00:00Z",
+              "fileHash": "hash-1-2",
+              "url": "http://komga.local/api/v1/books/book-1-2",
+              "deleted": false
+            }
+          ]
+        ],
+        "series-2": [
+          [
+            {
+              "id": "book-2-1",
+              "seriesId": "series-2",
+              "seriesTitle": "Berserk",
+              "libraryId": "lib-1",
+              "name": "Berserk #1",
+              "number": 1,
+              "oneshot": false,
+              "size": "18.1 MB",
+              "sizeBytes": 18979206,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Berserk #1",
+                "titleLock": false,
+                "number": "1",
+                "numberLock": false,
+                "numberSort": 1.0,
+                "numberSortLock": false,
+                "releaseDate": "1989-08-12",
+                "releaseDateLock": false,
+                "summary": "The Black Swordsman.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Kentaro Miura",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Dark"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-03T00:00:00Z",
+                "lastModified": "2025-01-04T00:00:00Z"
+              },
+              "readProgress": {
+                "page": 24,
+                "completed": true,
+                "created": "2025-01-12T00:00:00Z",
+                "lastModified": "2025-01-12T00:00:00Z",
+                "deviceId": "fixture",
+                "deviceName": "Fixture",
+                "readDate": "2025-01-12T00:00:00Z"
+              },
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z",
+              "fileLastModified": "2025-01-04T00:00:00Z",
+              "fileHash": "hash-2-1",
+              "url": "http://komga.local/api/v1/books/book-2-1",
+              "deleted": false
+            },
+            {
+              "id": "book-2-2",
+              "seriesId": "series-2",
+              "seriesTitle": "Berserk",
+              "libraryId": "lib-1",
+              "name": "Berserk #2",
+              "number": 2,
+              "oneshot": false,
+              "size": "17.6 MB",
+              "sizeBytes": 18454938,
+              "media": {
+                "mediaType": "application/pdf",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Berserk #2",
+                "titleLock": false,
+                "number": "2",
+                "numberLock": false,
+                "numberSort": 2.0,
+                "numberSortLock": false,
+                "releaseDate": "1989-12-01",
+                "releaseDateLock": false,
+                "summary": "The Brand of Sacrifice.",
+                "summaryLock": false,
+                "authors": [
+                  {
+                    "name": "Kentaro Miura",
+                    "role": "STORY_ART"
+                  }
+                ],
+                "authorsLock": false,
+                "tags": [
+                  "Manga",
+                  "Dark"
+                ],
+                "tagsLock": false,
+                "isbn": null,
+                "isbnLock": false,
+                "links": [],
+                "linksLock": false,
+                "created": "2025-01-03T00:00:00Z",
+                "lastModified": "2025-01-04T00:00:00Z"
+              },
+              "created": "2025-01-03T00:00:00Z",
+              "lastModified": "2025-01-04T00:00:00Z",
+              "fileLastModified": "2025-01-04T00:00:00Z",
+              "fileHash": "hash-2-2",
+              "url": "http://komga.local/api/v1/books/book-2-2",
+              "deleted": false
+            }
+          ]
+        ],
+        "series-4": [
+          [
+            {
+              "id": "book-4-2",
+              "seriesId": "series-4",
+              "seriesTitle": "Chainsaw Man",
+              "name": "Chainsaw Man #2",
+              "number": 2,
+              "oneshot": false,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-02-03T00:00:00Z",
+              "sizeBytes": 100000,
+              "media": {
+                "mediaType": "CBZ",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Chainsaw Man #2",
+                "number": "2",
+                "numberSort": 2.0,
+                "summary": "",
+                "authors": [],
+                "tags": [],
+                "isbn": "",
+                "releaseDate": null
+              },
+              "readProgress": null
+            }
+          ]
+        ],
+        "series-5": [
+          [
+            {
+              "id": "book-5-1",
+              "seriesId": "series-5",
+              "seriesTitle": "Spy x Family",
+              "name": "Spy x Family #1",
+              "number": 1,
+              "oneshot": false,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-02-04T00:00:00Z",
+              "sizeBytes": 100000,
+              "media": {
+                "mediaType": "CBZ",
+                "pagesCount": 24,
+                "status": "READY"
+              },
+              "metadata": {
+                "title": "Spy x Family #1",
+                "number": "1",
+                "numberSort": 1.0,
+                "summary": "",
+                "authors": [],
+                "tags": [],
+                "isbn": "",
+                "releaseDate": null
+              },
+              "readProgress": null
+            }
+          ]
+        ]
+      },
+      "collections": [
+        [
+          {
+            "id": "col-1",
+            "name": "Favorites",
+            "ordered": false,
+            "filtered": false,
+            "seriesIds": [
+              "series-1",
+              "series-3",
+              "series-4"
+            ],
+            "createdDate": "2025-01-07T00:00:00Z",
+            "lastModifiedDate": "2025-01-08T00:00:00Z"
+          },
+          {
+            "id": "col-3",
+            "name": "New Hits",
+            "ordered": true,
+            "filtered": false,
+            "seriesIds": [
+              "series-4",
+              "series-5"
+            ],
+            "createdDate": "2025-01-01T00:00:00Z",
+            "lastModifiedDate": "2025-02-06T00:00:00Z"
+          }
+        ]
+      ],
+      "readlists": [
+        [
+          {
+            "id": "rl-1",
+            "name": "Weekend Manga",
+            "summary": "Reading list for relaxed weekend reading.",
+            "ordered": true,
+            "filtered": false,
+            "bookIds": [
+              "book-1-1",
+              "book-1-2",
+              "book-2-1"
+            ],
+            "createdDate": "2025-01-09T00:00:00Z",
+            "lastModifiedDate": "2025-01-10T00:00:00Z"
+          },
+          {
+            "id": "rl-3",
+            "name": "New Series Run",
+            "summary": "",
+            "ordered": false,
+            "filtered": false,
+            "bookIds": [
+              "book-4-1",
+              "book-4-2",
+              "book-5-1"
+            ],
+            "createdDate": "2025-01-01T00:00:00Z",
+            "lastModifiedDate": "2025-02-06T00:00:00Z"
+          }
+        ]
+      ],
+      "onDeck": [
+        [
+          {
+            "id": "book-1-2",
+            "seriesId": "series-1",
+            "seriesTitle": "One Piece",
+            "libraryId": "lib-1",
+            "name": "One Piece #2",
+            "number": 2,
+            "oneshot": false,
+            "size": "11.9 MB",
+            "sizeBytes": 12478073,
+            "media": {
+              "mediaType": "application/pdf",
+              "pagesCount": 20,
+              "status": "READY"
+            },
+            "metadata": {
+              "title": "One Piece #2",
+              "titleLock": false,
+              "number": "2",
+              "numberLock": false,
+              "numberSort": 2.0,
+              "numberSortLock": false,
+              "releaseDate": "1997-09-04",
+              "releaseDateLock": false,
+              "summary": "Buggy the Clown appears.",
+              "summaryLock": false,
+              "authors": [
+                {
+                  "name": "Eiichiro Oda",
+                  "role": "STORY_ART"
+                }
+              ],
+              "authorsLock": false,
+              "tags": [
+                "Manga",
+                "Pirate"
+              ],
+              "tagsLock": false,
+              "isbn": null,
+              "isbnLock": false,
+              "links": [],
+              "linksLock": false,
+              "created": "2025-01-01T00:00:00Z",
+              "lastModified": "2025-01-02T00:00:00Z"
+            },
+            "readProgress": {
+              "page": 12,
+              "completed": false,
+              "created": "2025-01-11T00:00:00Z",
+              "lastModified": "2025-01-11T00:00:00Z",
+              "deviceId": "fixture",
+              "deviceName": "Fixture",
+              "readDate": "2025-01-11T00:00:00Z"
+            },
+            "created": "2025-01-01T00:00:00Z",
+            "lastModified": "2025-01-02T00:00:00Z",
+            "fileLastModified": "2025-01-02T00:00:00Z",
+            "fileHash": "hash-1-2",
+            "url": "http://komga.local/api/v1/books/book-1-2",
+            "deleted": false
+          }
+        ]
+      ]
+    },
+    {
       "id": "s3-partial-1",
       "libraries": [
         {
@@ -2606,6 +3952,27 @@
           "series_removed": 0,
           "books_removed": 0
         }
+      }
+    },
+    {
+      "label": "book metadata edit + library move are mirrored field by field",
+      "action": "reconcile",
+      "snapshot": "s5",
+      "trigger": "manual_refresh",
+      "expect": {
+        "mirror": "s5",
+        "tallies": {
+          "books_changed": 1
+        }
+      }
+    },
+    {
+      "label": "another device finished a book: series counters move, lastModified does not",
+      "action": "reconcile",
+      "snapshot": "s6",
+      "trigger": "did_become_active",
+      "expect": {
+        "mirror": "s6"
       }
     },
     {
