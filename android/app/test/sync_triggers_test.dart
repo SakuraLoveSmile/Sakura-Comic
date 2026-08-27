@@ -90,6 +90,49 @@ void main() {
     expect(find.text('Berserk'), findsOneWidget);
   });
 
+  testWidgets('a failed sweep retries as the network-recovery trigger', (tester) async {
+    final repo = _SyncFakeRepository(
+      status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
+    );
+    repo.failuresLeft = 1; // the server is unreachable at launch, then back
+    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester.pumpAndSettle();
+
+    expect(repo.triggers, contains('app_launch'));
+    expect(repo.triggers, isNot(contains('network_recovered')));
+    // The shelf still renders the mirror while offline.
+    expect(find.text('Berserk'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(repo.triggers, contains('network_recovered'));
+    expect(repo.triggers.where((t) => t == 'network_recovered').length, 1);
+
+    // Success ends the ladder: no further retries are scheduled.
+    await tester.pump(const Duration(minutes: 10));
+    await tester.pumpAndSettle();
+    expect(repo.triggers.where((t) => t == 'network_recovered').length, 1);
+  });
+
+  testWidgets('recovery retries stop after the bounded attempts', (tester) async {
+    final repo = _SyncFakeRepository(
+      status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
+    );
+    repo.throwOnReconcile = true; // permanently offline
+    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester.pumpAndSettle();
+
+    for (final delay in [15, 60, 300]) {
+      await tester.pump(Duration(seconds: delay));
+      await tester.pumpAndSettle();
+    }
+    expect(repo.triggers.where((t) => t == 'network_recovered').length, 3);
+
+    await tester.pump(const Duration(minutes: 30));
+    await tester.pumpAndSettle();
+    expect(repo.triggers.where((t) => t == 'network_recovered').length, 3);
+  });
+
   testWidgets('a reconcile failure keeps the local library on screen', (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
@@ -116,6 +159,9 @@ class _SyncFakeRepository extends LibraryRepository {
   ReconcileReport? nextReport;
   String? deletedByReconcile;
   bool throwOnReconcile = false;
+
+  /// Number of upcoming reconciliations that fail before the server returns.
+  int failuresLeft = 0;
 
   List<Series> _series = const [
     Series(remoteId: 's1', libraryId: 'lib-1', name: 'One Piece'),
@@ -145,7 +191,8 @@ class _SyncFakeRepository extends LibraryRepository {
   @override
   Future<ReconcileReport?> reconcileActiveServer({required String trigger}) async {
     triggers.add(trigger);
-    if (throwOnReconcile) {
+    if (throwOnReconcile || failuresLeft > 0) {
+      failuresLeft = failuresLeft > 0 ? failuresLeft - 1 : failuresLeft;
       status = const SyncStatus(
         lastSyncAt: '2026-08-27T09:00:00.000Z',
         status: 'error',
