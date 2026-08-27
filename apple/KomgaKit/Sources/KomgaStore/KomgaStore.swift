@@ -12,16 +12,52 @@ public final class KomgaStore: @unchecked Sendable {
 
     /// Opens (or creates) the database at `path` and applies migrations.
     public init(path: String) throws {
-        self.dbQueue = try DatabaseQueue(path: path)
+        self.dbQueue = try DatabaseQueue(path: path, configuration: Self.configuration(wal: true))
         try self.migrate()
     }
 
     /// In-memory store for tests and previews.
     public init() throws {
-        self.dbQueue = try DatabaseQueue()
+        // WAL needs a database file; an in-memory one cannot be journaled.
+        self.dbQueue = try DatabaseQueue(configuration: Self.configuration(wal: false))
         try self.migrate()
     }
 
+    /// Per-connection setup, run by GRDB every time it opens a connection
+    /// (mirror of Rust `store::configure`).
+    ///
+    /// - Parameter wal: only file-backed databases can journal; asking for WAL
+    ///   on an in-memory one is an SQLite error.
+    private static func configuration(wal: Bool) -> Configuration {
+        var configuration = Configuration()
+        if wal {
+            // WAL + NORMAL: the sync engine writes page by page, and the default
+            // rollback journal fsyncs on every commit. This store is a mirror
+            // that can always be re-derived from the server, so paying an fsync
+            // per statement is the wrong trade — the Rust core measured it at
+            // 11s for a *no-op* reconcile of 1,000 series / 20,000 books, far
+            // too slow for a foreground trigger. A process crash still loses no
+            // committed transaction under WAL.
+            configuration.journalMode = .wal
+        }
+        configuration.prepareDatabase { db in
+            // `.wal` already asks for `synchronous = NORMAL`; this keeps the
+            // setting explicit (and correct) for the in-memory case too.
+            try db.execute(sql: "PRAGMA synchronous = NORMAL")
+            try db.execute(sql: "PRAGMA temp_store = MEMORY")
+            try db.execute(sql: "PRAGMA cache_size = -8000")
+        }
+        return configuration
+    }
+
+    /// Apply the schema to the store's connection.
+    ///
+    /// The Rust core reads `PRAGMA user_version` first because it opens a fresh
+    /// `Connection` per page (a `Connection` must never be held across an
+    /// `await`), and every one of those opens replayed the ~40 DDL statements.
+    /// GRDB owns one connection per `DatabaseQueue` and the sync engine is handed
+    /// that store rather than opening it page by page, so this already runs once
+    /// per store — no version short-circuit needed.
     public func migrate() throws {
         try dbQueue.write { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")

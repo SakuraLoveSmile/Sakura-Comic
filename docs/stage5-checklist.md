@@ -16,7 +16,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 ```bash
 bash scripts/e2e_stage5.sh        # 4 步：场景重放 14/14 → 真实 HTTP 回环 → 真实服务器（需 Key）→ Swift 同契约
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 110 / Swift 85（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 110 / Swift 97（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -92,7 +92,14 @@ v6 `sync_state`：主键 `(server_id, entity_type)`，字段
 | 本地没有未上传意图 | 照常镜像 |
 
 `newer()` 用 RFC3339 解析比较，不靠字符串对齐（秒/毫秒精度混在真实数据里）。
-5 条测试覆盖，其中 4 条在去掉判定后立刻失败（变异校验过）。
+两端各自实现并各自变异校验：去掉判定后 Rust 4 条、Swift 4 条测试立刻失败；
+Swift 那条契约测试读的也是同一份 `offline-priority.json`。
+
+## 规模（`stage5_smoke --scale`，并入常跑验收 1b/4）
+
+1000 series / 20000 books 的安静复测：bootstrap 3.7s，无变化 Reconcile 4.7s
+（优化前 11.1s），第二次扫描 `clean=true`，SQLite 行数与 FTS 行数 == 服务器行数、
+零孤儿 Book。300 series / 6000 books 的小档每次 `e2e_stage5.sh` 都跑。
 
 ## Deleted 状态传播
 
@@ -150,8 +157,9 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 - **Flutter（26 通过，含新增 8 项）**：`test/sync_triggers_test.dart`（冷启动分叉
   Bootstrap/Reconcile、回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、
   对账失败仍可用、失败后按 `network_recovered` 重试并在成功时停止、重试次数有上界）
-- **Swift（85 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
-  `PruneStoreTests`、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
+- **Swift（97 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
+  `PruneStoreTests`、`ReadProgressSyncTests`（离线进度保护，含直接读共享 fixture 的一条）、
+  `ScaleSyncTests`（300×20 规模镜像 + 幂等对账）、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
   FullSync 续跑/幂等（fresh 重跑 == 首次）
 - **Smoke**：`stage5_smoke --scenario` 14/14 PASS
 - **UI 构建**：ComicApp iOS + macOS scheme BUILD SUCCEEDED；flutter analyze 0 issues
