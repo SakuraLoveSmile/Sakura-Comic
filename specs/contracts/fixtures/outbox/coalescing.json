@@ -1,0 +1,71 @@
+{
+  "description": "Outbox coalescing: per (server_id, entity_id) the read-progress family keeps only the user's last statement. `queue` is applied in array order against an empty outbox; `enqueue` steps are applied after. expected.queue is in insertion order.",
+  "family": ["READ_PROGRESS", "MARK_READ", "MARK_UNREAD"],
+  "cases": [
+    {
+      "name": "same passive progress collapses to the newest payload",
+      "steps": [
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 7, "completed": false},
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 9, "completed": false}
+      ],
+      "expected": {"queue": [{"type": "READ_PROGRESS", "entity": "book-1", "page": 9, "completed": false}]}
+    },
+    {
+      "name": "an explicit mark supersedes a queued passive progress",
+      "steps": [
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 40, "completed": false},
+        {"op": "enqueue", "type": "MARK_READ", "entity": "book-1"}
+      ],
+      "expected": {"queue": [{"type": "MARK_READ", "entity": "book-1"}]}
+    },
+    {
+      "name": "reading after marking read supersedes the mark (last statement wins)",
+      "steps": [
+        {"op": "enqueue", "type": "MARK_READ", "entity": "book-1"},
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 3, "completed": false}
+      ],
+      "expected": {"queue": [{"type": "READ_PROGRESS", "entity": "book-1", "page": 3, "completed": false}]}
+    },
+    {
+      "name": "mark unread then mark read collapses to mark read",
+      "steps": [
+        {"op": "enqueue", "type": "MARK_UNREAD", "entity": "book-1"},
+        {"op": "enqueue", "type": "MARK_READ", "entity": "book-1"}
+      ],
+      "expected": {"queue": [{"type": "MARK_READ", "entity": "book-1"}]}
+    },
+    {
+      "name": "different entities never collapse into each other",
+      "steps": [
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 2, "completed": false},
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-2", "page": 5, "completed": false}
+      ],
+      "expected": {"queue": [
+        {"type": "READ_PROGRESS", "entity": "book-1", "page": 2, "completed": false},
+        {"type": "READ_PROGRESS", "entity": "book-2", "page": 5, "completed": false}
+      ]}
+    },
+    {
+      "name": "a new action revives a given-up (failed) entry: counter resets",
+      "steps": [
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 2, "completed": false},
+        {"op": "fail_outbox", "entity": "book-1", "retry_count": 8, "state": "failed", "error": "400 Bad Request"},
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 3, "completed": false}
+      ],
+      "expected": {"queue": [{"type": "READ_PROGRESS", "entity": "book-1", "page": 3, "completed": false, "state": "pending", "retry_count": 0}]}
+    },
+    {
+      "name": "failures do not collapse: two entities both backing off keep their own schedules",
+      "steps": [
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-1", "page": 2, "completed": false},
+        {"op": "enqueue", "type": "READ_PROGRESS", "entity": "book-2", "page": 4, "completed": false},
+        {"op": "fail_outbox", "entity": "book-1", "retry_count": 3, "state": "pending", "error": "503"},
+        {"op": "fail_outbox", "entity": "book-2", "retry_count": 1, "state": "pending", "error": "503"}
+      ],
+      "expected": {"queue": [
+        {"type": "READ_PROGRESS", "entity": "book-1", "state": "pending", "retry_count": 3},
+        {"type": "READ_PROGRESS", "entity": "book-2", "state": "pending", "retry_count": 1}
+      ]}
+    }
+  ]
+}

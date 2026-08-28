@@ -1,0 +1,67 @@
+{
+  "route_evidence": "Confirmed twice. (1) Komga 1.26.3 source SseController.kt GetMapping sse/v1/events. (2) The user own running server: its public web bundle app.14b2997d.js (HTTP 200 from 192.168.0.69:25600) contains the literal /sse/v1/events plus a new EventSource, and one addEventListener per catalogue name (BookChanged, ReadProgressChanged, ReadProgressSeriesChanged, ThumbnailBookAdded, TaskQueueStatus, SessionExpired, BookImported). Still unproven without a credential: the authenticated handshake itself.",
+  "description": "What a connection attempt must prove before the client trusts the stream, and what it does when the route is not there. The exported OpenAPI of Komga 1.26.3 (both from the user's server and upstream master) has no /sse* path, and an unauthenticated probe cannot distinguish existence because Komga answers 401 for every /api/* and /sse/* path (control: /totally-bogus-xyz returns 200 - the SPA fallback). So existence is only establishable with a credential.",
+  "endpoint": {
+    "method": "GET",
+    "path": "/sse/v1/events",
+    "accept": "text/event-stream",
+    "auth": "X-API-Key header, same as REST",
+    "resume_header": "Last-Event-ID"
+  },
+  "success_criteria": [
+    "status == 200",
+    "content-type starts with text/event-stream",
+    "at least one frame received (a heartbeat/comment counts) within first_frame_timeout_ms"
+  ],
+  "first_frame_timeout_ms": 15000,
+  "on_failure": {
+    "mode": "reconcile_only",
+    "meaning": "The client keeps working: Reconcile triggers alone must converge the mirror. SSE absence degrades freshness, never correctness.",
+    "must_not": [
+      "retry-storm the SSE route",
+      "report the mirror as broken",
+      "drop queued outbox mutations"
+    ]
+  },
+  "outcome_classes": [
+    {
+      "observed": {
+        "status": 401
+      },
+      "classification": "unverified_credentials",
+      "note": "Cannot tell a wrong path from a wrong key without a valid credential. Do not conclude the route is absent."
+    },
+    {
+      "observed": {
+        "status": 404
+      },
+      "classification": "route_absent",
+      "action": "reconcile_only, and stop attempting"
+    },
+    {
+      "observed": {
+        "status": 200,
+        "content_type": "application/json"
+      },
+      "classification": "not_an_event_stream",
+      "action": "reconcile_only"
+    },
+    {
+      "observed": {
+        "status": 200,
+        "content_type": "text/event-stream",
+        "first_frame": ":hb"
+      },
+      "classification": "connected"
+    }
+  ],
+  "reconnect": {
+    "policy_source": "fixtures/outbox/backoff.json#policy",
+    "retry_field": "a server-sent retry: value raises the floor: delay = max(backoff_seconds, retry_ms / 1000)",
+    "mandatory_after_each_successful_reconnect": [
+      "1. run a full Reconcile with trigger sse_reconnected (not throttled)",
+      "2. only then resume consuming events"
+    ],
+    "forbidden": "resuming event consumption without step 1 - events missed while disconnected must be assumed lost"
+  }
+}

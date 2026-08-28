@@ -1,0 +1,31 @@
+{
+  "description": "Event name -> what to re-fetch, from the verified Komga 1.26.3 catalogue (specs/events/komga-sse-events.md). Both platforms classify with this table; Rust asserts it in tests/sse_contract.rs, Swift in SSEParserTests. Two cases exist specifically to catch a name-keyword implementation: ReadProgressChanged carries a bookId but no 'book' in its name, and ThumbnailBookDeleted is NOT a book deletion.",
+  "shape": {"books": "re-fetch these books", "deletedBooks": "propagate a book deletion", "needsSweep": "a full reconciliation is required", "ignore": "the event says nothing about mirrored data"},
+  "cases": [
+    {"event": "BookAdded", "data": "{\"bookId\":\"b1\",\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "expect": {"books": ["b1"]}},
+    {"event": "BookChanged", "data": "{\"bookId\":\"b1\",\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "expect": {"books": ["b1"]}},
+    {"event": "ReadProgressChanged", "data": "{\"bookId\":\"b1\",\"userId\":\"u1\"}", "expect": {"books": ["b1"]}},
+    {"event": "ReadProgressDeleted", "data": "{\"bookId\":\"b1\",\"userId\":\"u1\"}", "expect": {"books": ["b1"]}},
+    {"event": "ThumbnailBookAdded", "data": "{\"bookId\":\"b1\",\"seriesId\":\"s1\",\"selected\":true}", "expect": {"books": ["b1"]}},
+    {"event": "ThumbnailBookDeleted", "data": "{\"bookId\":\"b1\",\"seriesId\":\"s1\",\"selected\":false}", "expect": {"books": ["b1"]}},
+    {"event": "BookImported", "data": "{\"bookId\":\"b1\",\"sourceFile\":\"/f\",\"success\":true}", "expect": {"books": ["b1"]}},
+    {"event": "BookDeleted", "data": "{\"bookId\":\"b1\",\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "expect": {"deletedBooks": ["b1"]}},
+    {"event": "SeriesAdded", "data": "{\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "expect": {"needsSweep": true}},
+    {"event": "SeriesChanged", "data": "{\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "expect": {"needsSweep": true}},
+    {"event": "ReadProgressSeriesChanged", "data": "{\"seriesId\":\"s1\",\"userId\":\"u1\"}", "expect": {"needsSweep": true}},
+    {"event": "SeriesDeleted", "data": "{\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "expect": {"needsSweep": true}},
+    {"event": "CollectionChanged", "data": "{\"collectionId\":\"c1\",\"seriesIds\":[\"s1\"]}", "expect": {"needsSweep": true}},
+    {"event": "CollectionDeleted", "data": "{\"collectionId\":\"c1\",\"seriesIds\":[]}", "expect": {"needsSweep": true}},
+    {"event": "ReadListChanged", "data": "{\"readListId\":\"r1\",\"bookIds\":[\"b1\"]}", "expect": {"needsSweep": true}},
+    {"event": "ReadListDeleted", "data": "{\"readListId\":\"r1\",\"bookIds\":[]}", "expect": {"needsSweep": true}},
+    {"event": "LibraryChanged", "data": "{\"libraryId\":\"l1\"}", "expect": {"needsSweep": true}},
+    {"event": "LibraryDeleted", "data": "{\"libraryId\":\"l1\"}", "expect": {"needsSweep": true}},
+    {"event": "TaskQueueStatus", "data": "{\"count\":0,\"countByType\":{}}", "expect": {"ignore": true}},
+    {"event": "SessionExpired", "data": "{\"userId\":\"u1\"}", "expect": {"ignore": true}},
+    {"event": "SomeFutureKomgaEvent", "data": "{\"anything\":true}", "expect": {"needsSweep": true}},
+    {"event": "BookChanged", "data": "not json at all", "expect": {"needsSweep": true}},
+    {"event": "BookChanged", "data": "{\"userId\":\"u1\"}", "expect": {"needsSweep": true}},
+    {"event": "BookImported", "data": "{\"sourceFile\":\"/f\",\"success\":false}", "expect": {"needsSweep": true}},
+    {"event": "BookDeleted", "data": "{\"seriesId\":\"s1\"}", "expect": {"needsSweep": true}}
+  ]
+}

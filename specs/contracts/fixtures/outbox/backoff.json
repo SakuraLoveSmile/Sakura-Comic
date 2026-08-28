@@ -1,0 +1,53 @@
+{
+  "description": "Backoff schedule and the pending -> failed transition. Both platforms must read BASE_SECONDS / MAX_SECONDS / MAX_ATTEMPTS from here rather than hardcoding. `now` and all stamps are RFC 3339 UTC.",
+  "policy": {"base_seconds": 2, "factor": 2, "max_seconds": 300, "max_attempts": 8},
+  "schedule": [
+    {"retry_count": 1, "delay_seconds": 2},
+    {"retry_count": 2, "delay_seconds": 4},
+    {"retry_count": 3, "delay_seconds": 8},
+    {"retry_count": 4, "delay_seconds": 16},
+    {"retry_count": 5, "delay_seconds": 32},
+    {"retry_count": 6, "delay_seconds": 64},
+    {"retry_count": 7, "delay_seconds": 128},
+    {"retry_count": 8, "delay_seconds": 256}
+  ],
+  "outcome_classes": [
+    {"name": "transport failure is retryable", "result": {"kind": "network"}, "effect": {"retry_count": "+1", "state": "pending", "next_retry_at": "now + backoff(retry_count)"}},
+    {"name": "5xx is retryable", "result": {"kind": "server", "status": 503}, "effect": {"retry_count": "+1", "state": "pending", "next_retry_at": "now + backoff(retry_count)"}},
+    {"name": "429 is retryable and backs off like any other", "result": {"kind": "server", "status": 429}, "effect": {"retry_count": "+1", "state": "pending", "next_retry_at": "now + backoff(retry_count)"}},
+    {"name": "400 is rejected outright - retrying the same payload cannot help", "result": {"kind": "server", "status": 400}, "effect": {"retry_count": "unchanged", "state": "failed", "next_retry_at": "null"}},
+    {"name": "404 means the server confirmed the entity is gone - drop the row", "result": {"kind": "gone"}, "effect": {"row": "deleted"}},
+    {"name": "401 stops the whole run without penalising any row", "result": {"kind": "authentication"}, "effect": {"run": "stop", "retry_count": "unchanged", "state": "unchanged", "next_retry_at": "unchanged", "run_status": "blocked_authentication"}}
+  ],
+  "cases": [
+    {
+      "name": "eight retryable failures drive the row into failed",
+      "start": {"state": "pending", "retry_count": 0},
+      "failures": ["network", "network", "server-503", "network", "server-503", "network", "server-503", "network"],
+      "expected": {"state": "failed", "retry_count": 8, "next_retry_at": null}
+    },
+    {
+      "name": "backoff is absolute time: a restart during the window does not reschedule it",
+      "start": {"state": "pending", "retry_count": 3, "next_retry_at": "2026-08-28T10:01:04Z"},
+      "restart_at": "2026-08-28T10:00:30Z",
+      "due_checks": [
+        {"now": "2026-08-28T10:00:31Z", "due": false},
+        {"now": "2026-08-28T10:01:03Z", "due": false},
+        {"now": "2026-08-28T10:01:04Z", "due": true}
+      ],
+      "expected": {"state": "pending", "retry_count": 3, "next_retry_at": "2026-08-28T10:01:04Z"}
+    },
+    {
+      "name": "a failed row is still due-visible and is only released by a new user action or an explicit retry",
+      "start": {"state": "failed", "retry_count": 8, "next_retry_at": null},
+      "due_checks": [{"now": "2026-09-01T00:00:00Z", "due": false}],
+      "manual_retry": {"op": "retry_failed", "entity": "book-1", "now": "2026-09-01T00:00:00Z"},
+      "expected": {"state": "pending", "retry_count": 0, "next_retry_at": null, "last_error": null}
+    },
+    {
+      "name": "never-exponential: the cap holds past max_attempts worth of delay",
+      "policy_probe": {"retry_count": 30},
+      "expected": {"delay_seconds": 300}
+    }
+  ]
+}

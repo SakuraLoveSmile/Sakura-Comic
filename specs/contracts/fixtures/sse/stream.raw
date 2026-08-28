@@ -1,0 +1,24 @@
+:heartbeat
+
+event: BookChanged
+data: {"bookId":"book-1-1","seriesId":"series-1","libraryId":"lib-1"}
+
+event: ReadProgressChanged
+data: {"bookId":"book-1-2","userId":"u1"}
+
+event: ThumbnailSeriesAdded
+data: {"seriesId":"series-2","selected":true}
+
+:heartbeat
+
+id: 7
+event: TaskQueueStatus
+data: {"count":0,"countByType":{}}
+
+:keepalive
+
+event: SomeFutureKomgaEvent
+data: {"anything":true}
+
+event: HalfFrame
+data: {"bookId":"book-9-9"}
