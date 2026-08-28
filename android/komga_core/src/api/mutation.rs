@@ -35,11 +35,18 @@ pub fn read_progress_url(base_url: &str, book_id: &str) -> String {
 /// advances when another device reads — `book.lastModified` does not, which is
 /// exactly why using it here would make conflict rule R4 blind.
 pub fn remote_of(book: &Book) -> RemoteProgress {
+    // The format rides along: which write endpoint is legal depends on it
+    // (contract R8), and this is the only place the DTO is read.
+    let media_type = book
+        .media
+        .as_ref()
+        .and_then(|media| media.media_type.clone());
     match &book.read_progress {
         Some(progress) => RemoteProgress {
             page: progress.page,
             completed: progress.completed,
             last_modified: progress.last_modified.clone(),
+            media_type,
         },
         None => RemoteProgress {
             page: None,
@@ -47,6 +54,7 @@ pub fn remote_of(book: &Book) -> RemoteProgress {
             // No progress row at all: the server has never been told anything,
             // so there is no stamp to lose against.
             last_modified: None,
+            media_type,
         },
     }
 }

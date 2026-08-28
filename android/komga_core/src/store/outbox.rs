@@ -266,6 +266,19 @@ pub struct RemoteProgress {
     pub page: Option<i64>,
     pub completed: bool,
     pub last_modified: Option<String>,
+    /// `media.mediaType` of the same BookDto. Which write endpoint is legal
+    /// depends on it (contract R8), so the re-fetch has to carry it.
+    pub media_type: Option<String>,
+}
+
+/// Reflowable formats: Komga refuses a page-based `read-progress` write for
+/// these ("epub book is not Divina compatible") and expects the Progression API
+/// instead. Measured on the live server, not read off the OpenAPI.
+pub fn is_reflowable(media_type: Option<&str>) -> bool {
+    matches!(
+        media_type.unwrap_or_default(),
+        "application/epub+zip" | "application/pdf"
+    )
 }
 
 /// Outcome of the Targeted Re-fetch that must precede every upload.
@@ -355,7 +368,9 @@ pub fn request_for(book_id: &str, intent: &Intent) -> WireRequest {
         },
         Intent::Progress { page, completed } => {
             let mut pairs = Vec::new();
-            if let Some(page) = page {
+            // A page is only sent when it means something: the endpoint rejects
+            // 0 outright (R7 keeps that from ever being reached).
+            if let Some(page) = page.filter(|page| *page > 0) {
                 pairs.push(format!("\"page\":{page}"));
             }
             pairs.push(format!("\"completed\":{completed}"));
@@ -379,6 +394,12 @@ pub enum Decision {
     DropRemoteWins,
     /// Rule R1: the server confirmed the entity is gone.
     DropGone,
+    /// Rule R7: nothing the server can accept (no page / page 0, not completed).
+    /// Neither a success nor a failure; nothing is sent.
+    DropNoOp,
+    /// Rule R8: a passive page progress on a reflowable book, which this
+    /// endpoint refuses by format. Parked with a reason instead of retried.
+    UnsupportedFormat { reason: String },
     /// Do nothing, keep the row. `penalised` rows advance the backoff.
     Defer { penalised: bool },
 }
@@ -399,8 +420,30 @@ pub fn decide(
             // R2: an explicit mark is uploaded unconditionally — including over a
             // server value that is strictly newer. R3's shortcut deliberately
             // does not apply: the point of a mark is that the server holds it now.
+            // Marks are also the only thing the endpoint takes for a reflowable
+            // book, so they are decided before R7/R8.
             if matches!(intent, Intent::MarkRead | Intent::MarkUnread) {
                 return Decision::Upload(request_for(book_id, intent));
+            }
+            let page = match intent {
+                Intent::Progress { page, .. } => *page,
+                _ => None,
+            };
+            // R7, both measured on the live server: `page:0` answers 400
+            // "must be greater than 0", and `{"completed":false}` answers 400
+            // with no violations at all. Neither is a user action worth keeping.
+            if page.unwrap_or(0) < 1 {
+                return Decision::DropNoOp;
+            }
+            // R8: for epub (and non-Divina pdf) a page number cannot go through
+            // this endpoint at all, whatever its value.
+            if is_reflowable(remote.media_type.as_deref()) {
+                return Decision::UnsupportedFormat {
+                    reason: format!(
+                        "{} 的翻页进度需走 Progression API",
+                        remote.media_type.as_deref().unwrap_or("该格式")
+                    ),
+                };
             }
             // R3
             if remote_matches(remote, intent) {
@@ -444,6 +487,17 @@ pub fn apply_uploaded(conn: &Connection, server_id: &str, book_id: &str) -> rusq
         "UPDATE read_progress SET mutation_pending = 0, server_updated_at = NULL
          WHERE server_id = ?1 AND book_id = ?2",
         params![server_id, book_id],
+    )?;
+    Ok(())
+}
+
+/// Park a row the server cannot take in its current form: it stops being
+/// retried, keeps its payload, and carries a human-readable reason.
+pub fn park_unsupported(conn: &Connection, id: &str, reason: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE pending_mutations SET state = 'failed', next_retry_at = NULL, last_error = ?2
+         WHERE id = ?1",
+        params![id, reason],
     )?;
     Ok(())
 }
@@ -535,6 +589,8 @@ mod contract_tests {
         completed: Option<bool>,
         #[serde(default)]
         progress_last_modified: Option<String>,
+        #[serde(default)]
+        media_type: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -544,6 +600,8 @@ mod contract_tests {
         packets: Vec<PacketJson>,
         #[serde(default)]
         effect: Option<EffectJson>,
+        #[serde(default)]
+        reason: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -578,6 +636,7 @@ mod contract_tests {
                 page: value.page,
                 completed: value.completed.unwrap_or(false),
                 last_modified: value.progress_last_modified.clone(),
+                media_type: value.media_type.clone(),
             }),
             404 | 410 => Refetch::NotFound,
             401 | 403 => Refetch::Unauthorized,
@@ -631,6 +690,15 @@ mod contract_tests {
                     assert_eq!(decision, Decision::DropRemoteWins, "case {:?}", case.name)
                 }
                 "drop_gone" => assert_eq!(decision, Decision::DropGone, "case {:?}", case.name),
+                "drop_no_op" => assert_eq!(decision, Decision::DropNoOp, "case {:?}", case.name),
+                "unsupported_format" => {
+                    let want = case.expected.reason.as_deref().unwrap_or("epub");
+                    assert!(
+                        matches!(&decision, Decision::UnsupportedFormat { reason } if reason.contains(want)),
+                        "case {:?}: expected unsupported_format mentioning {want}, got {decision:?}",
+                        case.name
+                    );
+                }
                 "defer" => {
                     let penalised = case
                         .expected
@@ -666,6 +734,7 @@ mod contract_tests {
                 page: Some(90),
                 completed: false,
                 last_modified: Some("2026-08-28T10:00:00Z".into()),
+                media_type: Some("application/zip".into()),
             }),
         );
         let older_local_high = decide(
@@ -679,6 +748,7 @@ mod contract_tests {
                 page: Some(3),
                 completed: false,
                 last_modified: Some("2026-08-28T10:00:00Z".into()),
+                media_type: Some("application/zip".into()),
             }),
         );
         assert!(matches!(older_local_low, Decision::Upload(_)));
@@ -697,6 +767,7 @@ mod contract_tests {
                         page: Some(remote_page),
                         completed: false,
                         last_modified: Some("2026-08-28T11:00:00Z".into()),
+                        media_type: Some("application/zip".into()),
                     }),
                 ),
                 Decision::DropRemoteWins,

@@ -57,6 +57,31 @@ enqueue ──▶ pending(next_retry_at = NULL)
 | `401` / `403` | 凭据被拒 | 整轮立即停止；`retry_count` **不变**、`next_retry_at` 不变、状态不变。凭据问题是全局的，逐条累加惩罚会把用户自己的动作饿死 |
 | `408` / `429` / `5xx` / 传输层失败 | 可重试 | `retry_count += 1` + 退避 |
 
+## 实测出来的传输事实（真机，非推断）
+
+用真 key 在你的服务器上量出来的（每次探测之后都把书恢复原状），这些都不在导出的
+OpenAPI 里，光看文档会写错：
+
+| 发出去的东西 | 真实结果 |
+| --- | --- |
+| `PATCH {"page":0,...}` | `400` `violations[{fieldName:page,message:"must be greater than 0"}]` |
+| `PATCH {"completed":false}` | `400` `{"violations":[]}`（没有页码的「取消已读」服务器不接受） |
+| `PATCH {"completed":true}` | `204`，并且**服务器自己**把 page 置成 pagesCount（这就是 Mark Read） |
+| `PATCH {"page":N>=1,...}`，图像书（cbz/cbr） | `204` |
+| `PATCH {"page":N,...}`，`application/epub+zip` | `400` `epub book is not Divina compatible` |
+| `DELETE` | `204`，进度行回到「不存在」（这就是 Mark Unread），epub 同样适用 |
+
+由此多出两条规则：
+
+| # | 规则 |
+| --- | --- |
+| **R7** | 被动进度若 `page` 缺失或为 0 且 `completed=false`：**没有任何可上传的内容** → `drop_no_op`，不发包、清队列，既不算成功也不算失败（「点开后没读」是日常状态，不能变成用户可见的失败） |
+| **R8** | 被动翻页进度遇到可重排版式（epub，或非 Divina 兼容的 pdf）：**这个端点根本不接受** → `unsupported_format`，不发包，把行**停靠**并写下原因，绝不烧完退避阶梯去撞同一个 400。Mark Read / Mark Unread 对所有版式都仍然支持，照常上传 |
+
+R8 的正式解法是 `PUT /api/v1/books/{id}/progression`（R2Progression，导出文档里确实
+有这条路由），那是阅读器按版面定位内容的活儿 —— 属 Reader 阶段，不在本阶段里糊上做。
+本阶段要求的是**不许把它伪装成成功**：客户端必须知道这条进度没上去，并说清为什么。
+
 ## Mutation 合并（coalescing）
 
 同一 `(server_id, entity_id)` 上，阅读进度族（`READ_PROGRESS` / `MARK_READ` / `MARK_UNREAD`）
