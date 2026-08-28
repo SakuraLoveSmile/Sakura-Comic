@@ -180,7 +180,7 @@ final class SyncStateStoreTests: XCTestCase {
 
         let store = try KomgaStore(path: temp.path)
         XCTAssertEqual(try store.schemaVersion(), Schema.currentVersion)
-        XCTAssertEqual(try store.schemaVersion(), 6)
+        XCTAssertEqual(try store.schemaVersion(), 7)
         XCTAssertTrue(try store.columnNames(table: "sync_state").contains("entity_type"))
         XCTAssertTrue(try store.columnNames(table: "deleted_entities").contains("cause"))
 

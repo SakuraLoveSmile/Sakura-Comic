@@ -88,6 +88,40 @@ public struct KomgaTransport: Sendable {
         return try await fetch([LibraryDTO].self, url: url)
     }
 
+    /// `GET /api/v1/books/{id}` — the Targeted Re-fetch that must precede an
+    /// upload, and the read path for an SSE book hint.
+    public func fetchBook(id: String) async throws -> BookDTO {
+        try await fetch(BookDTO.self, url: Self.bookURL(baseURL: baseURL, bookID: id))
+    }
+
+    /// A write that answers `204` with no body: the status code *is* the result,
+    /// so it is returned rather than decoded. Transport failures still throw
+    /// `.network`; the caller classifies them (contract: 结果分类).
+    @discardableResult
+    public func performWrite(method: String, path: String, body: String?) async throws -> Int {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)\(path)") else {
+            throw KomgaAPIError.urlInvalid("\(base)\(path)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(body.utf8)
+        }
+        auth.apply(to: &request)
+        let (_, response): (Data, URLResponse)
+        do {
+            (_, response) = try await session.data(for: request)
+        } catch {
+            throw KomgaAPIError.network
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw KomgaAPIError.network
+        }
+        return http.statusCode
+    }
+
     /// Authenticated GET with unified error mapping.
     public func fetch<T: Decodable>(_ type: T.Type, url: URL) async throws -> T {
         var urlRequest = URLRequest(url: url)
@@ -182,6 +216,16 @@ public struct KomgaTransport: Sendable {
     public static func seriesThumbnailURL(baseURL: String, seriesID: String) throws -> URL {
         let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         guard let url = URL(string: "\(base)/api/v1/series/\(seriesID)/thumbnail") else {
+            throw KomgaAPIError.network
+        }
+        return url
+    }
+
+    /// `GET /api/v1/books/{id}` URL (Targeted Re-fetch; parity with Rust
+    /// `book_url`).
+    public static func bookURL(baseURL: String, bookID: String) throws -> URL {
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        guard let url = URL(string: "\(base)/api/v1/books/\(bookID)") else {
             throw KomgaAPIError.network
         }
         return url

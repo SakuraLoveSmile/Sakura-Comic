@@ -4,7 +4,7 @@ import GRDB
 /// and the Rust side (`android/komga_core/src/store/schema.rs`).
 public enum Schema {
     /// Bump when migrations are added; stored in `PRAGMA user_version`.
-    public static let currentVersion: Int64 = 6
+    public static let currentVersion: Int64 = 7
 
     public static let createStatements: [String] = [
         """
@@ -175,6 +175,9 @@ public enum Schema {
           PRIMARY KEY (server_id, entity_type, remote_id)
         )
         """,
+        // v7: `state` + `next_retry_at` make the Outbox consumable — a queued
+        // write survives a kill, and its backoff deadline is absolute so a
+        // restart cannot reset the penalty.
         """
         CREATE TABLE IF NOT EXISTS pending_mutations (
           id TEXT PRIMARY KEY,
@@ -184,7 +187,9 @@ public enum Schema {
           payload TEXT NOT NULL,
           created_at TEXT NOT NULL,
           retry_count INTEGER NOT NULL DEFAULT 0,
-          last_error TEXT
+          last_error TEXT,
+          state TEXT NOT NULL DEFAULT 'pending',
+          next_retry_at TEXT
         )
         """,
         """
@@ -341,16 +346,32 @@ public enum Schema {
         "ALTER TABLE libraries ADD COLUMN unavailable INTEGER NOT NULL DEFAULT 0",
     ]
 
+    /// v6 → v7: the Outbox grew its retry/scheduling columns
+    /// (mirror of Rust `V7_ALTER_STATEMENTS`).
+    public static let v7AlterStatements: [String] = [
+        "ALTER TABLE pending_mutations ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'",
+        "ALTER TABLE pending_mutations ADD COLUMN next_retry_at TEXT",
+    ]
+
+    /// Derived objects over the migrated columns. Rust keeps the due index
+    /// directly after the table in `CREATE_STATEMENTS`; here it has to come last,
+    /// because `CREATE INDEX` parses its column list and an on-disk pre-v7 table
+    /// has no `state` until the guarded ALTER adds it.
+    public static let postAlterStatements: [String] = [
+        "CREATE INDEX IF NOT EXISTS pending_mutations_due ON pending_mutations (server_id, state, next_retry_at)",
+    ]
+
     /// Applies the full migration set on a connection (mirror of the Rust
     /// `schema::migrate`): FTS shape repair → sync_state rebuild → CREATE
-    /// statements → guarded v4/v5 ALTER column additions → `PRAGMA user_version`.
+    /// statements → guarded v4/v5/v7 ALTER column additions → derived indexes →
+    /// `PRAGMA user_version`.
     public static func migrate(_ db: GRDB.Database) throws {
         try repairFTSShape(db)
         try migrateSyncStateShape(db)
         for statement in createStatements {
             try db.execute(sql: statement)
         }
-        for statement in v4AlterStatements + v5AlterStatements {
+        for statement in v4AlterStatements + v5AlterStatements + v7AlterStatements {
             // "ALTER TABLE t ADD COLUMN column ..." → skip when present.
             guard let rest = statement.split(separator: " ADD COLUMN ").first,
                   let column = statement.split(separator: " ADD COLUMN ").dropFirst().first?
@@ -364,6 +385,9 @@ public enum Schema {
             if hasColumn == 0 {
                 try db.execute(sql: statement)
             }
+        }
+        for statement in postAlterStatements {
+            try db.execute(sql: statement)
         }
         try db.execute(sql: "PRAGMA user_version = \(currentVersion)")
     }

@@ -23,6 +23,21 @@ struct LibraryView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
+            // Stage 6: queued client writes and what the event stream proved.
+            if model.outboxPending > 0 {
+                Text("待上传 \(model.outboxPending)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("outbox-pending")
+            }
+            if let live = model.liveSyncStatus {
+                Text(live)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("live-sync-status")
+            }
         }
         .padding(.horizontal)
         .padding(.bottom, 6)
@@ -84,6 +99,19 @@ struct LibraryView: View {
             .refreshable { await model.reconcile(trigger: .manualRefresh) }
         }
         .task { await initialLoad() }
+        .onChange(of: scenePhase) { _, phase in
+            // Stage 6: the event stream and the Outbox uploader belong to the
+            // foreground only. Backgrounding drops the socket without a sweep;
+            // coming back reconnects and reconciles what the gap may have missed.
+            switch phase {
+            case .active:
+                Task { await model.enterForeground() }
+            case .background:
+                model.enterBackground()
+            default:
+                break
+            }
+        }
         .sheet(isPresented: $showAdd) {
             AddServerView(model: model, existing: nil)
         }

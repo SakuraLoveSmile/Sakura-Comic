@@ -66,7 +66,8 @@ final class MediaLibraryStoreTests: XCTestCase {
         // The server-scoped FTS shape was rebuilt (server_id column).
         _ = try store.querySeries(serverID: "srv-1", limit: 10, offset: 0)
         // Reading the schema version through a pragma.
-        XCTAssertEqual(try store.schemaVersion(), 6)
+        XCTAssertEqual(try store.schemaVersion(), Schema.currentVersion)
+        XCTAssertEqual(try store.schemaVersion(), 7)
         // v5 landed on the pre-existing libraries table.
         let libraryColumns = try store.columnNames(table: "libraries")
         XCTAssertTrue(libraryColumns.contains("root"), "\(libraryColumns)")
@@ -77,6 +78,13 @@ final class MediaLibraryStoreTests: XCTestCase {
         XCTAssertTrue(syncColumns.contains("sync_cursor"), "\(syncColumns)")
         let tombstoneColumns = try store.columnNames(table: "deleted_entities")
         XCTAssertTrue(tombstoneColumns.contains("cause"), "\(tombstoneColumns)")
+        // v7 added the Outbox scheduling columns to the pre-existing table.
+        let outboxColumns = try store.columnNames(table: "pending_mutations")
+        XCTAssertTrue(outboxColumns.contains("state"), "\(outboxColumns)")
+        XCTAssertTrue(outboxColumns.contains("next_retry_at"), "\(outboxColumns)")
+        // ...and the index that makes a due scan cheap (same shape as a fresh DB).
+        let outboxIndexes = try store.indexNames(table: "pending_mutations")
+        XCTAssertTrue(outboxIndexes.contains("pending_mutations_due"), "\(outboxIndexes)")
     }
 
     // MARK: - FullSync + local query battery
@@ -175,7 +183,9 @@ final class MediaLibraryStoreTests: XCTestCase {
         try store.markRead(serverID: "srv-1", bookID: "book-1-3")
         let shrunk = try store.continueReading(serverID: "srv-1", limit: 20)
         XCTAssertFalse(shrunk.contains { $0.bookID == "book-1-3" })
-        XCTAssertEqual(try store.pendingMutationCount(serverID: "srv-1"), 2)
+        // One row, not two: the read-progress family collapses to the user's last
+        // statement (fixtures/outbox/coalescing.json).
+        XCTAssertEqual(try store.pendingMutationCount(serverID: "srv-1"), 1)
 
         // Collections + readlists details.
         let collections = try store.listCollections(serverID: "srv-1", limit: 50, offset: 0)
