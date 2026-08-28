@@ -357,16 +357,18 @@ public extension KomgaStore {
         serverID: String,
         bookID: String,
         mutationType: String,
-        payload: [String: Any],
+        payload: String,
         createdAt: String
     ) throws {
-        let payloadData = try JSONSerialization.data(withJSONObject: payload)
+        // Newest user statement wins: anything still queued for this book in the
+        // same family is superseded, including a row that had already given up.
+        try coalesceOutbox(db, serverID: serverID, entityID: bookID)
         try db.execute(
             sql: """
             INSERT INTO pending_mutations (id, server_id, entity_id, mutation_type, payload, created_at, retry_count)
             VALUES (?, ?, ?, ?, ?, ?, 0)
             """,
-            arguments: [UUID().uuidString, serverID, bookID, mutationType, String(data: payloadData, encoding: .utf8) ?? "{}", createdAt]
+            arguments: [UUID().uuidString, serverID, bookID, mutationType, payload, createdAt]
         )
     }
 
@@ -487,7 +489,8 @@ public extension KomgaStore {
             )
             try enqueueMutation(
                 db, serverID: serverID, bookID: bookID, mutationType: "READ_PROGRESS",
-                payload: ["bookId": bookID, "page": page, "completed": completed], createdAt: now
+                payload: Self.readProgressPayload(bookID: bookID, page: page, completed: completed),
+                createdAt: now
             )
         }
     }
@@ -517,7 +520,7 @@ public extension KomgaStore {
             )
             try enqueueMutation(
                 db, serverID: serverID, bookID: bookID, mutationType: mutationType,
-                payload: ["bookId": bookID, "completed": completed], createdAt: now
+                payload: Self.markPayload(bookID: bookID, completed: completed), createdAt: now
             )
         }
     }
@@ -1097,6 +1100,17 @@ public extension KomgaStore {
             try String.fetchAll(
                 db,
                 sql: "SELECT name FROM pragma_table_info(?)",
+                arguments: [table]
+            )
+        }
+    }
+
+    /// Index names attached to a table (migration probe).
+    func indexNames(table: String) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT name FROM pragma_index_list(?)",
                 arguments: [table]
             )
         }

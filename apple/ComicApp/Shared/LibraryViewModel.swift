@@ -49,6 +49,27 @@ final class LibraryViewModel: ObservableObject {
     /// Last sync error recorded by the core (the shelf keeps working without it).
     @Published var syncError: String?
 
+    /// Stage 6 — what the live event stream last proved. `nil` while the stream
+    /// is the reason we are up to date; otherwise the mirror converges on
+    /// Reconcile alone, which costs freshness and never correctness.
+    @Published var liveSyncStatus: String?
+
+    /// The event stream + Outbox uploader loop. Cancelled on background, restarted
+    /// on foreground and on connectivity recovery.
+    private var liveSyncTask: Task<Void, Never>?
+    /// `Last-Event-ID` resume token. Carrying it is a optimisation only: a
+    /// reconnect still reconciles, because the gap is unknowable.
+    private var lastEventID: String?
+    /// A server-sent `retry:` raises the reconnect backoff floor.
+    private var retryFloorSeconds: TimeInterval = 0
+    /// Set once the handshake proved there is no usable stream: stop attempting,
+    /// keep uploading and reconciling (contract: `on_failure.mode`).
+    private var streamUnavailable: String?
+    /// Queued client writes still waiting for the server (Outbox badge).
+    @Published var outboxPending = 0
+    /// The reachability watcher is started once per foreground session.
+    private var syncTriggersStarted = false
+
     /// One-line summary of `sync_state` for the shelf header.
     var syncStatusLabel: String {
         if let error = syncError { return "同步中断：" + error }
@@ -313,20 +334,183 @@ final class LibraryViewModel: ObservableObject {
 
     // MARK: - Stage 5 sync engine (Bootstrap resume + Reconcile)
 
-    /// Starts the connectivity watcher. Call once, after the store is open.
+    /// Starts the connectivity watcher and the live stream. Call once, after the
+    /// store is open and the scene is active.
     func startSyncTriggers() {
-        pathMonitor.pathUpdateHandler = { [weak self] path in
-            // The handler runs off the main actor: only the derived Bool crosses.
-            let offline = path.status != .satisfied
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if self.wasOffline && !offline {
-                    await self.reconcile(trigger: .networkRecovered)
+        if !syncTriggersStarted {
+            syncTriggersStarted = true
+            pathMonitor.pathUpdateHandler = { [weak self] path in
+                // The handler runs off the main actor: only the derived Bool crosses.
+                let offline = path.status != .satisfied
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if self.wasOffline && !offline {
+                        // Coming back: sweep, then replace whatever half-dead
+                        // socket the monitor was still holding.
+                        await self.reconcile(trigger: .networkRecovered)
+                        self.startLiveSync()
+                    }
+                    self.wasOffline = offline
                 }
-                self.wasOffline = offline
+            }
+            pathMonitor.start(queue: DispatchQueue(label: "komga.reachability"))
+        }
+        startLiveSync()
+    }
+
+    /// Tears the watchers down (background / teardown). Disconnecting here never
+    /// reconciles — the next foreground entry does that instead.
+    func stopSyncTriggers() {
+        pathMonitor.pathUpdateHandler = nil
+        pathMonitor.cancel()
+        syncTriggersStarted = false
+        stopLiveSync()
+    }
+
+    /// Stage 6: stream + Outbox uploader while the scene is active.
+    func startLiveSync() {
+        guard liveSyncTask == nil, let server, server.id != "demo" else { return }
+        guard let auth = try? authMethod(for: server) else { return }
+        streamUnavailable = nil
+        // A new session never resumes another server's (or another day's) token.
+        lastEventID = nil
+        retryFloorSeconds = 0
+        liveSyncTask = Task { [weak self] in
+            await self?.liveSyncLoop(serverID: server.id, baseURL: server.baseURL, auth: auth)
+        }
+    }
+
+    func stopLiveSync() {
+        liveSyncTask?.cancel()
+        liveSyncTask = nil
+    }
+
+    /// Scene came back: reconnect now, and make up for the window we were away.
+    func enterForeground() async {
+        startSyncTriggers()
+        guard server != nil else { return }
+        await reconcile(trigger: .didBecomeActive)
+        await refreshShelfAfterLiveUpdate()
+    }
+
+    /// Scene went away: drop the socket. No reconcile here — the next foreground
+    /// entry is what converges, and a background task must not spend the server.
+    func enterBackground() {
+        stopSyncTriggers()
+    }
+
+    /// A live update may have moved anything the shelf reads.
+    private func refreshShelfAfterLiveUpdate() async {
+        guard server != nil else { return }
+        try? loadSeries()
+        try? syncMediaState()
+        refreshSyncState()
+    }
+
+    /// The one place the Stage 6 loop lives: an Outbox ticker plus the event
+    /// stream. Either one ending (cancelled, or credentials refused) stops the
+    /// other, so there is exactly one owner of each while the scene is active.
+    private func liveSyncLoop(serverID: String, baseURL: String, auth: AuthMethod) async {
+        let transport = KomgaTransport(baseURL: baseURL, auth: auth)
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await self.outboxTicker(serverID: serverID, transport: transport)
+            }
+            group.addTask {
+                await self.streamLoop(serverID: serverID, baseURL: baseURL, transport: transport)
             }
         }
-        pathMonitor.start(queue: DispatchQueue(label: "komga.reachability"))
+    }
+
+    /// Background Upload Sync: drain whatever the Outbox has made due. A pass
+    /// with an empty queue costs one indexed query, so the tick can be short.
+    private func outboxTicker(serverID: String, transport: KomgaTransport) async {
+        while !Task.isCancelled {
+            do {
+                _ = try await OutboxUpload.run(store: store, serverID: serverID, writer: transport)
+            } catch {
+                // A queue we could not read is not a reason to stop trying: the
+                // next tick looks at it again. Nothing is ever dropped here.
+            }
+            refreshOutboxBadge(serverID: serverID)
+            try? await Task.sleep(nanoseconds: Self.outboxTickNanoseconds)
+        }
+    }
+
+    /// Event Driven Sync: hold the stream, apply hints, and reconnect with the
+    /// shared backoff. A reconnect always reconciles before its hints are trusted.
+    private func streamLoop(serverID: String, baseURL: String, transport: KomgaTransport) async {
+        var attempts = 0
+        var hasEverConnected = false
+        while !Task.isCancelled {
+            if let reason = streamUnavailable {
+                // Reconcile-only mode: the socket is not attempted again, and the
+                // mirror keeps converging through every other trigger.
+                liveSyncStatus = reason
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                continue
+            }
+            var hints = EventHints()
+            var reconciledForThisConnection = !hasEverConnected
+            do {
+                let client = SSEClient(baseURL: baseURL, auth: transport.auth)
+                for try await event in client.events(lastEventID: lastEventID) {
+                    attempts = 0
+                    hasEverConnected = true
+                    liveSyncStatus = nil
+                    if !reconciledForThisConnection {
+                        // The gap this connection replaces is unknowable, so the
+                        // sweep comes first — even if events are already in hand.
+                        reconciledForThisConnection = true
+                        await reconcile(trigger: .sseReconnected)
+                    }
+                    if let id = event.id { lastEventID = id }
+                    if let retry = event.retryMS { retryFloorSeconds = TimeInterval(retry / 1000) }
+                    hints.merge(EventClassifying.classify(event))
+                    let batch = hints
+                    hints = EventHints()
+                    if batch.isEmpty { continue }
+                    let needsSweep = try await EventApplication.apply(
+                        hints: batch, store: store, serverID: serverID, reader: transport
+                    )
+                    if needsSweep != nil {
+                        await reconcile(trigger: .manualRefresh)
+                    } else {
+                        await refreshShelfAfterLiveUpdate()
+                    }
+                }
+                // The server closed the stream cleanly: that is a reconnect too.
+                hasEverConnected = true
+            } catch let error as KomgaAPIError {
+                switch error {
+                case .apiCompatibility(let message):
+                    streamUnavailable = "事件流不可用，仅靠同步收敛：" + message
+                case .authentication:
+                    // A credential problem is global: stop the retry storm and say so.
+                    liveSyncStatus = "凭据被拒，已暂停实时同步"
+                    return
+                default:
+                    break
+                }
+            } catch {
+                // Anything else is a broken socket: back off and try again.
+            }
+            if Task.isCancelled { return }
+            attempts += 1
+            let delay = max(Double(outboxBackoffSeconds(Int64(attempts))), retryFloorSeconds)
+            liveSyncStatus = "事件流断开，\(Int(delay)) 秒后重连"
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+    }
+
+    /// 5 s: long enough to coalesce a burst of reader page-turns into one write,
+    /// short enough that a queued action is on the wire while the app is open.
+    private static let outboxTickNanoseconds: UInt64 = 5_000_000_000
+
+    /// The queued-mutation badge (SQLite only).
+    private func refreshOutboxBadge(serverID: String) {
+        let counts = try? store.outboxCounts(serverID: serverID, now: outboxSecondText(Date()))
+        outboxPending = Int(counts?.total ?? 0)
     }
 
     /// Reads `sync_state` into the published fields (SQLite only).
