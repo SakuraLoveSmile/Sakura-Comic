@@ -17,7 +17,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 bash scripts/e2e_stage5.sh        # 场景 16/16 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
 KOMGA_BASE_URL=http://192.168.0.69:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
-                                  # → ALL GREEN：Rust 120 / Swift 99（1 skip=live）/ Flutter 26
+                                  # → ALL GREEN：Rust 120 / Swift 102（1 skip=live）/ Flutter 26
 ```
 
 ### 第 2 步：真实 HTTP 回环（`komga_fixture_server`）
@@ -168,10 +168,11 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 - **Flutter（26 通过，含新增 8 项）**：`test/sync_triggers_test.dart`（冷启动分叉
   Bootstrap/Reconcile、回前台对账、下拉刷新后删除项从墙上消失、中断状态横幅、
   对账失败仍可用、失败后按 `network_recovered` 重试并在成功时停止、重试次数有上界）
-- **Swift（99 通过，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
+- **Swift（102 执行，1 skip=live）**：`SyncScenarioTests`（同一份场景 JSON，10 步全绿）、
   `PruneStoreTests`、`ReadProgressSyncTests`（离线进度保护，含直接读共享 fixture 的一条）、
   `ScaleSyncTests`（300×20 规模镜像 + 幂等对账）、`SyncStateStoreTests`、Schema v6 迁移（v5 单行 → `full` 行）、
-  FullSync 续跑/幂等（fresh 重跑 == 首次）
+  FullSync 续跑/幂等（fresh 重跑 == 首次）、`OpenAPIConformanceTests`（`api/openapi.rs` 门禁的
+  Apple 镜像：实体解码 requiredness 探测 + 分页信封钉死 + 传输路径）
 - **Smoke**：`stage5_smoke --scenario` 16/16 PASS
 - **UI 构建**：ComicApp iOS + macOS scheme BUILD SUCCEEDED；flutter analyze 0 issues
 - **删除传播落盘**：Reconcile 摘要携带真实封面路径（`Pruned.coverPaths` 两端一致），
@@ -190,10 +191,16 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
    `POST /api/v1/books/list`（带搜索 body）。换端点是传输层改动，必须在真实服务器上
    验证，所以本阶段不动，只把它钉成显式清单：将来任何新调用到废弃端点的代码都会让
    测试失败。
-   核对结果里的好消息：客户端**必填解码**的字段（id/name/libraryId/seriesId/root 等）在
+   核对结果里的好消息：客户端**必填解码**的实体字段（id/name/libraryId/seriesId/root 等）在
    文档里全都是 `required` + 非 nullable，客户端读取的每个属性也确实存在 —— 也就是说
-   真实响应不会把一次 sweep 解到一半炸掉。唯一例外是刻意记录的：`SeriesMetadataDto` 没有
-   `authors`，series 作者取自 `booksMetadata` 聚合，测试把这个来源钉住了。
+   真实响应不会把一次 sweep 解到一半炸掉。两个刻意记录的例外，两端测试都钉住了：
+   ① `SeriesMetadataDto` 没有 `authors`，series 作者取自 `booksMetadata` 聚合；
+   ② 分页信封（`Page*Dto`）在 springdoc 导出里**一个 `required` 都没有**，但客户端把
+   七个信封字段全部解码为必填 —— 这是故意的：翻页终止靠 `last`、游标靠 `number`/`size`，
+   缺字段应当大声失败进统一错误模型，而不是猜（`last` 默认 false 会无限翻页）。
+   这道门禁在 Apple 侧有了镜像（`OpenAPIConformanceTests`，3 条测试）：实体逐字段
+   删键解码探测、信封双向覆盖 + 必填钉死、传输路径对文档 —— 第一次跑就靠它证实了
+   例外 ②（信封必填在 spec 里没有支撑，是客户端的有意决策）。
 2. **`/sse/v1/events` 在文档里根本不存在**（整个 spec 没有任何 `/sse*` 路由）。
    这大概率是 SpringDoc 不导出 `text/event-stream`，但也可能是路径不对 ——
    已在 `specs/events/komga-sse-events.md` 标注「未经验证」，接入 SSE 之前必须实测。
