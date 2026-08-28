@@ -28,6 +28,7 @@ bash scripts/verify.sh          # cargo fmt/clippy/test + swift build/test + flu
 | Flutter（Android 壳） | `flutter analyze` 无问题、**40 tests all passed**（Stage 5 时 26） |
 | 回环 HTTP 验收 | `STAGE 6 ACCEPTANCE OK` |
 | 真实服务器（无需凭据） | 部署包 `app.14b2997d.js` 含 `/sse/v1/events`，且我们事件表里 **18/18** 个真实事件名都被官方 UI `addEventListener` 订阅；SSE 与 REST 共用同一 URL 基址（含子路径） |
+| **真机带凭据（已跑）** | `--phase live-sse`：握手 200 + `text/event-stream`，25s 内 5 帧、3 个事件（全 `TaskQueueStatus`，即 10s 管理端定时帧），心跳注释帧计为帧但不产生事件；`--phase live-write`：epub 被 R8 拦下（不发包），图像书 `PATCH -> 204` 并恢复原状 |
 
 ## 第 1 步：验收标准逐字跑通（真实 HTTP + 真实 `kill -9`）
 
@@ -143,8 +144,30 @@ Android 侧的编排是**薄**的：会话状态以不透明 JSON 往返于核�
 2. **回环服务器把请求头用 `BufReader` 读、请求体用裸 socket 读**，于是 body 被缓冲吞掉、
    任何带 body 的请求永久阻塞。修成同一个 buffered reader 一路读到底。
 
+## 真机跑出来的两条新规则（R7 / R8）
+
+第一次带凭据真机运行就把契约打个洞：`stage6_smoke --phase live-write` 对
+`PATCH read-progress` 收到 **400**，而回环 fixture 一律接受。量出来的是：
+
+| 发出的东西 | 真实结果 |
+| --- | --- |
+| `{"page":0,...}` | 400 `must be greater than 0` |
+| `{"completed":false}` | 400 `{"violations":[]}` |
+| `{"completed":true}` | 204，服务器自己把 page 置成 pagesCount |
+| `{"page":N>=1}` 图像书 | 204 |
+| `{"page":N>=1}` epub/pdf | 400 `epub book is not Divina compatible` |
+| `DELETE` | 204，两种版式都有效 |
+
+于是加了 R7（没页码又没读完 = `drop_no_op`，不发包、也不算失败）与
+R8（可重排版的翻页 = `unsupported_format`，**不发包**、把行停靠并写明原因，
+而不是烧完 8 次退避去撞同一个 400）。两端与 `conflict.json`（现 17 例）同步钉住。
+R8 的正式出口是 `PUT /api/v1/books/{id}/progression`，那是阅读器版面定位的活儿，
+归 Reader 阶段；本阶段的要求是**不许把它伪装成成功**。
+
 ## 尚未验证 / 已知限制
 
+- ~~带凭据的真机握手与真实写往返~~ **已跑**（见上表）；剩下的是把真机核对纳入常规流程：
+  `KOMGA_BASE_URL=... KOMGA_API_KEY=... bash scripts/e2e_stage6.sh` 现在会自动执行 2c/2d。
 - **事件目录已在你的真实服务器上核实（不需要凭据）**：`GET /` 引到的 Web 包
   `app.14b2997d.js`（HTTP 200）含 `/sse/v1/events` 字面量、`new EventSource`，
   以及逐个事件名的 `addEventListener`，与本阶段采用的表逐个吻合。

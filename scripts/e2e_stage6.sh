@@ -19,7 +19,8 @@
 #
 # Env: KOMGA_BASE_URL alone adds a credential-free check of the deployed UI bundle
 #      (does the running server know /sse/v1/events and our event names?).
-#      KOMGA_API_KEY additionally runs the authenticated handshake probe.
+#      KOMGA_API_KEY additionally runs the authenticated stream and one real
+#      write round-trip (every book it touches is restored).
 # Arg: --rust-only skips the Swift leg (the Rust half is the bulk of the run).
 set -euo pipefail
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
@@ -144,9 +145,19 @@ PYPROBE
 fi
 
 if [[ -n "${KOMGA_BASE_URL:-}" && -n "${KOMGA_API_KEY:-}" ]]; then
-  echo "== 2d/3 real server: SSE handshake =="
-  CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -H "X-API-Key: $KOMGA_API_KEY" -H 'Accept: text/event-stream' "$KOMGA_BASE_URL/sse/v1/events" || echo timeout)"
-  echo "  GET /sse/v1/events -> $CODE (200 = the route is live; anything else must be recorded, not guessed)"
+  echo "== 2d/3 real server: live stream + one data-preserving write round-trip =="
+  # curl cannot express "a 200 that never ends", so the handshake is judged by
+  # the client itself: SseClient must accept it and parse real frames.
+  SMOKE_LIVE_DB="$WORK/live.sqlite"
+  "$SMOKE" --db "$SMOKE_LIVE_DB" --key "$KOMGA_API_KEY" --base-url "$KOMGA_BASE_URL" \
+    --offline-url "http://127.0.0.1:1" --journal "$WORK/journal" --fault "$WORK/fault" \
+    --phase live-sse
+  # Exercises the authenticated PATCH/DELETE path and puts every book it touches
+  # back the way it found it; also proves the R8 routing on this library, which
+  # is mostly reflowable books.
+  "$SMOKE" --db "$SMOKE_LIVE_DB" --key "$KOMGA_API_KEY" --base-url "$KOMGA_BASE_URL" \
+    --offline-url "http://127.0.0.1:1" --journal "$WORK/journal" --fault "$WORK/fault" \
+    --phase live-write
 else
   echo "== 2d/3 skipped: set KOMGA_API_KEY for the authenticated SSE handshake =="
 fi

@@ -12,6 +12,16 @@
 //!   --phase sse        consume the fixture's event stream, lose it, reconnect,
 //!                      and prove a reconnect reconciles before events apply.
 //!   --phase gone       the server confirmed a book is gone: release the row.
+//!   --phase live-sse   connect to a real Komga stream and parse whatever it
+//!                      sends (a heartbeat counts as a frame). Nothing is
+//!                      asserted about *which* events fire, because that depends
+//!                      on server activity: what must hold is the handshake rule
+//!                      and the parser.
+//!   --phase live-write the authenticated write round-trip, data-preserving:
+//!                      read a book's progress, PATCH the same values back, read
+//!                      again. Exercises the endpoint, the auth header and the
+//!                      204-with-no-body handling without changing what the user
+//!                      has read.
 //!
 //! Every check is an assertion that panics, so the script's evidence is this
 //! binary's exit code plus the `ok:` lines it prints.
@@ -22,9 +32,12 @@ use std::{env, fs, thread};
 
 use chrono::{DateTime, Utc};
 use komga_core::api::auth::AuthMethod;
+use komga_core::api::book::BookFetcher;
 use komga_core::api::error::{ApiError, Result as ApiResult};
-use komga_core::api::series::KomgaClient;
+use komga_core::api::mutation::ProgressWriter;
+use komga_core::api::series::{KomgaClient, PageRequest};
 use komga_core::api::sse::{SseClient, SseEvent, SseStream};
+use komga_core::store::outbox::{Attempt, Decision, Refetch};
 use komga_core::store::{self, outbox, read_progress};
 use komga_core::sync::sse::{EventSource, Phase, PumpAction, SseSession};
 use komga_core::sync::upload::{self, RunStatus};
@@ -68,6 +81,8 @@ fn main() {
         "fault" => phase_fault(&args),
         "sse" => phase_sse(&args),
         "gone" => phase_gone(&args),
+        "live-sse" => phase_live_sse(&args),
+        "live-write" => phase_live_write(&args),
         other => panic!("unknown --phase {other}"),
     };
     match outcome {
@@ -125,20 +140,25 @@ fn stamp(text: &str) -> DateTime<Utc> {
 /// 断网 → 阅读 / 修改状态. Then park: the script kills us.
 fn phase_offline(args: &Args) -> Smoke {
     let conn = open(args);
-    read_progress::upsert_local_read_progress(&conn, "A", "book-1-1", 30, false)?;
+    // An image book: its page turn must reach the server verbatim.
+    read_progress::upsert_local_read_progress(&conn, "A", "book-3-3", 30, false)?;
+    // A reflowable book (the snapshot says application/pdf): the same action
+    // cannot go through this endpoint at all, and must stay visible (R8).
+    read_progress::upsert_local_read_progress(&conn, "A", "book-1-1", 12, false)?;
+    // Marks work on every format, measured 204 on both a cbz and an epub.
     read_progress::mark_read(&conn, "A", "book-1-2")?;
     read_progress::mark_unread(&conn, "A", "book-1-3")?;
     let queued = outbox::counts(&conn, "A", &now())?.total();
-    assert_eq!(queued, 3, "three user actions must be queued");
+    assert_eq!(queued, 4, "four user actions must be queued");
 
     // 断网: point at a port nothing listens on. The uploader must defer, not drop.
     let writer = client(&args.offline_url, &args.key);
     let summary = poll(&conn, "A", &writer)?;
-    assert_eq!(summary.retried, 3, "every row defers while offline");
+    assert_eq!(summary.retried, 4, "every row defers while offline");
     assert_eq!(summary.uploaded, 0);
     assert_eq!(
         outbox::counts(&conn, "A", &now())?.total(),
-        3,
+        4,
         "an offline window must not consume the queue"
     );
     println!("ok: queued {queued} actions survived an offline upload pass");
@@ -154,15 +174,12 @@ fn phase_restart(args: &Args) -> Smoke {
     let mut restored = outbox::all_entries(&conn, "A")?;
     assert_eq!(
         restored.len(),
-        3,
+        4,
         "restart recovery: the queue must come back from SQLite"
     );
     restored.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
     for entry in &restored {
-        assert_eq!(
-            entry.retry_count, 1,
-            "the offline attempt is charged, not reset by the restart"
-        );
+        assert_eq!(entry.retry_count, 1, "the offline attempt is still charged");
         assert!(
             entry.next_retry_at.is_some(),
             "its backoff deadline is on disk"
@@ -177,13 +194,34 @@ fn phase_restart(args: &Args) -> Smoke {
     .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let summary = poll_at(&conn, "A", &writer, &later)?;
     assert_eq!(summary.uploaded, 3, "summary: {summary:?}");
-    assert_eq!(summary.status, RunStatus::Complete);
     assert_eq!(
-        outbox::counts(&conn, "A", &later)?.total(),
-        0,
-        "成功后清理 Outbox"
+        summary.unsupported_format, 1,
+        "the pdf page turn is parked, never lost: {summary:?}"
     );
-    for book in ["book-1-1", "book-1-2", "book-1-3"] {
+    assert_eq!(summary.status, RunStatus::Complete);
+
+    // 成功后清理 Outbox. The one parked row is deliberately left behind with its
+    // reason, still blocking the mirror from overwriting that user action.
+    let left = outbox::all_entries(&conn, "A")?;
+    assert_eq!(left.len(), 1, "only the R8 row may remain: {left:?}");
+    assert_eq!(left[0].entity_id, "book-1-1");
+    assert_eq!(left[0].state, outbox::STATE_FAILED);
+    assert!(
+        left[0]
+            .last_error
+            .clone()
+            .unwrap_or_default()
+            .contains("Progression"),
+        "the parked row must say why: {:?}",
+        left[0].last_error
+    );
+    let pending: i64 = conn.query_row(
+        "SELECT mutation_pending FROM read_progress WHERE server_id='A' AND book_id='book-1-1'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(pending, 1, "a parked intent must keep blocking sweeps");
+    for book in ["book-1-2", "book-1-3", "book-3-3"] {
         let (pending, stamp): (i64, Option<String>) = conn.query_row(
             "SELECT mutation_pending, server_updated_at FROM read_progress
              WHERE server_id = 'A' AND book_id = ?1",
@@ -202,7 +240,7 @@ fn phase_restart(args: &Args) -> Smoke {
         lines
             .iter()
             .any(|line| line.contains("\"method\":\"PATCH\"")
-                && line.contains("book-1-1")
+                && line.contains("book-3-3")
                 && line.contains(r#"page\":30"#)),
         "the page the user reached must arrive verbatim: {journal}"
     );
@@ -218,14 +256,21 @@ fn phase_restart(args: &Args) -> Smoke {
             .any(|line| line.contains("\"method\":\"DELETE\"") && line.contains("book-1-3")),
         "mark-unread must be a DELETE: {journal}"
     );
-    println!("ok: 3 queued actions uploaded after a kill + restart");
+    assert!(
+        !journal.contains("book-1-1"),
+        "a reflowable page turn must never be pushed at this endpoint: {journal}"
+    );
+    println!(
+        "ok: 3 queued actions uploaded after a kill + restart; the pdf page turn parked with a reason"
+    );
     Ok(())
 }
 
 /// Retry / backoff / failed / authentication, all through injected HTTP faults.
 fn phase_fault(args: &Args) -> Smoke {
     let conn = open(args);
-    read_progress::upsert_local_read_progress(&conn, "A", "book-1-1", 7, false)?;
+    // An image book, so R8 cannot park it before the ladder is reached.
+    read_progress::upsert_local_read_progress(&conn, "A", "book-3-3", 7, false)?;
     let writer = client(&args.base_url, &args.key);
     let mut seen_deadlines = Vec::new();
     let mut now = now();
@@ -233,8 +278,11 @@ fn phase_fault(args: &Args) -> Smoke {
     set_fault(args, "503");
     for attempt in 1..=outbox::MAX_ATTEMPTS {
         let summary = poll_at(&conn, "A", &writer, &now)?;
-        assert_eq!(summary.retried, 1, "attempt {attempt} must be retryable");
-        let entry = outbox::queued_for_book(&conn, "A", "book-1-1")?.expect("still queued");
+        assert_eq!(
+            summary.retried, 1,
+            "attempt {attempt} must be retryable (a park would mean the format routing fired instead): {summary:?}"
+        );
+        let entry = outbox::queued_for_book(&conn, "A", "book-3-3")?.expect("still queued");
         assert_eq!(entry.retry_count, attempt);
         if attempt < outbox::MAX_ATTEMPTS {
             let deadline = entry.next_retry_at.clone().expect("scheduled");
@@ -264,11 +312,11 @@ fn phase_fault(args: &Args) -> Smoke {
     );
 
     // 400 is not retryable: it goes straight to failed, no attempts burned.
-    read_progress::upsert_local_read_progress(&conn, "A", "book-1-2", 3, false)?;
+    read_progress::upsert_local_read_progress(&conn, "A", "book-4-2", 3, false)?;
     set_fault(args, "400");
     let summary = poll_at(&conn, "A", &writer, &now)?;
     assert_eq!(summary.rejected, 1);
-    let entry = outbox::queued_for_book(&conn, "A", "book-1-2")?.expect("kept for the UI");
+    let entry = outbox::queued_for_book(&conn, "A", "book-4-2")?.expect("kept for the UI");
     assert_eq!(entry.state, outbox::STATE_FAILED);
     assert_eq!(
         entry.retry_count, 0,
@@ -276,12 +324,12 @@ fn phase_fault(args: &Args) -> Smoke {
     );
 
     // 401 stops the run and penalises nobody.
-    read_progress::mark_read(&conn, "A", "book-1-3")?;
+    read_progress::mark_read(&conn, "A", "book-5-1")?;
     set_fault(args, "401");
     let summary = poll_at(&conn, "A", &writer, &now)?;
     assert_eq!(summary.status, RunStatus::BlockedAuthentication);
     assert_eq!(summary.uploaded, 0);
-    let entry = outbox::queued_for_book(&conn, "A", "book-1-3")?.expect("still queued");
+    let entry = outbox::queued_for_book(&conn, "A", "book-5-1")?.expect("still queued");
     assert_eq!(
         entry.retry_count, 0,
         "a credential problem is not the user's fault"
@@ -500,4 +548,153 @@ impl EventSource for LiveSource {
     fn close(&mut self) {
         self.stream = None;
     }
+}
+
+/// The real stream: handshake rules and frame parsing against actual Komga bytes.
+fn phase_live_sse(args: &Args) -> Smoke {
+    let client = SseClient::new(
+        args.base_url.clone(),
+        AuthMethod::ApiKey {
+            key: args.key.clone(),
+        },
+    )?;
+    let mut stream = block_on(client.connect(None))?;
+    println!("ok: /sse/v1/events handshake accepted (200 + text/event-stream)");
+    let mut kinds: Vec<String> = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(25);
+    while std::time::Instant::now() < deadline {
+        match block_on(stream.next_event()) {
+            Ok(Some(event)) => kinds.push(event.kind),
+            // A close or a break inside the window is still evidence the
+            // handshake held; the reconnect path is covered by the local legs.
+            Ok(None) | Err(_) => break,
+        }
+        if stream.frames_seen() > 0 && kinds.len() >= 3 {
+            break;
+        }
+    }
+    let frames = stream.frames_seen();
+    println!(
+        "ok: {frames} frame(s) received, {} dispatched event(s): {kinds:?}",
+        kinds.len()
+    );
+    assert!(
+        frames > 0,
+        "not one frame in 25s, not even the 15s heartbeat: the stream is not live"
+    );
+    Ok(())
+}
+/// The authenticated write path, chosen so the library is left as it was found.
+///
+/// It exercises the *routing* the live server forced on us (contract R7/R8): a
+/// passive page progress on a reflowable book must be parked without sending
+/// anything, while an image book must take the PATCH and answer 204. Every book
+/// that is written is put back into the state it was found in.
+fn phase_live_write(args: &Args) -> Smoke {
+    let client = client(&args.base_url, &args.key);
+    // One series can hold a single format, so walk a few until both routes have
+    // been exercised against the running server.
+    let series_page = block_on(client.series_page(&PageRequest::new(0, 8)))?;
+    assert!(
+        !series_page.content.is_empty(),
+        "the server reports no series to write against"
+    );
+
+    let mut reflowable_seen = 0usize;
+    let mut image_done = 0usize;
+    'outer: for series in series_page.content.iter() {
+        let page = block_on(client.books_page(&series.id, &PageRequest::new(0, 12)))?;
+        for book in page.content.iter() {
+            let format = book
+                .media
+                .as_ref()
+                .and_then(|media| media.media_type.clone())
+                .unwrap_or_default();
+            let reflowable = outbox::is_reflowable(Some(&format));
+            let found = match block_on(client.refetch(&book.id)) {
+                Refetch::Found(found) => found,
+                other => {
+                    return Err(ApiError::InvalidInput {
+                        message: format!("re-fetch of {} returned {other:?}", book.id),
+                    }
+                    .into())
+                }
+            };
+            let intent = outbox::Intent::Progress {
+                page: Some(found.page.unwrap_or(0) + 1),
+                completed: false,
+            };
+            match outbox::decide(&book.id, &intent, &now(), &Refetch::Found(found.clone())) {
+                Decision::UnsupportedFormat { reason } => {
+                    assert!(
+                        reflowable,
+                        "{} ({format}) was parked as unsupported but is not reflowable",
+                        book.id
+                    );
+                    println!(
+                        "ok: {} ({format}) routed away from read-progress: {reason}",
+                        book.id
+                    );
+                    reflowable_seen += 1;
+                }
+                Decision::Upload(request) => {
+                    assert!(
+                        !reflowable,
+                        "{} ({format}) must not be sent to read-progress",
+                        book.id
+                    );
+                    let attempt = block_on(client.apply(&request));
+                    assert_eq!(
+                        attempt,
+                        Attempt::Succeeded,
+                        "{}: PATCH must answer 204, got {attempt:?}",
+                        book.id
+                    );
+                    // Back to exactly how it was found.
+                    let undo = if found.page.unwrap_or(0) == 0 {
+                        outbox::request_for(&book.id, &outbox::Intent::MarkUnread)
+                    } else {
+                        outbox::request_for(
+                            &book.id,
+                            &outbox::Intent::Progress {
+                                page: found.page,
+                                completed: found.completed,
+                            },
+                        )
+                    };
+                    assert_eq!(
+                        block_on(client.apply(&undo)),
+                        Attempt::Succeeded,
+                        "{}: restore must answer 204",
+                        book.id
+                    );
+                    let after = block_on(client.refetch(&book.id));
+                    println!(
+                        "ok: {} ({format}) PATCH -> 204, restored to {:?}",
+                        book.id,
+                        match after {
+                            Refetch::Found(progress) => Some((progress.page, progress.completed)),
+                            _ => None,
+                        }
+                    );
+                    image_done += 1;
+                }
+                other => {
+                    return Err(ApiError::InvalidInput {
+                        message: format!("{}: unexpected decision {other:?}", book.id),
+                    }
+                    .into())
+                }
+            }
+            if reflowable_seen > 0 && image_done > 0 {
+                break 'outer;
+            }
+        }
+    }
+    assert!(
+        reflowable_seen > 0 && image_done > 0,
+        "could not exercise both routes on the live server: reflowable={reflowable_seen} image={image_done}"
+    );
+    println!("ok: live routing matches the contract on both formats");
+    Ok(())
 }
