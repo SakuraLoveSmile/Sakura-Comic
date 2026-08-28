@@ -11,13 +11,30 @@ use std::fmt;
 pub enum ApiError {
     Authentication,
     Network,
-    Server { status_code: u16 },
-    ApiCompatibility { message: String },
-    UrlInvalid { message: String },
-    Database { message: String },
-    Storage { message: String },
-    Decode { message: String },
-    InvalidInput { message: String },
+    Server {
+        status_code: u16,
+    },
+    ApiCompatibility {
+        message: String,
+    },
+    UrlInvalid {
+        message: String,
+    },
+    Database {
+        message: String,
+    },
+    Storage {
+        message: String,
+    },
+    Decode {
+        message: String,
+    },
+    InvalidInput {
+        message: String,
+    },
+    /// A bounded event-stream read saw no frame: normal for a live connection,
+    /// and never a reason to reschedule a reconnect.
+    Idle,
 }
 
 impl fmt::Display for ApiError {
@@ -34,6 +51,7 @@ impl fmt::Display for ApiError {
             ApiError::Storage { message } => write!(f, "storage error: {message}"),
             ApiError::Decode { message } => write!(f, "decode error: {message}"),
             ApiError::InvalidInput { message } => write!(f, "invalid input: {message}"),
+            ApiError::Idle => write!(f, "event stream idle"),
         }
     }
 }

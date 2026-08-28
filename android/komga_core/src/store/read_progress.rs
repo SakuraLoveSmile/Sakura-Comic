@@ -73,7 +73,8 @@ fn sync_write_for(
 }
 
 /// RFC 3339 comparison that does not depend on fractional-second padding.
-fn newer(candidate: &str, current: &str) -> bool {
+/// Shared with the Outbox conflict rule (R4) so both use one clock semantics.
+pub(crate) fn newer(candidate: &str, current: &str) -> bool {
     match (
         chrono::DateTime::parse_from_rfc3339(candidate),
         chrono::DateTime::parse_from_rfc3339(current),
@@ -219,6 +220,9 @@ fn enqueue_mutation(
     payload: &serde_json::Value,
     created_at: &str,
 ) -> rusqlite::Result<()> {
+    // Newest user statement wins: anything still queued for this book in the
+    // same family is superseded (including a row that had given up).
+    crate::store::outbox::coalesce(conn, server_id, book_id)?;
     conn.execute(
         "INSERT INTO pending_mutations (id, server_id, entity_id, mutation_type, payload, created_at, retry_count)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
