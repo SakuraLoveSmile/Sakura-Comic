@@ -97,6 +97,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ServerProfile dco_decode_box_autoadd_server_profile(dynamic raw);
 
   @protected
+  SsePollResult dco_decode_box_autoadd_sse_poll_result(dynamic raw);
+
+  @protected
   BuildInfo dco_decode_build_info(dynamic raw);
 
   @protected
@@ -175,6 +178,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<LibraryCountRow> dco_decode_list_library_count_row(dynamic raw);
 
   @protected
+  List<OutboxEntryDto> dco_decode_list_outbox_entry_dto(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
@@ -234,6 +240,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ServerProfile? dco_decode_opt_box_autoadd_server_profile(dynamic raw);
 
   @protected
+  SsePollResult? dco_decode_opt_box_autoadd_sse_poll_result(dynamic raw);
+
+  @protected
+  OutboxEntryDto dco_decode_outbox_entry_dto(dynamic raw);
+
+  @protected
+  OutboxStatusDto dco_decode_outbox_status_dto(dynamic raw);
+
+  @protected
   ReadlistDetailRow dco_decode_readlist_detail_row(dynamic raw);
 
   @protected
@@ -261,6 +276,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ServerProfile dco_decode_server_profile(dynamic raw);
 
   @protected
+  SsePollResult dco_decode_sse_poll_result(dynamic raw);
+
+  @protected
   ThumbnailRow dco_decode_thumbnail_row(dynamic raw);
 
   @protected
@@ -274,6 +292,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void dco_decode_unit(dynamic raw);
+
+  @protected
+  UploadOutcomeDto dco_decode_upload_outcome_dto(dynamic raw);
 
   @protected
   BigInt dco_decode_usize(dynamic raw);
@@ -342,6 +363,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ServerProfile sse_decode_box_autoadd_server_profile(
+      SseDeserializer deserializer);
+
+  @protected
+  SsePollResult sse_decode_box_autoadd_sse_poll_result(
       SseDeserializer deserializer);
 
   @protected
@@ -431,6 +456,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<OutboxEntryDto> sse_decode_list_outbox_entry_dto(
+      SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
@@ -498,6 +527,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  SsePollResult? sse_decode_opt_box_autoadd_sse_poll_result(
+      SseDeserializer deserializer);
+
+  @protected
+  OutboxEntryDto sse_decode_outbox_entry_dto(SseDeserializer deserializer);
+
+  @protected
+  OutboxStatusDto sse_decode_outbox_status_dto(SseDeserializer deserializer);
+
+  @protected
   ReadlistDetailRow sse_decode_readlist_detail_row(
       SseDeserializer deserializer);
 
@@ -527,6 +566,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ServerProfile sse_decode_server_profile(SseDeserializer deserializer);
 
   @protected
+  SsePollResult sse_decode_sse_poll_result(SseDeserializer deserializer);
+
+  @protected
   ThumbnailRow sse_decode_thumbnail_row(SseDeserializer deserializer);
 
   @protected
@@ -540,6 +582,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
+
+  @protected
+  UploadOutcomeDto sse_decode_upload_outcome_dto(SseDeserializer deserializer);
 
   @protected
   BigInt sse_decode_usize(SseDeserializer deserializer);
@@ -614,6 +659,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_server_profile(
       ServerProfile self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_sse_poll_result(
+      SsePollResult self, SseSerializer serializer);
 
   @protected
   void sse_encode_build_info(BuildInfo self, SseSerializer serializer);
@@ -707,6 +756,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<LibraryCountRow> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_outbox_entry_dto(
+      List<OutboxEntryDto> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
       Uint8List self, SseSerializer serializer);
 
@@ -780,6 +833,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       ServerProfile? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_sse_poll_result(
+      SsePollResult? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_outbox_entry_dto(
+      OutboxEntryDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_outbox_status_dto(
+      OutboxStatusDto self, SseSerializer serializer);
+
+  @protected
   void sse_encode_readlist_detail_row(
       ReadlistDetailRow self, SseSerializer serializer);
 
@@ -812,6 +877,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_server_profile(ServerProfile self, SseSerializer serializer);
 
   @protected
+  void sse_encode_sse_poll_result(SsePollResult self, SseSerializer serializer);
+
+  @protected
   void sse_encode_thumbnail_row(ThumbnailRow self, SseSerializer serializer);
 
   @protected
@@ -825,6 +893,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_upload_outcome_dto(
+      UploadOutcomeDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_usize(BigInt self, SseSerializer serializer);

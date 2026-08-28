@@ -372,6 +372,64 @@ Future<void> markUnread(
     RustLib.instance.api.crateFfiBridgeMarkUnread(
         dbPath: dbPath, serverId: serverId, bookId: bookId);
 
+/// One upload pass over the queued mutations, plus the queue it left behind.
+/// Safe to call after every local write, on foreground, on network recovery and
+/// on a timer — an eligible row is only ever dropped once the server confirms.
+Future<UploadOutcomeDto> uploadOutbox(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeUploadOutbox(
+        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+
+/// The Outbox badge plus the rows that gave up (UI lists those with a retry).
+Future<OutboxStatusDto> outboxStatus(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeOutboxStatus(dbPath: dbPath, serverId: serverId);
+
+/// Hand every given-up row back to the retry machine. Returns how many came
+/// back to `pending`.
+Future<PlatformInt64> retryFailedMutations(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeRetryFailedMutations(dbPath: dbPath, serverId: serverId);
+
+/// One bounded event-stream tick. `state_json` is the previous tick's state —
+/// opaque here, owned by the caller, which is what keeps start/stop (and so
+/// pause-on-background) on the app side. `None` means a tick is still running
+/// for this server: skip this beat.
+Future<SsePollResult?> ssePoll(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey,
+        required String stateJson}) =>
+    RustLib.instance.api.crateFfiBridgeSsePoll(
+        dbPath: dbPath,
+        serverId: serverId,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        stateJson: stateJson);
+
+/// The reconcile `sse_poll` asked for has run: release the events that arrived
+/// during it and hand the session back to the stream.
+Future<String> sseReconciled(
+        {required String dbPath, required String stateJson}) =>
+    RustLib.instance.api
+        .crateFfiBridgeSseReconciled(dbPath: dbPath, stateJson: stateJson);
+
+/// Make one server's event stream due now (network came back / foreground).
+Future<String> sseResume({required String dbPath, required String stateJson}) =>
+    RustLib.instance.api
+        .crateFfiBridgeSseResume(dbPath: dbPath, stateJson: stateJson);
+
+/// Drop this server's parked stream (screen disposed / server switched).
+Future<void> sseStop({required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeSseStop(dbPath: dbPath, serverId: serverId);
+
 /// Book cover file path resolved from SQLite only (None = cache miss).
 Future<String?> bookCoverPath(
         {required String dbPath,

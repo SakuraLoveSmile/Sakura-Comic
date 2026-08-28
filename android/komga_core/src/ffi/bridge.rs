@@ -14,7 +14,8 @@
 use crate::api::server::Library;
 use crate::ffi::application::{
     BookDetailRow, CollectionDetailRow, CollectionPageResult, ConnectionResult, FilterOptions,
-    ReadlistDetailRow, ReadlistPageResult, SeriesDetailRow,
+    OutboxStatusDto, ReadlistDetailRow, ReadlistPageResult, SeriesDetailRow, SsePollResult,
+    UploadOutcomeDto,
 };
 use crate::model::server_profile::ServerProfile;
 use crate::store::prune::Tombstone;
@@ -430,6 +431,77 @@ pub fn mark_unread(db_path: String, server_id: String, book_id: String) -> Resul
     let app = crate::ffi::application::App::new(db_path);
     app.mark_unread(&server_id, &book_id)
         .map_err(|e| e.to_string())
+}
+
+// MARK: - Stage 6: Mutation Upload Sync (Outbox drain)
+
+/// One upload pass over the queued mutations, plus the queue it left behind.
+/// Safe to call after every local write, on foreground, on network recovery and
+/// on a timer — an eligible row is only ever dropped once the server confirms.
+pub async fn upload_outbox(
+    db_path: String,
+    server_id: String,
+    base_url: String,
+    api_key: String,
+) -> Result<UploadOutcomeDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.upload_outbox(server_id, base_url, api_key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The Outbox badge plus the rows that gave up (UI lists those with a retry).
+pub fn outbox_status(db_path: String, server_id: String) -> Result<OutboxStatusDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.outbox_status(&server_id).map_err(|e| e.to_string())
+}
+
+/// Hand every given-up row back to the retry machine. Returns how many came
+/// back to `pending`.
+pub fn retry_failed_mutations(db_path: String, server_id: String) -> Result<i64, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.retry_failed_mutations(&server_id)
+        .map(|n| n as i64)
+        .map_err(|e| e.to_string())
+}
+
+// MARK: - Stage 6: Event Driven Sync (pollable SSE)
+
+/// One bounded event-stream tick. `state_json` is the previous tick's state —
+/// opaque here, owned by the caller, which is what keeps start/stop (and so
+/// pause-on-background) on the app side. `None` means a tick is still running
+/// for this server: skip this beat.
+pub async fn sse_poll(
+    db_path: String,
+    server_id: String,
+    base_url: String,
+    api_key: String,
+    state_json: String,
+) -> Result<Option<SsePollResult>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.sse_poll(server_id, base_url, api_key, state_json)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The reconcile `sse_poll` asked for has run: release the events that arrived
+/// during it and hand the session back to the stream.
+pub fn sse_reconciled(db_path: String, state_json: String) -> Result<String, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.sse_reconciled(state_json).map_err(|e| e.to_string())
+}
+
+/// Make one server's event stream due now (network came back / foreground).
+pub fn sse_resume(db_path: String, state_json: String) -> Result<String, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.sse_resume(state_json).map_err(|e| e.to_string())
+}
+
+/// Drop this server's parked stream (screen disposed / server switched).
+pub fn sse_stop(db_path: String, server_id: String) -> Result<(), String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.sse_stop(&server_id);
+    Ok(())
 }
 
 // MARK: - Book covers (SQLite-resolved paths, `variant = 'book'`)

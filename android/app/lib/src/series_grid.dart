@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'collections_screen.dart';
 import 'libraries_screen.dart';
 import 'library_repository.dart';
+import 'live_sync.dart';
+import 'rust_core_api.dart' show OutboxStatusDto;
 import 'models.dart';
 import 'readlists_screen.dart';
 import 'series_detail.dart';
@@ -79,12 +81,34 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   List<CollectionItem> _collections = const [];
   List<ReadlistItem> _readlists = const [];
 
+  // Stage 6: the event stream + Outbox drainer. Owns no rules of its own — the
+  // core decides backoff, conflicts and cleanup; this only decides when to ask.
+  LiveSyncController? _live;
+  OutboxStatusDto? _outbox;
+  String? _liveStatus;
+
   @override
   void initState() {
     super.initState();
     // Stage 5 triggers: cold start syncs, coming back to the foreground
     // reconciles, and pull-to-refresh reconciles on demand.
     WidgetsBinding.instance.addObserver(this);
+    _live = LiveSyncController(
+      widget.repository,
+      reconcile: (trigger) => _reconcile(trigger, announce: false),
+      refresh: () async {
+        // UI 自动刷新 = 重读本地库；事件载荷从不直接进视图。
+        await _loadWall(reset: true);
+        await _loadSyncState();
+      },
+      onOutbox: (status) {
+        if (mounted) setState(() => _outbox = status);
+      },
+      onStreamStatus: (status) {
+        if (mounted) setState(() => _liveStatus = status);
+      },
+    );
+    _live!.start();
     _load();
   }
 
@@ -92,6 +116,16 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _reconcile('did_become_active');
+      // Foreground again: retry the stream now rather than at the end of the
+      // last backoff, and drain anything the background window queued.
+      _live!.start();
+      _live!.resume();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      // Backgrounded: stop listening. Events missed here cannot be replayed
+      // (the server sends no resume token), which is why resume() sweeps.
+      _live?.stop();
     }
   }
 
@@ -107,6 +141,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _live?.dispose();
     _recoveryTimer?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
@@ -218,6 +253,9 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       // Reaching the server again ends the recovery ladder.
       _recoveryTimer?.cancel();
       _recoveryAttempt = 0;
+      // ...and it is also the moment the event stream should not sit out its
+      // backoff any longer.
+      _live?.resume();
       if (!mounted || report == null) return;
       if (announce) {
         ScaffoldMessenger.of(context)
@@ -327,6 +365,19 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         appBar: AppBar(
           title: Text(_activeServerName ?? 'Library'),
           actions: [
+            // Outbox badge (SQLite only, so it is truthful while offline).
+            if ((_outbox?.total ?? 0) > 0 || _liveStatus != null)
+              _LiveSyncBadge(
+                outbox: _outbox,
+                status: _liveStatus,
+                onRetry: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final n = await _live?.retryFailed();
+                  messenger.showSnackBar(SnackBar(
+                    content: Text(n == null || n == 0 ? '没有可重试的上传' : '已重新排队 $n 项'),
+                  ));
+                },
+              ),
             IconButton(
               onPressed: () {
                 Navigator.of(context).push(
@@ -766,3 +817,38 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   }
 }
 
+
+
+/// The Stage 6 status pill: queued uploads, and a way to release given-up ones.
+class _LiveSyncBadge extends StatelessWidget {
+  const _LiveSyncBadge({required this.outbox, required this.status, required this.onRetry});
+
+  final OutboxStatusDto? outbox;
+  final String? status;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final failed = outbox?.failed ?? 0;
+    final queued = (outbox?.total ?? 0) - failed;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: IconButton(
+        tooltip: [
+          if (queued > 0) '$queued 项客户端写操作待上传',
+          if (failed > 0) '$failed 项已放弃（点开重试）',
+          if (status != null) status!,
+          if (queued == 0 && failed == 0 && status == null) '事件流正常',
+        ].join('；'),
+        onPressed: failed > 0 ? () => onRetry() : null,
+        icon: Icon(
+          failed > 0
+              ? Icons.cloud_off
+              : queued > 0
+                  ? Icons.cloud_upload_outlined
+                  : Icons.cloud_done_outlined,
+        ),
+      ),
+    );
+  }
+}

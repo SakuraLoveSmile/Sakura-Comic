@@ -5,15 +5,18 @@
 
 use crate::api::auth::AuthMethod;
 use crate::api::contract::{check_server_version, version_capabilities};
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, Result as ApiResult};
+use crate::api::mutation::ProgressWriter;
 use crate::api::series::KomgaClient;
 use crate::api::server::ConnectionFetching;
+use crate::api::sse::{SseClient, SseEvent, SseStream};
 use crate::cache::cover::{BytesFetcher, CoverStore};
 use crate::cache::DiskCache;
 use crate::model::server::{Library, ServerInfo};
 use crate::model::server_profile::ServerProfile;
 use crate::store;
 use crate::store::collections::CollectionRow;
+use crate::store::outbox::OutboxEntry;
 use crate::store::prune::Tombstone;
 use crate::store::query::{BookQuery, BookSort, SeriesQuery, SeriesSort};
 use crate::store::read_progress::ContinueReadingRow;
@@ -23,12 +26,18 @@ use crate::store::sync_state::EntitySyncState;
 use crate::store::thumbnails::{ThumbnailRow, VARIANT_BOOK, VARIANT_SERIES};
 use crate::sync;
 use crate::sync::full::FixtureLibraryFetcher;
+use crate::sync::sse::{DirtySet, EventSource, Phase, PumpAction, SseSession};
+use crate::sync::upload::UploadSummary;
 use crate::sync::{
     BootstrapSummary, FullSyncSummary, LibraryFetcher, ReconcileSummary, ReconcileTrigger,
 };
 
-use rusqlite::OptionalExtension;
+use rusqlite::{Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 /// Owns the app-level SQLite path; every call opens its own connection
 /// (simple for Phase 0; a long-lived pooled connection comes with the
@@ -838,6 +847,229 @@ impl App {
         store::read_progress::mark_unread(&conn, server_id, book_id).map_err(db_err)
     }
 
+    // MARK: - Stage 6: Mutation Upload Sync (the Outbox drain)
+
+    /// One upload pass over the queued mutations: 断网时排队的动作在恢复网络
+    /// （或重启、或回到前台）后自己排空。`now` is the real clock here;
+    /// `upload_outbox_with` takes an injected one so backoff is testable.
+    pub async fn upload_outbox(
+        &self,
+        server_id: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<UploadOutcomeDto, ApiError> {
+        let db_path = self.db_path.clone();
+        let now = utc_now();
+        // The uploader reads the queue, re-fetches, then writes — so it holds a
+        // `Connection` across its awaits, and that future is not `Send`. Run the
+        // pass where the handle can live: one blocking thread, one runtime.
+        tokio::task::spawn_blocking(move || {
+            let runtime = owned_runtime()?;
+            runtime.block_on(async move {
+                let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+                let conn = store::open(&db_path).map_err(db_err)?;
+                let summary = sync::upload::upload_outbox(&conn, &server_id, &client, &now)
+                    .await
+                    .map_err(db_err)?;
+                Ok(UploadOutcomeDto::of(
+                    &summary,
+                    outbox_status_of(&conn, &server_id, &now)?,
+                ))
+            })
+        })
+        .await
+        .map_err(join_err)?
+    }
+
+    /// Same as upload_outbox with an injectable writer (offline tests). The
+    /// queue and the badge counts come back in one DTO, because the UI always
+    /// needs the residue after a pass, never just what the pass did.
+    pub async fn upload_outbox_with<W: ProgressWriter + Sync>(
+        &self,
+        writer: &W,
+        server_id: &str,
+        now: &str,
+    ) -> Result<UploadOutcomeDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let summary = sync::upload::upload_outbox(&conn, server_id, writer, now)
+            .await
+            .map_err(db_err)?;
+        Ok(UploadOutcomeDto::of(
+            &summary,
+            outbox_status_of(&conn, server_id, now)?,
+        ))
+    }
+
+    /// The Outbox as the UI sees it: what is queued, and what has given up.
+    pub fn outbox_status(&self, server_id: &str) -> Result<OutboxStatusDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        outbox_status_of(&conn, server_id, &utc_now())
+    }
+
+    /// Hand every given-up row back to the retry machine (UI "retry now").
+    /// Returns how many rows came back to `pending`.
+    pub fn retry_failed_mutations(&self, server_id: &str) -> Result<usize, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let entries = store::outbox::all_entries(&conn, server_id).map_err(db_err)?;
+        let entities: HashSet<String> = entries
+            .into_iter()
+            .filter(|entry| entry.state == store::outbox::STATE_FAILED)
+            .map(|entry| entry.entity_id)
+            .collect();
+        let mut revived = 0usize;
+        for entity_id in entities {
+            revived += store::outbox::retry_failed(&conn, server_id, &entity_id).map_err(db_err)?;
+        }
+        Ok(revived)
+    }
+
+    // MARK: - Stage 6: Event Driven Sync (pollable SSE)
+
+    /// One bounded SSE tick. The App owns start/stop for lifecycle, so Rust
+    /// runs no event loop: the caller keeps the session in `state_json`, and
+    /// this only parks the *socket* for the duration of the process
+    /// (`SSE_SOCKETS`) because a live stream cannot cross the FFI.
+    ///
+    /// `Ok(None)` means another tick already holds this server's socket — the
+    /// caller should simply try again on its next tick.
+    pub async fn sse_poll(
+        &self,
+        server_id: String,
+        base_url: String,
+        api_key: String,
+        state_json: String,
+    ) -> Result<Option<SsePollResult>, ApiError> {
+        let key = socket_key(&self.db_path, &server_id);
+        let Some((mut source, idle_ticks)) =
+            claim_socket(&key, || LiveSource::new(&base_url, &api_key))?
+        else {
+            return Ok(None);
+        };
+        // A hint stream belongs to one server: a state that came from another
+        // one (switched server, replaced database) starts over instead of
+        // resuming a socket handover that never happened.
+        let mut session = session_for_server(&state_json, &server_id);
+        let now = utc_now();
+        // The socket half reads no database, so this await stays Send.
+        let (action, dirty) = advance_stream(&mut session, &mut source, &now).await;
+        // The hint half writes SQLite between its awaits, and `Connection` is
+        // Send but not Sync: run it on a blocking thread with a runtime of its
+        // own, the way the smoke binaries drive the core.
+        let db_path = self.db_path.clone();
+        let hints = dirty.clone();
+        let streaming_for = server_id.clone();
+        let (report, orphans) = tokio::task::spawn_blocking(move || {
+            let runtime = owned_runtime()?;
+            runtime.block_on(async move {
+                let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+                let conn = store::open(&db_path).map_err(db_err)?;
+                Ok::<_, ApiError>(
+                    sync::sse::apply_dirty(&conn, &streaming_for, &hints, &client).await,
+                )
+            })
+        })
+        .await
+        .map_err(join_err)??;
+        let (action_name, owes_sweep) =
+            settle_sweep(&mut session, action, &dirty, dirty.needs_sweep());
+        self.remove_cover_files(&orphans);
+        let result = SsePollResult::of(
+            SseSessionState::of(&server_id, &session),
+            action_name,
+            &dirty,
+            report,
+            owes_sweep,
+        );
+        // The socket goes back whether the tick worked or not — dropping it on
+        // an error would turn one bad read into a reconnect storm.
+        park_socket(
+            &key,
+            source,
+            if result.action == "idle" {
+                idle_ticks + 1
+            } else {
+                0
+            },
+            result.keep_socket,
+        );
+        Ok(Some(result))
+    }
+
+    /// The SSE tick with both seams injectable (offline tests): `source` is the
+    /// stream, `writer` the re-fetch behind every hint.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn sse_poll_with<S: EventSource + Sync, W: ProgressWriter + Sync>(
+        &self,
+        source: &mut S,
+        writer: &W,
+        conn: &Connection,
+        server_id: &str,
+        state_json: &str,
+        now: &str,
+    ) -> Result<SsePollResult, ApiError> {
+        let mut session = session_for_server(state_json, server_id);
+        let (action, dirty) = advance_stream(&mut session, source, now).await;
+        let (report, orphans, needs_sweep) =
+            Self::apply_hints(conn, server_id, &dirty, writer).await;
+        let (action_name, owes_sweep) = settle_sweep(&mut session, action, &dirty, needs_sweep);
+        self.remove_cover_files(&orphans);
+        Ok(SsePollResult::of(
+            SseSessionState::of(server_id, &session),
+            action_name,
+            &dirty,
+            report,
+            owes_sweep,
+        ))
+    }
+
+    /// `SSE Event → API 重新拉取 → SQLite 更新`. Bare book touches are
+    /// re-fetched one by one; anything broader (a series, a collection, a
+    /// readlist, an unnameable event) needs the caller's id sweep, so this
+    /// reports `reconcile` and lets `sse_reconnected` do it once for all of it.
+    async fn apply_hints<W: ProgressWriter + Sync>(
+        conn: &Connection,
+        server_id: &str,
+        dirty: &DirtySet,
+        writer: &W,
+    ) -> (sync::sse::ApplyReport, Vec<String>, bool) {
+        if dirty.is_empty() {
+            return (sync::sse::ApplyReport::default(), Vec::new(), false);
+        }
+        let (report, orphans) = sync::sse::apply_dirty(conn, server_id, dirty, writer).await;
+        (report, orphans, dirty.needs_sweep())
+    }
+
+    /// The caller finished the sweep `sse_poll` asked for: release the events
+    /// that arrived while it ran, so they are consumed now instead of lost.
+    /// Connectivity came back, or the app returned to the foreground: make the
+    /// stream due immediately instead of waiting out the last backoff. The
+    /// sweep it owes is not cancelled — `reconcile_required` survives.
+    pub fn sse_resume(&self, state_json: String) -> Result<String, ApiError> {
+        let state = session_from_state(&state_json);
+        let mut session = state.to_session();
+        session.resume(&utc_now());
+        Ok(session_to_state(&SseSessionState::of(
+            &state.server_id,
+            &session,
+        )))
+    }
+
+    pub fn sse_reconciled(&self, state_json: String) -> Result<String, ApiError> {
+        let state = session_from_state(&state_json);
+        let mut session = state.to_session();
+        session.reconcile_done();
+        Ok(session_to_state(&SseSessionState::of(
+            &state.server_id,
+            &session,
+        )))
+    }
+
+    /// Give up on one server's stream (screen disposed / server switched): the
+    /// parked socket goes away with it, so a stale connection cannot leak.
+    pub fn sse_stop(&self, server_id: &str) {
+        forget_socket(&socket_key(&self.db_path, server_id));
+    }
+
     // MARK: - Book covers (SQLite-resolved paths, `variant = 'book'`)
 
     /// Book cover file path resolved from SQLite only (None = cache miss).
@@ -946,6 +1178,313 @@ struct DemoCoverFetcher {}
 impl BytesFetcher for DemoCoverFetcher {
     async fn fetch_bytes(&self, url: &str) -> crate::api::error::Result<Vec<u8>> {
         Ok(crate::cache::demo_png::demo_cover_bytes(url))
+    }
+}
+
+// MARK: - Stage 6 adapters (pollable SSE plumbing for the FFI)
+
+/// The one clock the facade injects into the core's time-dependent entry
+/// points, second precision so it compares cleanly against the backoff
+/// deadlines the core stores (`next_retry_at` / `next_attempt_at`).
+fn utc_now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// The Outbox in the shape the UI reads: counts for the badge plus whatever
+/// has given up, which is the only state the user can act on.
+fn outbox_status_of(
+    conn: &Connection,
+    server_id: &str,
+    now: &str,
+) -> Result<OutboxStatusDto, ApiError> {
+    let counts = store::outbox::counts(conn, server_id, now).map_err(db_err)?;
+    let failed_entries = store::outbox::all_entries(conn, server_id)
+        .map_err(db_err)?
+        .into_iter()
+        .filter(|entry| entry.state == store::outbox::STATE_FAILED)
+        .map(OutboxEntryDto::of)
+        .collect();
+    Ok(OutboxStatusDto {
+        server_id: server_id.to_string(),
+        pending: counts.pending,
+        waiting: counts.waiting,
+        failed: counts.failed,
+        total: counts.total(),
+        failed_entries,
+    })
+}
+
+/// Events one tick may consume before handing control back.
+const SSE_MAX_EVENTS_PER_POLL: usize = 64;
+
+/// How long one SSE read may wait for a frame before the tick calls it idle.
+/// The stream is not closed on idle: only the pending read is cancelled, and it
+/// is cancel-safe — bytes are only consumed once a chunk has actually arrived.
+const SSE_READ_WINDOW: Duration = Duration::from_millis(750);
+
+/// How many consecutive silent ticks a parked stream may survive. Komga
+/// heartbeats every 20s, so a stream that has produced *nothing* — not even a
+/// comment frame — for this long is gone without having said so.
+const SSE_MAX_IDLE_TICKS: u32 = 20;
+
+/// The `EventSource` the *live* poll uses: the same shape
+/// `bin/stage6_smoke.rs` drives, with an idle read reported as `Idle`.
+struct LiveSource {
+    client: SseClient,
+    stream: Option<SseStream>,
+}
+
+impl LiveSource {
+    fn new(base_url: &str, api_key: &str) -> ApiResult<Self> {
+        Ok(Self {
+            client: SseClient::new(
+                base_url.to_string(),
+                AuthMethod::ApiKey {
+                    key: api_key.to_string(),
+                },
+            )?,
+            stream: None,
+        })
+    }
+}
+
+impl EventSource for LiveSource {
+    async fn open(&mut self, last_event_id: Option<&str>) -> ApiResult<()> {
+        self.stream = Some(self.client.connect(last_event_id).await?);
+        Ok(())
+    }
+
+    async fn next(&mut self) -> ApiResult<Option<SseEvent>> {
+        let Some(stream) = self.stream.as_mut() else {
+            return Err(ApiError::Network);
+        };
+        tokio::time::timeout(SSE_READ_WINDOW, stream.next_event())
+            .await
+            .unwrap_or(Err(ApiError::Idle))
+    }
+
+    fn close(&mut self) {
+        self.stream = None;
+    }
+}
+
+/// True for the one failure that means "nothing arrived yet" — it must never
+/// be charged to the reconnect schedule, because it happens on every quiet tick.
+fn is_idle(error: &ApiError) -> bool {
+    matches!(error, ApiError::Idle)
+}
+
+/// The session a tick resumes: an unparseable or foreign state is a fresh one,
+/// because a stream that cannot be read is a freshness loss only.
+fn session_for_server(state_json: &str, server_id: &str) -> SseSession {
+    let state = session_from_state(state_json);
+    if state.server_id == server_id {
+        state.to_session()
+    } else {
+        SseSession::new()
+    }
+}
+
+/// One `owned_runtime`-free half of a tick: the state machine plus the socket.
+/// No `Connection` is borrowed here, which is what lets the FFI call await it.
+async fn advance_stream<S: EventSource + Sync>(
+    session: &mut SseSession,
+    source: &mut S,
+    now: &str,
+) -> (PumpAction, DirtySet) {
+    // Nothing is ever closed for owing a sweep: `pump` keeps answering Reconcile
+    // while Reconciling, and the handshake path needs its socket.
+    let mut action = if session.phase == Phase::ReconcileOnly {
+        // Parked: no handshake to re-run, but the reason stays reportable.
+        PumpAction::ReconcileOnly
+    } else {
+        PumpAction::Idle
+    };
+    if session.phase != Phase::ReconcileOnly {
+        if session.phase == Phase::Connected {
+            action = read_available(session, source, now).await;
+        } else {
+            action = pump_once(session, source, now).await;
+            if action == PumpAction::ReconcileOnly {
+                // The stream is absent, not merely behind: the local mirror is
+                // only trustworthy after the sweep that trigger names.
+                session.reconcile_required = true;
+            }
+        }
+    }
+    let dirty = session.take_dirty();
+    (action, dirty)
+}
+
+/// Decide what the caller owes, and hold or release the session accordingly.
+/// One boolean drives both the reported action and `reconcile`: the reconnect
+/// gap, a hint only an id sweep can settle, and the one sweep a missing stream
+/// owes all ask for the same caller action.
+fn settle_sweep(
+    session: &mut SseSession,
+    action: PumpAction,
+    dirty: &DirtySet,
+    needs_sweep: bool,
+) -> (&'static str, bool) {
+    let owes_sweep = needs_sweep
+        || action == PumpAction::Reconcile
+        || (action == PumpAction::ReconcileOnly && session.reconcile_required);
+    if owes_sweep {
+        match action {
+            // The session holds its events until the caller says the sweep ran:
+            // releasing them here would let a reconnect consume the very gap it
+            // just refused to trust.
+            PumpAction::Reconcile => {}
+            PumpAction::ReconcileOnly => session.reconcile_required = false,
+            // A hint that only an id sweep can settle: the stream itself is
+            // healthy, so keep consuming while the caller sweeps.
+            _ => session.reconcile_done(),
+        }
+    }
+    let name = if owes_sweep {
+        "reconcile"
+    } else {
+        match action {
+            PumpAction::ReconcileOnly => "reconcile-only",
+            PumpAction::BackingOff => "backing-off",
+            PumpAction::Reconcile => "reconcile",
+            PumpAction::Applied | PumpAction::Idle => {
+                if dirty.is_empty() {
+                    "idle"
+                } else {
+                    "applied"
+                }
+            }
+        }
+    };
+    (name, owes_sweep)
+}
+
+/// A current-thread runtime for the passes that must hold a SQLite handle
+/// across an await: `Connection` is `Send` but not `Sync`, so their futures
+/// cannot be spawned on the FFI executor — the same trick `bin/stage6_smoke.rs`
+/// uses, on a blocking thread instead of the main one.
+fn owned_runtime() -> ApiResult<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| ApiError::Network)
+}
+
+/// A pass that died on its worker thread is reported, not propagated as a panic
+/// into the platform thread.
+fn join_err(e: tokio::task::JoinError) -> ApiError {
+    ApiError::Database {
+        message: format!("sync worker failed: {e}"),
+    }
+}
+
+/// One `sync::sse::pump` step, from any phase except a live stream (which the
+/// caller drains so a burst lands in one tick).
+async fn pump_once<S: EventSource + Sync>(
+    session: &mut SseSession,
+    source: &mut S,
+    now: &str,
+) -> PumpAction {
+    sync::sse::pump(session, source, now).await
+}
+
+/// Drain everything the stream has already dispatched. `pump` deliberately
+/// reads one event per step, and a tick that stopped at the first one would
+/// stretch a burst over many polling intervals.
+async fn read_available<S: EventSource + Sync>(
+    session: &mut SseSession,
+    source: &mut S,
+    now: &str,
+) -> PumpAction {
+    let mut applied = false;
+    for _ in 0..SSE_MAX_EVENTS_PER_POLL {
+        match source.next().await {
+            Ok(Some(event)) => {
+                session.note_event(&event);
+                applied = true;
+            }
+            // The server closed it or the read failed: a gap we cannot read,
+            // so the reconnect has to sweep before anything is trusted again.
+            Ok(None) => break,
+            // Idle: the stream is fine, it simply has nothing. Leave it open.
+            Err(error) if is_idle(&error) => {
+                return if applied {
+                    PumpAction::Applied
+                } else {
+                    PumpAction::Idle
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    source.close();
+    session.note_disconnected(now, true);
+    PumpAction::BackingOff
+}
+
+/// One server's parked stream. The socket is the only SSE state the FFI cannot
+/// carry, and re-opening it every tick would make "the gap is unknowable" true
+/// every tick — i.e. a reconcile storm.
+enum Parked {
+    Ready(Box<LiveSource>, u32),
+    /// A tick holds it right now.
+    Polling,
+}
+
+static SSE_SOCKETS: OnceLock<Mutex<HashMap<String, Parked>>> = OnceLock::new();
+
+fn sockets() -> &'static Mutex<HashMap<String, Parked>> {
+    SSE_SOCKETS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The database is part of the key: two App handles over different files must
+/// not share one stream.
+fn socket_key(db_path: &str, server_id: &str) -> String {
+    format!("{db_path}\u{1}{server_id}")
+}
+
+/// Takes the socket for this tick, opening one when there is nothing parked.
+/// `None` means a concurrent tick already holds it — that tick reports the
+/// events, so this one has nothing to do.
+fn claim_socket(
+    key: &str,
+    make: impl FnOnce() -> ApiResult<LiveSource>,
+) -> ApiResult<Option<(LiveSource, u32)>> {
+    let parked = {
+        let Ok(mut guard) = sockets().lock() else {
+            return Ok(None);
+        };
+        if matches!(guard.get(key), Some(Parked::Polling)) {
+            return Ok(None);
+        }
+        guard.insert(key.to_string(), Parked::Polling)
+    };
+    Ok(Some(match parked {
+        Some(Parked::Ready(source, idle_ticks)) => (*source, idle_ticks),
+        _ => (make()?, 0),
+    }))
+}
+
+/// Parks the socket again for the next tick. `keep` is false once the session
+/// owes a handshake only `pump` may run, and a stream that has stopped proving
+/// itself alive is dropped rather than re-read forever — either way the entry
+/// has to go, or every later tick would believe one is already running.
+fn park_socket(key: &str, source: LiveSource, idle_ticks: u32, keep: bool) {
+    let Ok(mut guard) = sockets().lock() else {
+        return;
+    };
+    if keep && idle_ticks < SSE_MAX_IDLE_TICKS {
+        guard.insert(key.to_string(), Parked::Ready(Box::new(source), idle_ticks));
+    } else {
+        guard.remove(key);
+    }
+}
+
+/// Forgets a server's stream entirely (`sse_stop`).
+fn forget_socket(key: &str) {
+    if let Ok(mut guard) = sockets().lock() {
+        guard.remove(key);
     }
 }
 
@@ -1085,6 +1624,318 @@ pub struct ConnectionResult {
     pub libraries: Vec<Library>,
     /// e.g. `libraries:2`, `unknown-version`, `newer-than-snapshot:1.27.0`.
     pub capabilities: Vec<String>,
+}
+
+// MARK: - Stage 6 result types (Outbox + pollable SSE)
+
+/// One queued client write, in the shape the UI lists it under the badge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboxEntryDto {
+    pub id: String,
+    pub entity_id: String,
+    pub mutation_type: String,
+    pub retry_count: i64,
+    pub last_error: Option<String>,
+    /// `pending` | `failed`.
+    pub state: String,
+    pub next_retry_at: Option<String>,
+    pub created_at: String,
+}
+
+impl OutboxEntryDto {
+    fn of(entry: OutboxEntry) -> Self {
+        Self {
+            id: entry.id,
+            entity_id: entry.entity_id,
+            mutation_type: entry.mutation_type,
+            retry_count: entry.retry_count,
+            last_error: entry.last_error,
+            state: entry.state,
+            next_retry_at: entry.next_retry_at,
+            created_at: entry.created_at,
+        }
+    }
+}
+
+/// The Outbox badge plus whatever has given up — the only part of the queue a
+/// user can act on.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboxStatusDto {
+    pub server_id: String,
+    /// Due right now; an upload pass would take these.
+    pub pending: i64,
+    /// Still waiting for a backoff deadline that is on disk, not in memory.
+    pub waiting: i64,
+    pub failed: i64,
+    pub total: i64,
+    pub failed_entries: Vec<OutboxEntryDto>,
+}
+
+/// What one upload pass did, and the queue it left behind: the caller needs
+/// both to refresh the badge without a second round trip.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadOutcomeDto {
+    pub server_id: String,
+    pub considered: i64,
+    pub uploaded: i64,
+    /// Converged without a request (rule R3).
+    pub already_applied: i64,
+    /// Rule R4: a strictly later remote action won.
+    pub remote_wins: i64,
+    /// Rule R1: the server confirmed the entity is gone.
+    pub gone: i64,
+    pub retried: i64,
+    pub rejected: i64,
+    pub blocked_authentication: i64,
+    /// `complete` | `blocked_authentication`.
+    pub status: String,
+    pub outbox: OutboxStatusDto,
+}
+
+impl UploadOutcomeDto {
+    fn of(summary: &UploadSummary, outbox: OutboxStatusDto) -> Self {
+        Self {
+            server_id: summary.server_id.clone(),
+            considered: summary.considered as i64,
+            uploaded: summary.uploaded as i64,
+            already_applied: summary.already_applied as i64,
+            remote_wins: summary.remote_wins as i64,
+            gone: summary.gone as i64,
+            retried: summary.retried as i64,
+            rejected: summary.rejected as i64,
+            blocked_authentication: summary.blocked_authentication as i64,
+            status: match summary.status {
+                sync::upload::RunStatus::BlockedAuthentication => "blocked_authentication",
+                sync::upload::RunStatus::Complete => "complete",
+            }
+            .to_string(),
+            outbox,
+        }
+    }
+}
+
+/// A dispatched frame, mirrored for the round trip: the session buffers events
+/// while a reconnect sweep runs, and dropping them there would be trusting the
+/// stream to be a queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SseEventDto {
+    pub kind: String,
+    pub data: String,
+    pub id: Option<String>,
+    pub retry_ms: Option<u64>,
+}
+
+impl From<&SseEvent> for SseEventDto {
+    fn from(event: &SseEvent) -> Self {
+        Self {
+            kind: event.kind.clone(),
+            data: event.data.clone(),
+            id: event.id.clone(),
+            retry_ms: event.retry_ms,
+        }
+    }
+}
+
+impl From<SseEventDto> for SseEvent {
+    fn from(value: SseEventDto) -> Self {
+        Self {
+            kind: value.kind,
+            data: value.data,
+            id: value.id,
+            retry_ms: value.retry_ms,
+        }
+    }
+}
+
+/// The coalescing hint list, mirrored (`BTreeSet` has no Dart counterpart).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirtySetDto {
+    pub books: Vec<String>,
+    pub deleted_books: Vec<String>,
+    pub series: Vec<String>,
+    pub deleted_series: Vec<String>,
+    pub collections: Vec<String>,
+    pub readlists: Vec<String>,
+    pub global: bool,
+}
+
+impl From<&DirtySet> for DirtySetDto {
+    fn from(dirty: &DirtySet) -> Self {
+        Self {
+            books: dirty.books.iter().cloned().collect(),
+            deleted_books: dirty.deleted_books.iter().cloned().collect(),
+            series: dirty.series.iter().cloned().collect(),
+            deleted_series: dirty.deleted_series.iter().cloned().collect(),
+            collections: dirty.collections.iter().cloned().collect(),
+            readlists: dirty.readlists.iter().cloned().collect(),
+            global: dirty.global,
+        }
+    }
+}
+
+impl From<DirtySetDto> for DirtySet {
+    fn from(value: DirtySetDto) -> Self {
+        Self {
+            books: value.books.into_iter().collect(),
+            deleted_books: value.deleted_books.into_iter().collect(),
+            series: value.series.into_iter().collect(),
+            deleted_series: value.deleted_series.into_iter().collect(),
+            collections: value.collections.into_iter().collect(),
+            readlists: value.readlists.into_iter().collect(),
+            global: value.global,
+        }
+    }
+}
+
+/// The SSE session as it travels through Dart: opaque JSON in, same JSON back.
+///
+/// It is the core `SseSession` plus the server it belongs to, because a session
+/// resumed against a different server would resume someone else's gap.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SseSessionState {
+    pub server_id: String,
+    /// `disconnected` | `reconciling` | `connected` | `reconcile_only`.
+    pub phase: String,
+    pub attempts: i64,
+    pub next_attempt_at: Option<String>,
+    pub last_event_id: Option<String>,
+    pub retry_floor_ms: Option<u64>,
+    pub reconcile_required: bool,
+    pub reason: Option<String>,
+    pub buffered: Vec<SseEventDto>,
+    pub dirty: DirtySetDto,
+}
+
+impl SseSessionState {
+    fn of(server_id: &str, session: &SseSession) -> Self {
+        Self {
+            server_id: server_id.to_string(),
+            phase: phase_name(session.phase).to_string(),
+            attempts: session.attempts,
+            next_attempt_at: session.next_attempt_at.clone(),
+            last_event_id: session.last_event_id.clone(),
+            retry_floor_ms: session.retry_floor_ms,
+            reconcile_required: session.reconcile_required,
+            reason: session.reason.clone(),
+            buffered: session.buffered.iter().map(SseEventDto::from).collect(),
+            dirty: DirtySetDto::from(&session.dirty),
+        }
+    }
+
+    fn to_session(&self) -> SseSession {
+        SseSession {
+            phase: phase_of(&self.phase),
+            attempts: self.attempts,
+            next_attempt_at: self.next_attempt_at.clone(),
+            last_event_id: self.last_event_id.clone(),
+            retry_floor_ms: self.retry_floor_ms,
+            buffered: self.buffered.iter().cloned().map(SseEvent::from).collect(),
+            dirty: self.dirty.clone().into(),
+            reconcile_required: self.reconcile_required,
+            reason: self.reason.clone(),
+        }
+    }
+}
+
+fn phase_name(phase: Phase) -> &'static str {
+    match phase {
+        Phase::Disconnected => "disconnected",
+        Phase::Reconciling => "reconciling",
+        Phase::Connected => "connected",
+        Phase::ReconcileOnly => "reconcile_only",
+    }
+}
+
+/// Anything unrecognised is `Disconnected` — the one phase that owes a fresh
+/// handshake, so a state from a newer core is never trusted into a read.
+fn phase_of(name: &str) -> Phase {
+    match name {
+        "reconciling" => Phase::Reconciling,
+        "connected" => Phase::Connected,
+        "reconcile_only" => Phase::ReconcileOnly,
+        _ => Phase::Disconnected,
+    }
+}
+
+/// Untrusted input gets a fresh session: a stream that cannot be read is a
+/// freshness loss only, which is exactly what the contract allows.
+fn session_from_state(state_json: &str) -> SseSessionState {
+    serde_json::from_str(state_json).unwrap_or_else(|_| SseSessionState {
+        server_id: String::new(),
+        phase: phase_name(Phase::Disconnected).to_string(),
+        attempts: 0,
+        next_attempt_at: None,
+        last_event_id: None,
+        retry_floor_ms: None,
+        reconcile_required: false,
+        reason: None,
+        buffered: Vec::new(),
+        dirty: DirtySetDto::default(),
+    })
+}
+
+/// Round-trip helper for callers that only ran the sweep (`sse_reconciled`).
+fn session_to_state(state: &SseSessionState) -> String {
+    serde_json::to_string(state).unwrap_or_else(|_| String::new())
+}
+
+/// What one SSE tick reported. `dirtyBooks` are the ids this tick re-fetched
+/// into SQLite — the caller re-reads its list rather than applying a payload,
+/// because an event is a hint, never truth.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsePollResult {
+    /// Feed this straight back into the next `sse_poll`.
+    pub state_json: String,
+    /// `idle` | `applied` | `reconcile` | `backing-off` | `reconcile-only`.
+    pub action: String,
+    /// True when the caller must run a Reconcile (`sse_reconnected`) and then
+    /// hand the state back through `sse_reconciled`.
+    pub reconcile: bool,
+    pub dirty_books: Vec<String>,
+    pub phase: String,
+    /// Why the stream is parked (e.g. `/sse/v1/events` is not an event stream).
+    pub reason: Option<String>,
+    /// Counts of the hints this tick turned into local rows.
+    pub books_written: i64,
+    pub books_deleted: i64,
+    /// False once the parked stream is not worth keeping: a closed, failed or
+    /// handed-up stream owes a handshake that only the Rust side may run.
+    pub keep_socket: bool,
+}
+
+impl SsePollResult {
+    fn of(
+        state: SseSessionState,
+        action: &'static str,
+        dirty: &DirtySet,
+        report: sync::sse::ApplyReport,
+        reconcile: bool,
+    ) -> Self {
+        let mut dirty_books: Vec<String> = dirty.books.iter().cloned().collect();
+        dirty_books.extend(dirty.deleted_books.iter().cloned());
+        let phase = phase_of(&state.phase);
+        Self {
+            state_json: session_to_state(&state),
+            action: action.to_string(),
+            reconcile,
+            dirty_books,
+            phase: state.phase.clone(),
+            reason: state.reason.clone(),
+            books_written: report.books_written as i64,
+            books_deleted: report.books_deleted as i64,
+            // A stream that is merely waiting for the caller's sweep is still
+            // open; dropping it there would make the first tick after the sweep
+            // read a handle that nothing reconnects.
+            keep_socket: matches!(phase, Phase::Connected | Phase::Reconciling),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1549,6 +2400,391 @@ mod tests {
             "cover files must be removed"
         );
 
+        cleanup_temp(&db);
+    }
+
+    // MARK: Stage 6 — Outbox + pollable SSE
+
+    use crate::model::book::{Book, BookMetadata, ReadProgress};
+    use crate::store::outbox::{Attempt as UploadAttempt, Refetch, RemoteProgress, WireRequest};
+    use std::collections::VecDeque;
+
+    /// A server that always has the same answer for every book.
+    struct FakeServer {
+        remote: Refetch,
+        outcome: UploadAttempt,
+    }
+
+    impl ProgressWriter for FakeServer {
+        async fn refetch(&self, _book_id: &str) -> Refetch {
+            self.remote.clone()
+        }
+
+        async fn apply(&self, _request: &WireRequest) -> UploadAttempt {
+            self.outcome.clone()
+        }
+
+        async fn book(&self, book_id: &str) -> std::result::Result<Option<Book>, ApiError> {
+            Ok(Some(mirrored_book(book_id, "Fetched Title", 42, false)))
+        }
+    }
+
+    fn mirrored_book(book_id: &str, title: &str, page: i64, completed: bool) -> Book {
+        Book {
+            id: book_id.to_string(),
+            series_id: "s1".to_string(),
+            series_title: None,
+            name: title.to_string(),
+            number: None,
+            oneshot: false,
+            media: None,
+            metadata: Some(BookMetadata {
+                title: title.to_string(),
+                number: None,
+                number_sort: None,
+                summary: None,
+                isbn: None,
+                release_date: None,
+                authors: Vec::new(),
+                tags: Vec::new(),
+            }),
+            read_progress: Some(ReadProgress {
+                page: Some(page),
+                completed,
+                last_modified: None,
+            }),
+            created: None,
+            last_modified: None,
+            size_bytes: None,
+        }
+    }
+
+    fn remote_found(page: i64, stamp: &str) -> Refetch {
+        Refetch::Found(RemoteProgress {
+            page: Some(page),
+            completed: false,
+            last_modified: Some(stamp.to_string()),
+        })
+    }
+
+    #[tokio::test]
+    async fn an_upload_pass_reports_the_queue_it_left_behind() {
+        let db = temp_db();
+        let app = App::new(&db);
+        {
+            let conn = store::open(&db).unwrap();
+            store::read_progress::upsert_local_read_progress(&conn, "A", "b1", 30, false).unwrap();
+        }
+        // The server has something older: rule R5 says our page goes up.
+        let online = FakeServer {
+            remote: remote_found(3, "2026-08-28T09:00:00Z"),
+            outcome: UploadAttempt::Succeeded,
+        };
+        let outcome = app
+            .upload_outbox_with(&online, "A", "2026-08-28T12:00:00Z")
+            .await
+            .unwrap();
+        assert_eq!(outcome.uploaded, 1);
+        assert_eq!(outcome.status, "complete");
+        assert_eq!(
+            outcome.outbox.total, 0,
+            "the badge must clear with the queue"
+        );
+
+        // Offline: the same pass defers everything and loses nothing.
+        {
+            let conn = store::open(&db).unwrap();
+            store::read_progress::mark_read(&conn, "A", "b2").unwrap();
+        }
+        let offline = FakeServer {
+            remote: Refetch::Unreachable,
+            outcome: UploadAttempt::Retryable,
+        };
+        let outcome = app
+            .upload_outbox_with(&offline, "A", "2026-08-28T12:00:00Z")
+            .await
+            .unwrap();
+        assert_eq!(outcome.uploaded, 0);
+        assert_eq!(outcome.retried, 1);
+        assert_eq!(outcome.outbox.total, 1);
+        assert_eq!(outcome.outbox.waiting, 1, "its deadline is on disk");
+        assert_eq!(outcome.outbox.pending, 0, "so it is not due yet");
+        cleanup_temp(&db);
+    }
+
+    #[tokio::test]
+    async fn a_failed_row_is_listed_until_the_ui_retries_it() {
+        let db = temp_db();
+        let app = App::new(&db);
+        let conn = store::open(&db).unwrap();
+        store::read_progress::upsert_local_read_progress(&conn, "A", "b1", 12, false).unwrap();
+        conn.execute(
+            "UPDATE pending_mutations SET state = 'failed', last_error = '400', retry_count = 0",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let status = app.outbox_status("A").unwrap();
+        assert_eq!(status.failed, 1);
+        assert_eq!(status.total, 1);
+        assert_eq!(status.failed_entries.len(), 1);
+        assert_eq!(status.failed_entries[0].entity_id, "b1");
+        assert_eq!(status.failed_entries[0].mutation_type, "READ_PROGRESS");
+        assert_eq!(status.failed_entries[0].last_error.as_deref(), Some("400"));
+        assert_eq!(status.failed_entries[0].state, "failed");
+
+        assert_eq!(app.retry_failed_mutations("A").unwrap(), 1);
+        let after = app.outbox_status("A").unwrap();
+        assert_eq!(after.failed, 0);
+        assert!(after.failed_entries.is_empty());
+        assert_eq!(after.pending, 1);
+        // Idempotent: nothing is left to hand back.
+        assert_eq!(app.retry_failed_mutations("A").unwrap(), 0);
+        cleanup_temp(&db);
+    }
+
+    /// What the scripted stream does once its frames have been dispatched.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Tail {
+        /// Up and quiet — what every idle tick looks like.
+        Idle,
+        /// The server closed it: the reconnect path owes a sweep.
+        Ends,
+    }
+
+    /// A scripted stream: handshakes on demand, then dispatches its frames.
+    struct FakeSource {
+        frames: VecDeque<SseEvent>,
+        tail: Tail,
+        refuse_handshake: bool,
+        closed: bool,
+    }
+
+    fn frame(kind: &str, book_id: &str) -> SseEvent {
+        SseEvent {
+            kind: kind.to_string(),
+            data: format!(r#"{{"bookId":"{book_id}"}}"#),
+            id: Some(format!("{kind}-1")),
+            retry_ms: None,
+        }
+    }
+
+    impl EventSource for FakeSource {
+        async fn open(&mut self, _last_event_id: Option<&str>) -> ApiResult<()> {
+            if self.refuse_handshake {
+                return Err(ApiError::ApiCompatibility {
+                    message: "/sse/v1/events is not an event stream".into(),
+                });
+            }
+            Ok(())
+        }
+
+        async fn next(&mut self) -> ApiResult<Option<SseEvent>> {
+            match self.frames.pop_front() {
+                Some(event) => Ok(Some(event)),
+                None => match self.tail {
+                    Tail::Idle => Err(ApiError::Idle),
+                    Tail::Ends => Ok(None),
+                },
+            }
+        }
+
+        fn close(&mut self) {
+            self.closed = true;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_event_refreshes_the_local_row_and_a_reconnect_sweeps_first() {
+        let db = temp_db();
+        let app = App::new(&db);
+        {
+            let conn = store::open(&db).unwrap();
+            store::books::save_books_batch(
+                &conn,
+                "A",
+                &[mirrored_book("b1", "Stale Title", 1, false)],
+            )
+            .unwrap();
+        }
+        let server = FakeServer {
+            remote: remote_found(1, "2026-08-28T09:00:00Z"),
+            outcome: UploadAttempt::Succeeded,
+        };
+        let mut source = FakeSource {
+            frames: VecDeque::new(),
+            tail: Tail::Idle,
+            refuse_handshake: false,
+            closed: false,
+        };
+        let mut conn = store::open(&db).unwrap();
+        // The caller's half of the round trip: every tick hands back what the
+        // last one returned.
+        let mut state = String::new();
+
+        // 1. First handshake: the stream is up and nothing has been missed.
+        let first = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &state,
+                "2026-08-28T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.phase, "connected");
+        assert_eq!(first.action, "idle", "a bare connect applies nothing");
+        assert!(!first.reconcile, "a cold start owes no sweep");
+        assert!(first.keep_socket, "the stream stays parked");
+        state = first.state_json.clone();
+
+        // 2. A hint re-reads the entity: the local row changes, and the event
+        //    payload never becomes the UI's data.
+        source.frames.push_back(frame("BookChanged", "b1"));
+        let second = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &state,
+                "2026-08-28T12:00:02Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.action, "applied");
+        assert_eq!(second.dirty_books, vec!["b1".to_string()]);
+        assert_eq!(second.books_written, 1);
+        drop(conn);
+        let detail = app.book_detail("A", "b1").unwrap().unwrap();
+        assert_eq!(
+            detail.title, "Fetched Title",
+            "the hint must be re-fetched through the API"
+        );
+        conn = store::open(&db).unwrap();
+        state = second.state_json.clone();
+
+        // 3. A quiet tick leaves the session exactly where it was.
+        let third = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &state,
+                "2026-08-28T12:00:04Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(third.action, "idle");
+        assert_eq!(third.phase, "connected");
+        assert!(third.keep_socket);
+        state = third.state_json.clone();
+
+        // 4. The stream ended: freshness loss, and a dead socket is not parked.
+        source.tail = Tail::Ends;
+        let fourth = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &state,
+                "2026-08-28T12:00:06Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(fourth.action, "backing-off");
+        assert_eq!(fourth.phase, "disconnected");
+        assert!(!fourth.keep_socket);
+        assert!(source.closed);
+        source.tail = Tail::Idle;
+        state = fourth.state_json.clone();
+
+        // 5. Reconnecting demands the sweep before a single hint is trusted.
+        let fifth = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &state,
+                "2026-08-28T12:00:10Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(fifth.action, "reconcile");
+        assert!(fifth.reconcile);
+        assert_eq!(fifth.phase, "reconciling");
+        assert!(fifth.keep_socket, "the gap is not the socket's fault");
+        // Asking twice is harmless while the caller still owes the sweep.
+        let sixth = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &fifth.state_json,
+                "2026-08-28T12:00:12Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(sixth.action, "reconcile");
+        assert!(sixth.dirty_books.is_empty(), "nothing applies mid-sweep");
+        state = sixth.state_json.clone();
+
+        // 6. The sweep ran, so the stream consumes again — and an event that
+        //    arrived in the meantime is not lost.
+        source.frames.push_back(frame("BookChanged", "b1"));
+        let seventh = app
+            .sse_poll_with(
+                &mut source,
+                &server,
+                &conn,
+                "A",
+                &app.sse_reconciled(state.clone()).unwrap(),
+                "2026-08-28T12:00:14Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(seventh.phase, "connected");
+        assert_eq!(seventh.dirty_books, vec!["b1".to_string()]);
+
+        // 7. A server with no usable stream degrades freshness only: it asks for
+        //    one sweep, then parks, and keeps saying so without demanding more.
+        let mut broken = FakeSource {
+            frames: VecDeque::new(),
+            tail: Tail::Idle,
+            refuse_handshake: true,
+            closed: false,
+        };
+        let parked = app
+            .sse_poll_with(&mut broken, &server, &conn, "A", "", "2026-08-28T12:00:16Z")
+            .await
+            .unwrap();
+        assert_eq!(parked.action, "reconcile");
+        assert_eq!(parked.phase, "reconcile_only");
+        assert_eq!(
+            parked.reason.as_deref(),
+            Some("/sse/v1/events is not an event stream")
+        );
+        let settled = app
+            .sse_poll_with(
+                &mut broken,
+                &server,
+                &conn,
+                "A",
+                &parked.state_json,
+                "2026-08-28T12:00:18Z",
+            )
+            .await
+            .unwrap();
+        assert_eq!(settled.action, "reconcile-only");
+        assert!(!settled.reconcile, "one sweep is enough");
+        drop(conn);
         cleanup_temp(&db);
     }
 }
