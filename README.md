@@ -41,7 +41,7 @@ Comic/
 | --- | --- |
 | Phase 0 | Architecture Vertical Slice（真实服务器 → SQLite → 封面墙） |
 | Phase 1 | Media Library（封面墙 / 搜索 / Home / Series Detail） |
-| Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理）— Stage 5 已落地 Bootstrap + Reconcile |
+| Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理）— Stage 5 Bootstrap + Reconcile，Stage 6 SSE + Mutation Outbox |
 | Phase 3 | Reader（单页 / 双页 / Webtoon） |
 | Phase 4 | Offline（缓存 / 下载 / 离线浏览） |
 | Phase 5 | Platform Polish（macOS / tvOS / visionOS） |
@@ -195,6 +195,45 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   bash scripts/e2e_stage5.sh
   ```
   勾选状态与实现位置见 [docs/stage5-checklist.md](docs/stage5-checklist.md)。
+
+## Stage 6 — SSE 与 Mutation Outbox
+
+补上同步引擎的后两半：**实时刷新**（Event Driven Sync）与**可靠的客户端写操作**
+（Mutation Upload）。完成条件：实时事件丢失不影响最终一致性，客户端写操作在异常退出与
+断网之后仍能恢复。
+
+- **SSE**（`api/sse.rs` + `sync/sse.rs` ↔ `KomgaAPI/SSEClient.swift`）：连
+  `GET /sse/v1/events`（1.26.3 源码核实，事件目录见
+  `specs/events/komga-sse-events.md`）。帧解析器逐字节处理 LF/CRLF/CR、被切断的
+  UTF-8、多行 `data:`、注释心跳 `:heartbeat`；退避复用 Outbox 那份共享策略
+  （base 2s / factor 2 / cap 300s），服务端 `retry:` 只能抬高下限。**重连后必须先跑一次
+  完整 Reconcile 再消费事件**，期间到达的帧只缓存不应用 —— 服务端从不发 `id:`，不存在续传。
+  握手不合格（非 200 / 不是 `text/event-stream`）就停在 `ReconcileOnly` 且不再重连：
+  实时性降级，正确性不降级。
+- **事件只给 id**：`classify` → `DirtySet` 合并 → `GET /api/v1/books/{id}` → 走既有镜像
+  写入路径进 SQLite → UI 重读本地库。认不出的事件一律「全局脏」，代价只是一次 Reconcile。
+- **Mutation Outbox**（`store/outbox.rs` + `sync/upload.rs` ↔ `KomgaStore+Outbox.swift` +
+  `KomgaSync/OutboxUpload.swift`）：Schema v7 加 `state` / `next_retry_at`；重试、指数退避、
+  `failed` 终态、同族合并（只保留用户最后一次表态）、重启恢复（到期时间是写在库里的绝对戳）、
+  成功后清理。故意不设 in-flight 标记：Komga 的进度写幂等，所以「at-least-once + 崩溃重放」
+  就是全部恢复机制。写端点按导出文档：`PATCH /api/v1/books/{id}/read-progress`
+  （`ReadProgressUpdateDto {page?, completed?}`，成功 204 **无 body**，因此不得伪造服务器
+  时间戳），Mark Unread 是同路径 `DELETE`。
+- **冲突规则写进 Behavior Contract**，两条偷懒解法被明确禁止且各有反例测试：不是
+  `Server Always Wins`（断网动作恢复后照旧上传），也不是统一 `max(page)`（判据只有
+  「谁的动作时间更晚」+「显式 Mark 压过被动进度」，于是本地 page 3 能覆盖服务器 page 90，
+  反之远端 page 3 也能覆盖本地 page 90）。R4 取的是 `readProgress.lastModified`，
+  不是不随进度推进的 `book.lastModified`。
+- **双端共享验收**：`specs/contracts/fixtures/outbox/{conflict,backoff,coalescing}.json` 与
+  `specs/contracts/fixtures/sse/{parse,handshake}.json` 是唯一数据源，Rust
+  （`store::outbox::contract_tests`、`tests/sse_contract.rs`）与 Swift 各加载同一批文件。
+- **验收**：
+  ```bash
+  bash scripts/e2e_stage6.sh      # 断网 → 阅读 → kill -9 → 重启 → 恢复网络 → 自动上传（以服务器 journal 为证）
+                                  # → 注入故障跑退避阶梯 / 400 / 401 → 真流 SSE 重连顺序 → Swift 同契约
+  bash scripts/verify.sh
+  ```
+  勾选状态与实现位置见 [docs/stage6-checklist.md](docs/stage6-checklist.md)。
 
 ## 文档入口
 

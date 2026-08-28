@@ -1,8 +1,9 @@
 # 同步引擎
 
 四部分：**BootstrapSync / ReconciliationSync / EventDrivenSync / MutationUploadSync**。
-Stage 5 落地了前两种，且**后两者不再被依赖**：即使 SSE 完全失效，Reconcile 也能把
-本地库收敛回正确状态。
+Stage 5 落地前两种，Stage 6 补齐后两种。Stage 5 那条完成条件在补齐之后**依然成立**：
+即使 SSE 完全失效（或被判定不可用而停在 `ReconcileOnly`），Reconcile 仍能把本地库收敛
+回正确状态 —— 这一点由带着 `"sse": "disabled"` 的共享场景契约持续守着。
 
 实现位置（两端同语义，逐字镜像同一套 DDL）：
 
@@ -13,6 +14,9 @@ Stage 5 落地了前两种，且**后两者不再被依赖**：即使 SSE 完全
 | Sync State | `store/sync_state.rs` | `KomgaStore/SyncStateRecord.swift` |
 | 删除传播 | `store/prune.rs` | `KomgaStore/Prune.swift` |
 | 场景重放 | `sync/scenario.rs` | `KomgaSync/SyncScenario.swift` |
+| SSE 解析 / 会话 | `api/sse.rs` + `sync/sse.rs` | `KomgaAPI/SSEClient.swift` |
+| Outbox 队列 | `store/outbox.rs` | `KomgaStore/KomgaStore+Outbox.swift` |
+| Mutation 上传 | `sync/upload.rs` + `api/mutation.rs` | `KomgaSync/OutboxUpload.swift` |
 
 ## Bootstrap Sync
 
@@ -85,40 +89,102 @@ Komga 删除 → Reconcile id 扫描发现缺失 → SQLite 级联删除 + delet
 `cause ∈ reconcile | cascade | event`。它记录「服务端已经没有了」这一事实，让迟到的
 SSE 事件或过期 Outbox 条目能被识别。
 
-## Event Driven Sync（下一阶段）
+## Event Driven Sync（Stage 6 已落地）
 
-SSE 端点 `/sse/v1/events`。事件只是「数据变了」的提示，不是可靠消息队列：
-`SSE Event → Mark Dirty → Targeted Reconcile → SQLite Update → UI Observe`。
-断开重连后必须先 Reconciliation Sync 再恢复事件订阅，禁止假设连接期间没漏事件。
-当前仅落地了 `sse_reconnected` 这个触发入口（走完整 Reconcile），事件流本身尚未接入。
+端点 `GET /sse/v1/events` —— 1.26.3 源码核实（`SseController.kt` 里
+`@GetMapping("sse/v1/events")`）；完整事件目录与三条关键限制见
+[specs/events/komga-sse-events.md](../specs/events/komga-sse-events.md)。
 
-## Mutation Outbox（下一阶段）
+| | Rust | Swift |
+| --- | --- | --- |
+| 帧解析 | `api/sse.rs::SseParser` | `KomgaAPI/SSEClient.swift` |
+| 连接 + 握手校验 | `api/sse.rs::SseClient` | 同上（`URLSession.bytes`） |
+| 会话状态机 | `sync/sse.rs::SseSession` + `pump` | `KomgaSync` 同名语义 |
+| 事件 → 动作 | `sync/sse.rs::{classify, DirtySet, apply_dirty}` | 同名语义 |
 
-本地先更新 → 写 `pending_mutations` → 后台上传 → 成功后删除。
-支持 READ_PROGRESS / MARK_READ / MARK_UNREAD。字段：id / server_id / entity_id /
-mutation_type / payload / created_at / retry_count / last_error。
-实体被远端删除时其镜像行被级联删掉，但**未上传的条目保留**：删除只是「这一轮没扫到」
-的推断，而 offset 分页在并发增删下可能错位；镜像行可以重新拉回，用户动作丢了不能。
-只有上传阶段拿到服务器确认（404/410）后才丢弃 `pending_mutations`。
+流程严格是「事件只给 id，内容回 API 拉」：
 
-## 阅读进度冲突（已实现在同步路径上）
+```text
+SSE Event → classify 取 Entity ID → DirtySet 合并 → GET /api/v1/books/{id} → SQLite 更新 → UI 重读本地库
+```
 
-镜像扫描在写入进度前会先判定本地是否有**未上传的用户意图**，规则见下方三条；
-判定实现于 `store/read_progress.rs::sync_write_for`，由
-`specs/contracts/fixtures/read-progress/offline-priority.json` 驱动测试。
+四条不靠约定、由测试钉住的规则：
+
+1. **重连后先 Reconcile，再消费事件**。`pump` 在 `Phase::Reconciling` 期间把帧
+   **缓存**而不是应用，`reconcile_done()` 之后才并入 dirty
+   （`a_reconnect_reconciles_before_any_event_is_applied`）。必须如此是因为服务端
+   **从不发 `id:`**（源码核实）：没有续传，`Last-Event-ID` 带回去也没东西可补。
+2. **退避复用 Outbox 那份共享策略**（base 2s / factor 2 / cap 300s），服务端 `retry:`
+   只能抬高下限（`the_server_retry_field_only_raises_the_floor`）。1.26.3 也根本不发
+   `retry:`，所以这套退避完全是客户端自己的责任。
+3. **握手不合格就退化成纯 Reconcile**：非 200、`Content-Type` 不是
+   `text/event-stream`、或超时收不到任何一帧 → `Phase::ReconcileOnly` 且**不再重连**
+   （`a_missing_route_parks_in_reconcile_only_without_a_retry_storm`）。实时性降级，
+   正确性不降级。
+4. **认不出的事件一律「全局脏」**（代价 = 一次 Reconcile）；`TaskQueueStatus` /
+   `SessionExpired` 与镜像无关，直接忽略。心跳是**注释帧** `:heartbeat`（15s 一次），
+   解析器把它计为「收到过帧」（证明连接活着）但不产生事件——空闲 ≠ 死连接。
+
+生命周期由 App 驱动，Rust 内部不起线程：`SseSession` 没有时钟，`pump` 每 tick 被调用
+一次，所以「后台断开、回前台立即重连并补一次 Reconcile」是显式状态迁移
+（`backgrounding_stops_it_and_foreground_retries_immediately`）。
+
+## Mutation Outbox（Stage 6 已落地）
+
+```text
+UI → SQLite(read_progress) → pending_mutations → Background Upload → Komga
+```
+
+| | Rust | Swift |
+| --- | --- | --- |
+| 队列读写 | `store/outbox.rs` | `KomgaStore/KomgaStore+Outbox.swift` |
+| 上传器 | `sync/upload.rs::upload_outbox` | `KomgaSync/OutboxUpload.swift` |
+| 写端点 | `api/mutation.rs`（`PATCH` / `DELETE` `read-progress`） | `KomgaTransport` |
+
+Schema **v7** 给 `pending_mutations` 加了 `state`（`pending|failed`）和绝对到期时间
+`next_retry_at`，两端同一份 DDL。**故意不设 in-flight 标记列**：Komga 的进度写幂等，
+所以「at-least-once + 崩溃后重放」就是全部恢复机制；退避到期时间存在库里，因此重启
+拿不到一次新的惩罚。
+
+规则细节全部在
+[specs/contracts/offline-mutation/README.md](../specs/contracts/offline-mutation/README.md)，
+`specs/contracts/fixtures/outbox/{conflict,backoff,coalescing}.json` 是唯一数据源，
+Rust 与 Swift 各自加载同一批文件断言（`store::outbox::contract_tests` ↔
+`OutboxContractTests`）。
+
+保留 Stage 5 的判断：**远端删除推断不丢队列**。级联删掉的是镜像行（可从服务器重新
+拉回），队列里没上传过的动作丢了就再也回不来；只有上传阶段自己拿到 `404/410` 才允许
+丢（`phase_gone` / `a_book_the_server_deleted_releases_its_queued_action`）。
 
 ## 阅读进度冲突
 
-- **Passive Progress**：可结合本地更新时间、Mutation 是否上传、服务端更新时间合并
-- **Explicit Mark Read**：优先级高于普通进度
+两条被明确禁止的偷懒解法，以及替代判据：
+
+- **不是 `Server Always Wins`**：断网期间的阅读/标记在恢复后照旧上传（规则 R5）。
+- **不是统一 `max(page)`**：页码大小不携带「谁更新」的信息。判据只有「谁的动作在时间上
+  更晚」，外加「显式表态优先于被动进度」（R2）。fixture 里两条反例各有测试
+  （`the_losing_side_is_never_chosen_because_its_page_is_bigger`）：
+  本地 page 3 且更晚 → 本地赢，覆盖服务器 page 90；远端 page 3 且更晚 → 远端赢，
+  覆盖本地 page 90。`MARK_UNREAD` 永远不会被远端的 page 50 复活。
+
+三条优先级（`specs/contracts/fixtures/read-progress/offline-priority.json`）：
+
+- **Passive Progress**：按本地动作时间 vs `readProgress.lastModified` 合并
+- **Explicit Mark Read**：优先级高于任何远端被动进度
 - **Explicit Mark Unread**：不能被 max(page) 类规则覆盖
 
-最终规则见 `specs/contracts/read-progress/`，由 Shared Fixture 验证两端行为一致。
+R4 比较的时间戳是 **`readProgress.lastModified`**，不是 `book.lastModified`：后者不随
+阅读进度推进（Stage 5 的增量写为了这点专门多比较了一次），用错就会对**所有**远端阅读
+失明。镜像侧的判定实现在 `store/read_progress.rs::sync_write_for`（有未上传意图时扫描
+不得改写），上传侧的判定在 `store/outbox.rs::decide`，两端各有一份同名 fixture 测试。
 
 ## 上传节流
 
 阅读中禁止每翻一页就请求：Page → Local DB → debounce/throttle → PATCH。
-App 被强杀前未上传的进度仍在 Outbox，下次启动继续上传。
+App 被强杀前未上传的进度仍在 Outbox，下次启动继续上传 —— 由
+`offline_actions_survive_a_kill_and_upload_after_recovery`（进程内重开同一个文件库）
+和 `scripts/e2e_stage6.sh` 第 1 步（**真的 `kill -9`** 掉离线阶段的进程，再用新进程
+打开同一个 SQLite 文件）两层验证。
 
 ## API 一致性门禁（`api/openapi.rs`）
 

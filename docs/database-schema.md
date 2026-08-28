@@ -12,9 +12,10 @@
   同步引擎每页开一次连接（`Connection` 不能跨 await 持有），规模测试里
   1000 series / 20000 books 一次扫描要开上千次连接
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
-- 当前 Schema 版本：**v6**（v2 新增 `app_state`；v3 新增 `thumbnails`；
+- 当前 Schema 版本：**v7**（v2 新增 `app_state`；v3 新增 `thumbnails`；
   v4 新增归一化筛选表 / 成员关系表 / 完整元数据列 / 服务器作用域 FTS；
   v5 为 `libraries` 补齐详情列；v6 让 `sync_state` 按实体类型记账并新增墓碑表；
+  v7 给 `pending_mutations` 加上 Outbox 消费所需的 `state` / `next_retry_at`；
   两端用幂等 `CREATE TABLE IF NOT EXISTS` + 受保护的 `ALTER TABLE ADD COLUMN`
   应用迁移并写 `PRAGMA user_version`）
 
@@ -26,6 +27,23 @@ read_progress / series_metadata / book_metadata / **sync_state (v6 复合主键)
 **thumbnails** / cache_entries /
 **series_genres / series_tags / series_authors / book_tags / book_authors /
 collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服务器作用域）
+
+## v7 变更（Mutation Outbox 可消费）
+
+`pending_mutations` 从「只记录」变成「可消费」，两列：
+
+| 列 | 作用 |
+| --- | --- |
+| `state`（取值 `pending` 或 `failed`，默认 `pending`） | `failed` 是**终态**：不再自动重试，只能被用户的新动作顶掉，或被显式重试清零 |
+| `next_retry_at`（绝对 RFC 3339 时间，NULL 表示立即可试） | 退避到期时间；**存在库里而不是内存计时器**，所以杀掉 App 重启不会把惩罚清零 |
+
+配套索引 `pending_mutations_due (server_id, state, next_retry_at)`：上传器每轮只问
+「现在有哪些到期该传的」，不该为一次退避扫全表。
+
+**故意没有 in-flight 标记列。** Komga 的 read-progress 写是幂等的
+（`PATCH {page, completed}` 或 `DELETE`），所以「至少一次 + 崩溃后重放」就是完整的
+恢复策略；加一个 `uploading` 状态只会引入「进程被杀时永远停在 uploading」这类需要
+额外清理的假状态。迁移沿用 v4/v5 那套「列存在才 ALTER」的 guard，两端 DDL 逐字一致。
 
 ## v6 变更（同步引擎）
 
