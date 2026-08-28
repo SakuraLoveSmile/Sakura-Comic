@@ -152,6 +152,12 @@ Schema **v7** 给 `pending_mutations` 加了 `state`（`pending|failed`）和绝
 Rust 与 Swift 各自加载同一批文件断言（`store::outbox::contract_tests` ↔
 `OutboxContractTests`）。
 
+真机实测还多出两条只有在跑真服务器时才会知道的规则（见契约里的「实测出来的传输事实」）：
+`page:0` 与 `{"completed":false}` 都会被 400 拒掉（→ R7 `drop_no_op`，不发包也不算失败），
+而 epub / 非 Divina pdf 的翻页进度**根本不能走 read-progress**（400 `epub book is not
+Divina compatible` → R8 `unsupported_format`：不发包，把行停靠并写明原因，而不是烧完
+退避阶梯去撞同一个 400）。Mark Read / Mark Unread 对两种版式都照常工作（实测 204）。
+
 保留 Stage 5 的判断：**远端删除推断不丢队列**。级联删掉的是镜像行（可从服务器重新
 拉回），队列里没上传过的动作丢了就再也回不来；只有上传阶段自己拿到 `404/410` 才允许
 丢（`phase_gone` / `a_book_the_server_deleted_releases_its_queued_action`）。
