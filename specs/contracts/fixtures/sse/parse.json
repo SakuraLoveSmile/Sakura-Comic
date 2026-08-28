@@ -1,0 +1,109 @@
+{
+  "description": "SSE frame parsing. `chunks` are the byte groups exactly as the transport would deliver them (an arbitrary split is part of the test). \\r and \\n are literal escapes. events[] is what must be dispatched, in order. A parser that reads line-by-line without buffering will pass most of these by accident - the split-chunk cases are the ones that catch it.",
+  "cases": [
+    {
+      "name": "minimal event, LF terminated",
+      "chunks": ["event: BookChanged\ndata: {\"bookId\":\"b1\"}\n\n"],
+      "events": [{"type": "BookChanged", "data": "{\"bookId\":\"b1\"}", "id": null, "retry": null}]
+    },
+    {
+      "name": "CRLF line endings",
+      "chunks": ["event: BookChanged\r\ndata: {}\r\n\r\n"],
+      "events": [{"type": "BookChanged", "data": "{}", "id": null, "retry": null}]
+    },
+    {
+      "name": "CR-only line endings",
+      "chunks": ["event: BookChanged\rdata: {}\r\r"],
+      "events": [{"type": "BookChanged", "data": "{}", "id": null, "retry": null}]
+    },
+    {
+      "name": "one frame split across three chunks",
+      "chunks": ["event: Series", "Changed\ndata: {\"ser", "iesId\":\"s1\"}\n\n"],
+      "events": [{"type": "SeriesChanged", "data": "{\"seriesId\":\"s1\"}", "id": null, "retry": null}]
+    },
+    {
+      "name": "the blank line between frames may be split so that only its LF lands in a chunk",
+      "chunks": ["data: a\n", "\ndata: b\n\n"],
+      "events": [{"type": "message", "data": "a", "id": null, "retry": null}, {"type": "message", "data": "b", "id": null, "retry": null}]
+    },
+    {
+      "name": "CRLF terminator split across the chunk boundary",
+      "chunks": ["data: a\r", "\n\r\n"],
+      "events": [{"type": "message", "data": "a", "id": null, "retry": null}]
+    },
+    {
+      "name": "multi-line data joins with a single newline",
+      "chunks": ["data: line1\ndata: line2\n\n"],
+      "events": [{"type": "message", "data": "line1\nline2", "id": null, "retry": null}]
+    },
+    {
+      "name": "exactly one space after the colon is stripped, extra spaces are kept",
+      "chunks": ["data:  two leading spaces\ndata:one\ndata: \n\n"],
+      "events": [{"type": "message", "data": " two leading spaces\none\n", "id": null, "retry": null}]
+    },
+    {
+      "name": "comment/heartbeat lines are ignored but must not swallow the event after them",
+      "chunks": [":hb\n:keepalive\n\nevent: BookAdded\ndata: {}\n\n"],
+      "events": [{"type": "BookAdded", "data": "{}", "id": null, "retry": null}]
+    },
+    {
+      "name": "a lone heartbeat frame with a trailing blank line dispatches nothing",
+      "chunks": [":hb\n\n"],
+      "events": []
+    },
+    {
+      "name": "event with no data field dispatches nothing (spec: empty data buffer -> do not dispatch)",
+      "chunks": ["event: BookChanged\n\n"],
+      "events": []
+    },
+    {
+      "name": "unknown fields are ignored",
+      "chunks": ["event: BookChanged\ncustom: whatever\ndata: {}\n\n"],
+      "events": [{"type": "BookChanged", "data": "{}", "id": null, "retry": null}]
+    },
+    {
+      "name": "field with no colon is treated as a field with an empty value, which still fills the data buffer",
+      "chunks": ["data\n\n"],
+      "events": [{"type": "message", "data": "", "id": null, "retry": null}]
+    },
+    {
+      "name": "id and retry are captured; retry is milliseconds",
+      "chunks": ["id: 42\nretry: 1500\nevent: TaskFinished\ndata: {}\n\n"],
+      "events": [{"type": "TaskFinished", "data": "{}", "id": "42", "retry": 1500}]
+    },
+    {
+      "name": "retry with a non-integer value is ignored, the connection keeps its own schedule",
+      "chunks": ["retry: soon\ndata: {}\n\n"],
+      "events": [{"type": "message", "data": "{}", "id": null, "retry": null}]
+    },
+    {
+      "name": "an id containing NUL is ignored, so last_event_id stays at the previous value",
+      "chunks": ["id: 7\ndata: {}\n\nid: a\u0000b\ndata: {}\n\n"],
+      "events": [
+        {"type": "message", "data": "{}", "id": "7", "retry": null},
+        {"type": "message", "data": "{}", "id": "7", "retry": null}
+      ]
+    },
+    {
+      "name": "two frames arriving in one chunk",
+      "chunks": ["data: one\n\ndata: two\n\n"],
+      "events": [{"type": "message", "data": "one", "id": null, "retry": null}, {"type": "message", "data": "two", "id": null, "retry": null}]
+    },
+    {
+      "name": "stream ends with a half frame: it must not be dispatched",
+      "chunks": ["data: complete\n\ndata: part"],
+      "events": [{"type": "message", "data": "complete", "id": null, "retry": null}],
+      "ends_open": true
+    },
+    {
+      "name": "a multi-byte UTF-8 character split across the chunk boundary must not garble",
+      "chunks": ["data: 进", "度\n\n"],
+      "events": [{"type": "message", "data": "进度", "id": null, "retry": null}]
+    },
+    {
+      "name": "Komga-shaped payload: data carries the whole JSON object with the entity id",
+      "chunks": ["event: SeriesChanged\ndata: {\"@type\":\"seriesChangedEvent\",\"seriesId\":\"s1\",\"libraryId\":\"l1\"}\n\n"],
+      "events": [{"type": "SeriesChanged", "data": "{\"@type\":\"seriesChangedEvent\",\"seriesId\":\"s1\",\"libraryId\":\"l1\"}", "id": null, "retry": null}]
+    }
+  ]
+}
