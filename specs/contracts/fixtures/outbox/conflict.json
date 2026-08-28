@@ -1,98 +1,432 @@
 {
   "description": "Conflict resolution before upload. Inputs are always: the queued intent, the local row's action time (local_updated_at), and the result of the mandatory Targeted Re-fetch. Output is one decision. FORBIDDEN shortcuts, pinned by the two anti-max cases and by offline-wins cases: (a) Server Always Wins, (b) max(page). Rules R1-R5 are matched in order, first hit wins. `packets` lists the exact wire calls the uploader must make, in order.",
-  "decisions": ["upload", "drop_success", "drop_remote_wins", "drop_gone", "defer"],
+  "decisions": [
+    "upload",
+    "drop_success",
+    "drop_remote_wins",
+    "drop_gone",
+    "defer",
+    "drop_no_op",
+    "unsupported_format"
+  ],
   "rules": {
     "R1": "refetch says the entity no longer exists -> drop_gone",
     "R2": "intent is an explicit MARK_READ / MARK_UNREAD -> upload unconditionally, a remote passive value never outranks an explicit mark",
     "R3": "server already equals the intent -> drop_success without sending a packet",
     "R4": "progressLastModified is strictly newer than local_updated_at -> drop_remote_wins (latest user action wins, decided by time only). The stamp is ReadProgressDto.lastModified - the progress row's own timestamp, `required` on the wire. BookDto.lastModified must NEVER be substituted: it does not advance when read progress changes, which would make R4 blind to every remote read.",
     "R5": "otherwise -> upload",
-    "R6": "refetch itself failed (transport/auth) -> defer, do not write blind; counted as a retryable failure"
+    "R6": "refetch itself failed (transport/auth) -> defer, do not write blind; counted as a retryable failure",
+    "R7": "passive progress with no page (or page 0) and completed=false says nothing the server can accept -> drop_no_op: no packet, queue cleared, counted as neither success nor failure",
+    "R8": "a passive page progress on a reflowable book (epub, or pdf that is not Divina compatible) cannot go through read-progress at all -> unsupported_format: no packet, row parked with that reason, never retried into a 400 storm. Mark Read / Mark Unread stay supported for every format."
   },
   "cases": [
     {
       "name": "R5 offline read beats an older, further-along server value (not max(page), not server-wins)",
-      "intent": {"type": "READ_PROGRESS", "page": 3, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 3,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T11:00:00Z",
-      "refetch": {"status": 200, "page": 90, "completed": false, "progressLastModified": "2026-08-28T10:00:00Z"},
-      "expected": {"decision": "upload", "packets": [{"method": "PATCH", "path": "/api/v1/books/book-1/read-progress", "body": {"page": 3, "completed": false}}]}
+      "refetch": {
+        "status": 200,
+        "page": 90,
+        "completed": false,
+        "progressLastModified": "2026-08-28T10:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "page": 3,
+              "completed": false
+            }
+          }
+        ]
+      }
     },
     {
       "name": "R4 remote action is strictly later -> remote wins even though its page is smaller (not max(page))",
-      "intent": {"type": "READ_PROGRESS", "page": 90, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 90,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:00:00Z",
-      "refetch": {"status": 200, "page": 3, "completed": false, "progressLastModified": "2026-08-28T11:00:00Z"},
-      "expected": {"decision": "drop_remote_wins", "packets": [], "local_row_after_mirror": {"page": 3, "completed": false}}
+      "refetch": {
+        "status": 200,
+        "page": 3,
+        "completed": false,
+        "progressLastModified": "2026-08-28T11:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "drop_remote_wins",
+        "packets": [],
+        "local_row_after_mirror": {
+          "page": 3,
+          "completed": false
+        }
+      }
     },
     {
       "name": "R5 the plain offline-reading case: server untouched since our base -> local wins",
-      "intent": {"type": "READ_PROGRESS", "page": 30, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 30,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 200, "page": 5, "completed": false, "progressLastModified": "2026-08-28T09:00:00Z"},
-      "expected": {"decision": "upload", "packets": [{"method": "PATCH", "path": "/api/v1/books/book-1/read-progress", "body": {"page": 30, "completed": false}}]}
+      "refetch": {
+        "status": 200,
+        "page": 5,
+        "completed": false,
+        "progressLastModified": "2026-08-28T09:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "page": 30,
+              "completed": false
+            }
+          }
+        ]
+      }
     },
     {
       "name": "R2 explicit MARK_READ beats a server value that is strictly newer",
-      "intent": {"type": "MARK_READ"},
+      "intent": {
+        "type": "MARK_READ"
+      },
       "local_updated_at": "2026-08-28T10:00:00Z",
-      "refetch": {"status": 200, "page": 12, "completed": false, "progressLastModified": "2026-08-28T11:00:00Z"},
-      "expected": {"decision": "upload", "packets": [{"method": "PATCH", "path": "/api/v1/books/book-1/read-progress", "body": {"completed": true}}]}
+      "refetch": {
+        "status": 200,
+        "page": 12,
+        "completed": false,
+        "progressLastModified": "2026-08-28T11:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "completed": true
+            }
+          }
+        ]
+      }
     },
     {
       "name": "R2 MARK_UNREAD is never resurrected by a remote passive progress (this is where max(page) would fail)",
-      "intent": {"type": "MARK_UNREAD"},
+      "intent": {
+        "type": "MARK_UNREAD"
+      },
       "local_updated_at": "2026-08-28T10:00:00Z",
-      "refetch": {"status": 200, "page": 50, "completed": true, "progressLastModified": "2026-08-28T11:00:00Z"},
-      "expected": {"decision": "upload", "packets": [{"method": "DELETE", "path": "/api/v1/books/book-1/read-progress", "body": null}]}
+      "refetch": {
+        "status": 200,
+        "page": 50,
+        "completed": true,
+        "progressLastModified": "2026-08-28T11:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "DELETE",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": null
+          }
+        ]
+      }
     },
     {
       "name": "R3 already applied - converge without spending a request",
-      "intent": {"type": "READ_PROGRESS", "page": 30, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 30,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 200, "page": 30, "completed": false, "progressLastModified": "2026-08-28T10:07:00Z"},
-      "expected": {"decision": "drop_success", "packets": []}
+      "refetch": {
+        "status": 200,
+        "page": 30,
+        "completed": false,
+        "progressLastModified": "2026-08-28T10:07:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "drop_success",
+        "packets": []
+      }
     },
     {
       "name": "R3 does not fire on a completed mismatch: page equal, completed differs",
-      "intent": {"type": "READ_PROGRESS", "page": 30, "completed": true},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 30,
+        "completed": true
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 200, "page": 30, "completed": false, "progressLastModified": "2026-08-28T09:00:00Z"},
-      "expected": {"decision": "upload", "packets": [{"method": "PATCH", "path": "/api/v1/books/book-1/read-progress", "body": {"page": 30, "completed": true}}]}
+      "refetch": {
+        "status": 200,
+        "page": 30,
+        "completed": false,
+        "progressLastModified": "2026-08-28T09:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "page": 30,
+              "completed": true
+            }
+          }
+        ]
+      }
     },
     {
       "name": "R1 server confirmed the book is gone -> drop the queued action",
-      "intent": {"type": "READ_PROGRESS", "page": 30, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 30,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 404},
-      "expected": {"decision": "drop_gone", "packets": []}
+      "refetch": {
+        "status": 404
+      },
+      "expected": {
+        "decision": "drop_gone",
+        "packets": []
+      }
     },
     {
       "name": "R6 refetch failed on the wire: never write blind",
-      "intent": {"type": "READ_PROGRESS", "page": 30, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 30,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 0, "error": "network"},
-      "expected": {"decision": "defer", "packets": [], "effect": {"retry_count": "+1", "state": "pending"}}
+      "refetch": {
+        "status": 0,
+        "error": "network"
+      },
+      "expected": {
+        "decision": "defer",
+        "packets": [],
+        "effect": {
+          "retry_count": "+1",
+          "state": "pending"
+        }
+      }
     },
     {
       "name": "R6 a rejected credential mid-upload defers without burning attempts",
-      "intent": {"type": "READ_PROGRESS", "page": 30, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 30,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 401},
-      "expected": {"decision": "defer", "packets": [], "effect": {"retry_count": "unchanged", "state": "pending", "run_status": "blocked_authentication"}}
+      "refetch": {
+        "status": 401
+      },
+      "expected": {
+        "decision": "defer",
+        "packets": [],
+        "effect": {
+          "retry_count": "unchanged",
+          "state": "pending",
+          "run_status": "blocked_authentication"
+        }
+      }
     },
     {
       "name": "R5 no mirrored server state at all (restored DB, never synced): local intent wins over dropping it",
-      "intent": {"type": "READ_PROGRESS", "page": 12, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 12,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:05:00Z",
-      "refetch": {"status": 200, "page": 40, "completed": false, "progressLastModified": null},
-      "expected": {"decision": "upload", "packets": [{"method": "PATCH", "path": "/api/v1/books/book-1/read-progress", "body": {"page": 12, "completed": false}}]}
+      "refetch": {
+        "status": 200,
+        "page": 40,
+        "completed": false,
+        "progressLastModified": null,
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "page": 12,
+              "completed": false
+            }
+          }
+        ]
+      }
     },
     {
       "name": "equal stamps are not 'newer': R4 does not fire, so the local action is uploaded",
-      "intent": {"type": "READ_PROGRESS", "page": 8, "completed": false},
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 8,
+        "completed": false
+      },
       "local_updated_at": "2026-08-28T10:00:00Z",
-      "refetch": {"status": 200, "page": 60, "completed": false, "progressLastModified": "2026-08-28T10:00:00Z"},
-      "expected": {"decision": "upload", "packets": [{"method": "PATCH", "path": "/api/v1/books/book-1/read-progress", "body": {"page": 8, "completed": false}}]}
+      "refetch": {
+        "status": 200,
+        "page": 60,
+        "completed": false,
+        "progressLastModified": "2026-08-28T10:00:00Z",
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "page": 8,
+              "completed": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "R7 a passive progress that never left page 0 is not uploadable and is not a failure",
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 0,
+        "completed": false
+      },
+      "local_updated_at": "2026-08-28T10:05:00Z",
+      "refetch": {
+        "status": 200,
+        "page": null,
+        "completed": false,
+        "progressLastModified": null,
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "drop_no_op",
+        "packets": []
+      }
+    },
+    {
+      "name": "R7b no page at all and not completed - same, nothing to say",
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": null,
+        "completed": false
+      },
+      "local_updated_at": "2026-08-28T10:05:00Z",
+      "refetch": {
+        "status": 200,
+        "page": null,
+        "completed": false,
+        "progressLastModified": null,
+        "mediaType": "application/zip"
+      },
+      "expected": {
+        "decision": "drop_no_op",
+        "packets": []
+      }
+    },
+    {
+      "name": "R8 an epub page turn must not be pushed at the read-progress endpoint",
+      "intent": {
+        "type": "READ_PROGRESS",
+        "page": 12,
+        "completed": false
+      },
+      "local_updated_at": "2026-08-28T10:05:00Z",
+      "refetch": {
+        "status": 200,
+        "page": 2,
+        "completed": false,
+        "progressLastModified": "2026-08-28T09:00:00Z",
+        "mediaType": "application/epub+zip"
+      },
+      "expected": {
+        "decision": "unsupported_format",
+        "packets": [],
+        "reason": "epub"
+      }
+    },
+    {
+      "name": "R8 still lets Mark Read through on an epub (measured 204)",
+      "intent": {
+        "type": "MARK_READ"
+      },
+      "local_updated_at": "2026-08-28T10:05:00Z",
+      "refetch": {
+        "status": 200,
+        "page": 2,
+        "completed": false,
+        "progressLastModified": "2026-08-28T11:00:00Z",
+        "mediaType": "application/epub+zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "PATCH",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": {
+              "completed": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "R8 still lets Mark Unread through on an epub (measured 204)",
+      "intent": {
+        "type": "MARK_UNREAD"
+      },
+      "local_updated_at": "2026-08-28T10:05:00Z",
+      "refetch": {
+        "status": 200,
+        "page": 138,
+        "completed": true,
+        "progressLastModified": "2026-08-28T11:00:00Z",
+        "mediaType": "application/epub+zip"
+      },
+      "expected": {
+        "decision": "upload",
+        "packets": [
+          {
+            "method": "DELETE",
+            "path": "/api/v1/books/book-1/read-progress",
+            "body": null
+          }
+        ]
+      }
     }
   ],
   "after_success": {
@@ -100,5 +434,16 @@
     "read_progress.mutation_pending": 0,
     "read_progress.server_updated_at": null,
     "note": "204 carries no body, so the server stamp is unknown until the next Reconcile. Writing a guessed stamp here would make R4 lie later."
+  },
+  "transport_reality_measured_on_the_live_server": {
+    "note": "Not inferable from the exported OpenAPI. Measured against 192.168.0.69:25600 with a real key, restoring every probe.",
+    "PATCH_read_progress": {
+      "page": "must be >= 1: {page:0} answers 400 with violations fieldName=page message 'must be greater than 0'",
+      "completed_false_alone": "400 {violations:[]} - unsetting completion without a page is not accepted",
+      "completed_true_alone": "204, and the server itself sets page = pagesCount (this is Mark Read; works for epub too)",
+      "reflowable_books": "400 'epub book is not Divina compatible' for any page value - epub progress belongs to PUT /api/v1/books/{id}/progression",
+      "image_books": "204 for {page:N>=1,completed:false} (a comic page turn)"
+    },
+    "DELETE_read_progress": "204 for both formats; the progress row returns to absent (Mark Unread)"
   }
 }

@@ -29,12 +29,23 @@ public struct RemoteProgress: Sendable, Equatable {
     public var page: Int64?
     public var completed: Bool
     public var lastModified: String?
+    /// `media.mediaType` of the same BookDto: which write endpoint is legal
+    /// depends on it (contract R8).
+    public var mediaType: String?
 
-    public init(page: Int64?, completed: Bool, lastModified: String?) {
+    public init(page: Int64?, completed: Bool, lastModified: String?, mediaType: String? = nil) {
         self.page = page
         self.completed = completed
         self.lastModified = lastModified
+        self.mediaType = mediaType
     }
+}
+
+/// Reflowable formats: Komga answers 400 "epub book is not Divina compatible"
+/// for a page-based write and expects the Progression API instead. Measured on
+/// the live server.
+public func outboxIsReflowable(_ mediaType: String?) -> Bool {
+    mediaType == "application/epub+zip" || mediaType == "application/pdf"
 }
 
 /// Outcome of the Targeted Re-fetch that must precede every upload.
@@ -75,6 +86,11 @@ public enum Decision: Sendable, Equatable {
     case dropRemoteWins
     /// Rule R1: the server confirmed the entity is gone.
     case dropGone
+    /// Rule R7: nothing the server can accept (no page / page 0, not completed).
+    case dropNoOp
+    /// Rule R8: a passive page progress on a reflowable book. Parked with a
+    /// reason instead of retried into a guaranteed 400.
+    case unsupportedFormat(reason: String)
     /// Do nothing, keep the row. Penalised rows advance the backoff.
     /// Rule R6: keep the row. `defer` is a Swift keyword, so the case is
     /// spelled `deferred`; the fixture still calls it `defer`.
@@ -88,6 +104,8 @@ public enum Decision: Sendable, Equatable {
         case .dropSuccess: return "drop_success"
         case .dropRemoteWins: return "drop_remote_wins"
         case .dropGone: return "drop_gone"
+        case .dropNoOp: return "drop_no_op"
+        case .unsupportedFormat: return "unsupported_format"
         case .deferred: return "defer"
         }
     }
@@ -124,7 +142,8 @@ public func requestFor(bookID: String, intent: Intent) -> WireRequest {
         return WireRequest(method: .patch, path: path, body: "{\"completed\":true}")
     case .progress(let page, let completed):
         var pairs: [String] = []
-        if let page {
+        // A page is only sent when it means something (the endpoint rejects 0).
+        if let page, page > 0 {
             pairs.append("\"page\":\(page)")
         }
         pairs.append("\"completed\":\(completed ? "true" : "false")")
@@ -172,8 +191,24 @@ public func decide(
         // R2: an explicit mark is uploaded unconditionally — including over a
         // server value that is strictly newer. R3's shortcut deliberately does
         // not apply: the point of a mark is that the server holds it now.
+        // Marks are also the only thing the endpoint takes for a reflowable
+        // book, so they are decided before R7/R8.
         if intent == .markRead || intent == .markUnread {
             return .upload(requestFor(bookID: bookID, intent: intent))
+        }
+        let page: Int64?
+        if case .progress(let requested, _) = intent { page = requested } else { page = nil }
+        // R7, both measured live: page 0 answers 400 "must be greater than 0",
+        // and {"completed":false} answers 400 with no violations at all.
+        if (page ?? 0) < 1 {
+            return .dropNoOp
+        }
+        // R8: for epub (and non-Divina pdf) a page number cannot go through this
+        // endpoint at all, whatever its value.
+        if outboxIsReflowable(remote.mediaType) {
+            return .unsupportedFormat(
+                reason: "\(remote.mediaType ?? "该格式") 的翻页进度需走 Progression API"
+            )
         }
         // R3
         if remoteMatches(remote, intent) {
@@ -231,6 +266,10 @@ public struct UploadSummary: Sendable, Equatable {
     public var remoteWins = 0
     /// Rule R1: the server confirmed the entity is gone.
     public var gone = 0
+    /// Rule R7: the intent said nothing uploadable; cleared without a request.
+    public var noOp = 0
+    /// Rule R8: the server cannot take this write for this format.
+    public var unsupportedFormat = 0
     public var retried = 0
     public var rejected = 0
     /// Rows still waiting for their backoff to elapse when the run started.
@@ -270,6 +309,18 @@ public enum OutboxUpload {
             case .dropGone:
                 try store.forget(serverID: serverID, bookID: entry.entityID)
                 summary.gone += 1
+            case .dropNoOp:
+                // R7: opening a book and putting it down is neither a success
+                // nor a failure — the queue just goes quiet.
+                try store.forget(serverID: serverID, bookID: entry.entityID)
+                summary.noOp += 1
+            case .unsupportedFormat(let reason):
+                // R8: park the row with the reason instead of spending the retry
+                // ladder on a 400 the server will keep giving.
+                try store.recordOutcome(
+                    entry: entry, attempt: .rejected, now: now, error: reason
+                )
+                summary.unsupportedFormat += 1
             case .dropSuccess:
                 try store.forget(serverID: serverID, bookID: entry.entityID)
                 summary.alreadyApplied += 1
@@ -448,16 +499,20 @@ public extension RemoteProgress {
     /// advances when another device reads — `book.lastModified` does not, which
     /// is exactly why using it here would make conflict rule R4 blind.
     init(of book: BookDTO) {
+        // The format rides along: which write endpoint is legal depends on it
+        // (contract R8), and this is the only place the DTO is read.
+        let mediaType = book.media?.mediaType
         guard let progress = book.readProgress else {
             // No progress row at all: the server has never been told anything,
             // so there is no stamp to lose against.
-            self.init(page: nil, completed: false, lastModified: nil)
+            self.init(page: nil, completed: false, lastModified: nil, mediaType: mediaType)
             return
         }
         self.init(
             page: progress.page.map(Int64.init),
             completed: progress.completed ?? false,
-            lastModified: progress.lastModified
+            lastModified: progress.lastModified,
+            mediaType: mediaType
         )
     }
 }

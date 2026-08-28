@@ -36,6 +36,10 @@ pub struct UploadSummary {
     pub remote_wins: usize,
     /// Rule R1: the server confirmed the entity is gone.
     pub gone: usize,
+    /// Rule R7: the intent said nothing uploadable; cleared without a request.
+    pub no_op: usize,
+    /// Rule R8: the server cannot take this write for this format.
+    pub unsupported_format: usize,
     pub retried: usize,
     pub rejected: usize,
     /// Rows still waiting for their backoff to elapse when the run started.
@@ -83,6 +87,16 @@ pub async fn upload_outbox<W: ProgressWriter + Sync>(
             Decision::DropGone => {
                 outbox::forget(conn, server_id, &entry.entity_id)?;
                 summary.gone += 1;
+            }
+            Decision::DropNoOp => {
+                outbox::forget(conn, server_id, &entry.entity_id)?;
+                summary.no_op += 1;
+            }
+            Decision::UnsupportedFormat { reason } => {
+                // Park it with the reason rather than spend the retry ladder on
+                // a 400 the server will keep giving.
+                outbox::park_unsupported(conn, &entry.id, &reason)?;
+                summary.unsupported_format += 1;
             }
             Decision::DropSuccess => {
                 outbox::forget(conn, server_id, &entry.entity_id)?;
@@ -266,6 +280,17 @@ mod tests {
             page: Some(page),
             completed,
             last_modified: Some(stamp.to_string()),
+            media_type: Some("application/zip".to_string()),
+        })
+    }
+
+    /// A reflowable book: same shape, different format (contract R8).
+    fn remote_epub(page: i64, stamp: &str) -> Refetch {
+        Refetch::Found(RemoteProgress {
+            page: Some(page),
+            completed: false,
+            last_modified: Some(stamp.to_string()),
+            media_type: Some("application/epub+zip".to_string()),
         })
     }
 
@@ -274,6 +299,7 @@ mod tests {
             page: server_updated_at,
             completed: false,
             last_modified: None,
+            media_type: None,
         }
     }
 
@@ -425,6 +451,52 @@ mod tests {
         assert_eq!(page, 91, "the local row converges on the server value");
     }
 
+    /// R8, at the uploader level: an epub page turn is parked with a reason and
+    /// never sent, so it cannot burn the retry ladder on a guaranteed 400.
+    #[tokio::test]
+    async fn a_reflowable_page_progress_is_parked_not_sent() {
+        let conn = open_in_memory().unwrap();
+        read_progress::upsert_local_read_progress(&conn, "A", "b1", 12, false).unwrap();
+        let server = ScriptedServer::default();
+        server.serve("b1", vec![remote_epub(2, "2026-08-28T09:00:00Z")]);
+        server.then(vec![Attempt::Succeeded]);
+        let summary = upload_outbox(&conn, "A", &server, "2026-08-28T12:00:00Z")
+            .await
+            .unwrap();
+        assert_eq!(summary.unsupported_format, 1, "summary: {summary:?}");
+        assert_eq!(summary.uploaded, 0);
+        assert!(
+            server.sent().is_empty(),
+            "R8 must not put a packet on the wire"
+        );
+        let entry = outbox::queued_for_book(&conn, "A", "b1")
+            .unwrap()
+            .expect("kept for the UI");
+        assert_eq!(entry.state, outbox::STATE_FAILED);
+        assert!(entry.last_error.unwrap().contains("epub"));
+    }
+
+    /// R7: opening a book and putting it down again is not an upload, and it is
+    /// not a failure either — the queue must simply go quiet.
+    #[tokio::test]
+    async fn a_progress_with_nothing_to_say_is_dropped_quietly() {
+        let conn = open_in_memory().unwrap();
+        read_progress::upsert_local_read_progress(&conn, "A", "b1", 0, false).unwrap();
+        let server = ScriptedServer::default();
+        server.serve("b1", vec![remote(0, false, "2026-08-28T09:00:00Z")]);
+        let summary = upload_outbox(&conn, "A", &server, "2026-08-28T12:00:00Z")
+            .await
+            .unwrap();
+        assert_eq!(summary.no_op, 1, "summary: {summary:?}");
+        assert!(server.sent().is_empty());
+        assert_eq!(
+            outbox::counts(&conn, "A", "2026-08-28T12:00:00Z")
+                .unwrap()
+                .total(),
+            0
+        );
+    }
+
     #[tokio::test]
     async fn a_book_the_server_deleted_releases_its_queued_action() {
         let conn = open_in_memory().unwrap();
@@ -538,6 +610,7 @@ mod tests {
                 page: Some(7),
                 completed: true,
                 last_modified: Some("2026-08-28T10:00:00Z".to_string()),
+                media_type: Some("application/zip".to_string()),
             },
         );
         let progress = remote_of(&book);

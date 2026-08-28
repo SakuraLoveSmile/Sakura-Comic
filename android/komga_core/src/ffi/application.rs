@@ -2464,6 +2464,7 @@ mod tests {
             page: Some(page),
             completed: false,
             last_modified: Some(stamp.to_string()),
+            media_type: Some("application/zip".to_string()),
         })
     }
 

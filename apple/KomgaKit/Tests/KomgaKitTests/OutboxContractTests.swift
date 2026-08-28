@@ -83,9 +83,10 @@ final class OutboxContractTests: XCTestCase {
         var page: Int64?
         var completed: Bool?
         var progressLastModified: String?
+        var mediaType: String?
 
         enum CodingKeys: String, CodingKey {
-            case status, page, completed
+            case status, page, completed, mediaType
             case progressLastModified = "progressLastModified"
         }
     }
@@ -291,7 +292,8 @@ final class OutboxContractTests: XCTestCase {
                 RemoteProgress(
                     page: value.page,
                     completed: value.completed ?? false,
-                    lastModified: value.progressLastModified
+                    lastModified: value.progressLastModified,
+                    mediaType: value.mediaType
                 )
             )
         case 404, 410: return .notFound
