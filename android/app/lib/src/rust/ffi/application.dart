@@ -255,6 +255,101 @@ class FilterOptions {
           statuses == other.statuses;
 }
 
+/// One queued client write, in the shape the UI lists it under the badge.
+class OutboxEntryDto {
+  final String id;
+  final String entityId;
+  final String mutationType;
+  final PlatformInt64 retryCount;
+  final String? lastError;
+
+  /// `pending` | `failed`.
+  final String state;
+  final String? nextRetryAt;
+  final String createdAt;
+
+  const OutboxEntryDto({
+    required this.id,
+    required this.entityId,
+    required this.mutationType,
+    required this.retryCount,
+    this.lastError,
+    required this.state,
+    this.nextRetryAt,
+    required this.createdAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      entityId.hashCode ^
+      mutationType.hashCode ^
+      retryCount.hashCode ^
+      lastError.hashCode ^
+      state.hashCode ^
+      nextRetryAt.hashCode ^
+      createdAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OutboxEntryDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          entityId == other.entityId &&
+          mutationType == other.mutationType &&
+          retryCount == other.retryCount &&
+          lastError == other.lastError &&
+          state == other.state &&
+          nextRetryAt == other.nextRetryAt &&
+          createdAt == other.createdAt;
+}
+
+/// The Outbox badge plus whatever has given up — the only part of the queue a
+/// user can act on.
+class OutboxStatusDto {
+  final String serverId;
+
+  /// Due right now; an upload pass would take these.
+  final PlatformInt64 pending;
+
+  /// Still waiting for a backoff deadline that is on disk, not in memory.
+  final PlatformInt64 waiting;
+  final PlatformInt64 failed;
+  final PlatformInt64 total;
+  final List<OutboxEntryDto> failedEntries;
+
+  const OutboxStatusDto({
+    required this.serverId,
+    required this.pending,
+    required this.waiting,
+    required this.failed,
+    required this.total,
+    required this.failedEntries,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      pending.hashCode ^
+      waiting.hashCode ^
+      failed.hashCode ^
+      total.hashCode ^
+      failedEntries.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OutboxStatusDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          pending == other.pending &&
+          waiting == other.waiting &&
+          failed == other.failed &&
+          total == other.total &&
+          failedEntries == other.failedEntries;
+}
+
 /// Readlist detail: row + its ordered books (paged).
 class ReadlistDetailRow {
   final String remoteId;
@@ -428,4 +523,140 @@ class SeriesDetailRow {
           tags == other.tags &&
           authors == other.authors &&
           collections == other.collections;
+}
+
+/// What one SSE tick reported. `dirtyBooks` are the ids this tick re-fetched
+/// into SQLite — the caller re-reads its list rather than applying a payload,
+/// because an event is a hint, never truth.
+class SsePollResult {
+  /// Feed this straight back into the next `sse_poll`.
+  final String stateJson;
+
+  /// `idle` | `applied` | `reconcile` | `backing-off` | `reconcile-only`.
+  final String action;
+
+  /// True when the caller must run a Reconcile (`sse_reconnected`) and then
+  /// hand the state back through `sse_reconciled`.
+  final bool reconcile;
+  final List<String> dirtyBooks;
+  final String phase;
+
+  /// Why the stream is parked (e.g. `/sse/v1/events` is not an event stream).
+  final String? reason;
+
+  /// Counts of the hints this tick turned into local rows.
+  final PlatformInt64 booksWritten;
+  final PlatformInt64 booksDeleted;
+
+  /// False once the parked stream is not worth keeping: a closed, failed or
+  /// handed-up stream owes a handshake that only the Rust side may run.
+  final bool keepSocket;
+
+  const SsePollResult({
+    required this.stateJson,
+    required this.action,
+    required this.reconcile,
+    required this.dirtyBooks,
+    required this.phase,
+    this.reason,
+    required this.booksWritten,
+    required this.booksDeleted,
+    required this.keepSocket,
+  });
+
+  @override
+  int get hashCode =>
+      stateJson.hashCode ^
+      action.hashCode ^
+      reconcile.hashCode ^
+      dirtyBooks.hashCode ^
+      phase.hashCode ^
+      reason.hashCode ^
+      booksWritten.hashCode ^
+      booksDeleted.hashCode ^
+      keepSocket.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SsePollResult &&
+          runtimeType == other.runtimeType &&
+          stateJson == other.stateJson &&
+          action == other.action &&
+          reconcile == other.reconcile &&
+          dirtyBooks == other.dirtyBooks &&
+          phase == other.phase &&
+          reason == other.reason &&
+          booksWritten == other.booksWritten &&
+          booksDeleted == other.booksDeleted &&
+          keepSocket == other.keepSocket;
+}
+
+/// What one upload pass did, and the queue it left behind: the caller needs
+/// both to refresh the badge without a second round trip.
+class UploadOutcomeDto {
+  final String serverId;
+  final PlatformInt64 considered;
+  final PlatformInt64 uploaded;
+
+  /// Converged without a request (rule R3).
+  final PlatformInt64 alreadyApplied;
+
+  /// Rule R4: a strictly later remote action won.
+  final PlatformInt64 remoteWins;
+
+  /// Rule R1: the server confirmed the entity is gone.
+  final PlatformInt64 gone;
+  final PlatformInt64 retried;
+  final PlatformInt64 rejected;
+  final PlatformInt64 blockedAuthentication;
+
+  /// `complete` | `blocked_authentication`.
+  final String status;
+  final OutboxStatusDto outbox;
+
+  const UploadOutcomeDto({
+    required this.serverId,
+    required this.considered,
+    required this.uploaded,
+    required this.alreadyApplied,
+    required this.remoteWins,
+    required this.gone,
+    required this.retried,
+    required this.rejected,
+    required this.blockedAuthentication,
+    required this.status,
+    required this.outbox,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      considered.hashCode ^
+      uploaded.hashCode ^
+      alreadyApplied.hashCode ^
+      remoteWins.hashCode ^
+      gone.hashCode ^
+      retried.hashCode ^
+      rejected.hashCode ^
+      blockedAuthentication.hashCode ^
+      status.hashCode ^
+      outbox.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is UploadOutcomeDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          considered == other.considered &&
+          uploaded == other.uploaded &&
+          alreadyApplied == other.alreadyApplied &&
+          remoteWins == other.remoteWins &&
+          gone == other.gone &&
+          retried == other.retried &&
+          rejected == other.rejected &&
+          blockedAuthentication == other.blockedAuthentication &&
+          status == other.status &&
+          outbox == other.outbox;
 }

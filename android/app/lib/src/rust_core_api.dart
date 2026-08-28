@@ -10,6 +10,13 @@ import 'rust/sync/full.dart';
 import 'rust/sync/reconcile.dart';
 import 'rust/store/sync_state.dart';
 
+// The Stage 6 surface is expressed in these generated types; re-exporting just
+// them keeps callers (repository, controllers) from pulling in the whole
+// generated model library, where names like `FilterOptions` collide with the
+// app's own view models.
+export 'rust/ffi/application.dart'
+    show OutboxEntryDto, OutboxStatusDto, SsePollResult, UploadOutcomeDto;
+
 /// In-memory stub so tests and the fallback UI path can run without FFI.
 class StubRustCoreApi extends RustCoreApi {
   StubRustCoreApi();
@@ -470,4 +477,90 @@ abstract class RustCoreApi {
     required String apiKey,
   }) async =>
       0;
+
+  // MARK: Stage 6 — Mutation Outbox + SSE
+
+  /// Drain everything due in the Outbox to Komga. A no-op when nothing is due,
+  /// and never destructive: a row is dropped only once the server confirms.
+  Future<UploadOutcomeDto> uploadOutbox({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) async =>
+      emptyUploadOutcome(serverId);
+
+  /// Queued-mutation counts for the badge (SQLite only, so it works offline).
+  Future<OutboxStatusDto> outboxStatus({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      emptyOutboxStatus(serverId);
+
+  /// Hand every given-up row back to the retry machine.
+  Future<int> retryFailedMutations({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      0;
+
+  /// One bounded step of the event stream. `stateJson` is the session as the
+  /// previous call returned it (empty on the first tick); it is opaque here on
+  /// purpose — the reconnect schedule lives in the core, not in the UI.
+  Future<SsePollResult?> ssePoll({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+    required String stateJson,
+  }) async =>
+      null;
+
+  /// Tell the core the owed sweep has run, so buffered events may be applied.
+  Future<String> sseReconciled({
+    required String dbPath,
+    required String serverId,
+    required String stateJson,
+  }) async =>
+      stateJson;
+
+  /// Connectivity came back or the app is foreground again: make the stream due
+  /// now instead of waiting out the last backoff. The owed sweep is not skipped.
+  Future<String> sseResume({
+    required String dbPath,
+    required String serverId,
+    required String stateJson,
+  }) async =>
+      stateJson;
+
+  /// Drop the stream (screen disposed / server switched).
+  Future<void> sseStop({
+    required String dbPath,
+    required String serverId,
+  }) async {}
 }
+
+/// A zero upload outcome: test doubles and the no-server path use it.
+UploadOutcomeDto emptyUploadOutcome(String serverId) => UploadOutcomeDto(
+      serverId: serverId,
+      considered: 0,
+      uploaded: 0,
+      alreadyApplied: 0,
+      remoteWins: 0,
+      gone: 0,
+      retried: 0,
+      rejected: 0,
+      blockedAuthentication: 0,
+      status: 'complete',
+      outbox: emptyOutboxStatus(serverId),
+    );
+
+/// An empty Outbox status.
+OutboxStatusDto emptyOutboxStatus(String serverId) => OutboxStatusDto(
+      serverId: serverId,
+      pending: 0,
+      waiting: 0,
+      failed: 0,
+      total: 0,
+      failedEntries: const [],
+    );

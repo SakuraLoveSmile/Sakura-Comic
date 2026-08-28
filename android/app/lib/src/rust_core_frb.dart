@@ -499,4 +499,94 @@ class FrbRustCoreApi extends RustCoreApi {
       apiKey: apiKey,
     );
   }
+
+  // MARK: Stage 6 — Mutation Outbox + SSE
+
+  @override
+  Future<UploadOutcomeDto> uploadOutbox({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    return frb.uploadOutbox(
+      dbPath: dbPath,
+      serverId: serverId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+    );
+  }
+
+  @override
+  Future<OutboxStatusDto> outboxStatus({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.outboxStatus(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<int> retryFailedMutations({
+    required String dbPath,
+    required String serverId,
+  }) async {
+    final count = await frb.retryFailedMutations(
+      dbPath: dbPath,
+      serverId: serverId,
+    );
+    return count.toInt();
+  }
+
+  @override
+  Future<SsePollResult?> ssePoll({
+    required String dbPath,
+    required String serverId,
+    required String baseUrl,
+    required String apiKey,
+    required String stateJson,
+  }) {
+    return frb.ssePoll(
+      dbPath: dbPath,
+      serverId: serverId,
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+      stateJson: stateJson,
+    );
+  }
+
+  @override
+  Future<String> sseReconciled({
+    required String dbPath,
+    required String serverId,
+    required String stateJson,
+  }) {
+    // serverId rides inside the serialised session, so the transport does not
+    // take it again.
+    return frb.sseReconciled(
+      dbPath: dbPath,
+      stateJson: stateJson,
+    );
+  }
+
+  @override
+  Future<String> sseResume({
+    required String dbPath,
+    required String serverId,
+    required String stateJson,
+  }) {
+    // serverId rides inside the serialised session, so the transport does not
+    // take it again.
+    return frb.sseResume(
+      dbPath: dbPath,
+      stateJson: stateJson,
+    );
+  }
+
+  @override
+  Future<void> sseStop({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.sseStop(dbPath: dbPath, serverId: serverId);
+  }
 }

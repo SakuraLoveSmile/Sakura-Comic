@@ -118,6 +118,30 @@ abstract class LibraryRepository {
   Future<void> markRead({required String bookId}) async {}
 
   Future<void> markUnread({required String bookId}) async {}
+
+  // MARK: Stage 6 — Mutation Outbox + SSE
+
+  /// One bounded step of the event stream; `stateJson` is the session as the
+  /// previous call returned it. Null means the core has nothing to report.
+  Future<SsePollResult?> ssePoll({required String stateJson}) async => null;
+
+  /// Tell the core the owed sweep ran, so it may release buffered events.
+  Future<String> sseReconciled({required String stateJson}) async => stateJson;
+
+  /// Connectivity came back: make the stream due now.
+  Future<String> sseResume({required String stateJson}) async => stateJson;
+
+  /// Park the stream (screen disposed / server switched).
+  Future<void> sseStop() async {}
+
+  /// Drain everything due in the Outbox.
+  Future<UploadOutcomeDto> uploadOutbox() async => emptyUploadOutcome('');
+
+  /// Queued-mutation badge (SQLite only, so it works with the network down).
+  Future<OutboxStatusDto> outboxStatus() async => emptyOutboxStatus('');
+
+  /// Hand every given-up row back to the retry machine.
+  Future<int> retryFailedMutations() async => 0;
 }
 
 /// In-memory stub so the grid UI can be built and tested without FFI.
@@ -648,6 +672,7 @@ class RustLibraryRepository extends LibraryRepository {
     await _api.setReadProgress(
       dbPath: dbPath, serverId: serverId, bookId: bookId, page: page, completed: completed,
     );
+    _scheduleUpload();
   }
 
   @override
@@ -655,6 +680,7 @@ class RustLibraryRepository extends LibraryRepository {
     final serverId = await _activeServerId();
     if (serverId == null) return;
     await _api.markRead(dbPath: dbPath, serverId: serverId, bookId: bookId);
+    _scheduleUpload();
   }
 
   @override
@@ -662,7 +688,89 @@ class RustLibraryRepository extends LibraryRepository {
     final serverId = await _activeServerId();
     if (serverId == null) return;
     await _api.markUnread(dbPath: dbPath, serverId: serverId, bookId: bookId);
+    _scheduleUpload();
   }
+
+  // MARK: Stage 6 — Mutation Outbox + SSE
+
+  @override
+  Future<SsePollResult?> ssePoll({required String stateJson}) async {
+    final credential = await _activeCredential();
+    if (credential == null) return null;
+    final (profile, apiKey) = credential;
+    return _api.ssePoll(
+      dbPath: dbPath,
+      serverId: profile.id,
+      baseUrl: profile.baseUrl,
+      apiKey: apiKey,
+      stateJson: stateJson,
+    );
+  }
+
+  @override
+  Future<String> sseReconciled({required String stateJson}) async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return stateJson;
+    return _api.sseReconciled(dbPath: dbPath, serverId: serverId, stateJson: stateJson);
+  }
+
+  @override
+  Future<String> sseResume({required String stateJson}) async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return stateJson;
+    return _api.sseResume(dbPath: dbPath, serverId: serverId, stateJson: stateJson);
+  }
+
+  @override
+  Future<void> sseStop() async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return;
+    await _api.sseStop(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<UploadOutcomeDto> uploadOutbox() async {
+    final credential = await _activeCredential();
+    if (credential == null) return emptyUploadOutcome('');
+    final (profile, apiKey) = credential;
+    final outcome = await _api.uploadOutbox(
+      dbPath: dbPath,
+      serverId: profile.id,
+      baseUrl: profile.baseUrl,
+      apiKey: apiKey,
+    );
+    debugPrint(
+      '[RustCore] uploadOutbox -> uploaded=${outcome.uploaded} retried=${outcome.retried} '
+      'failed=${outcome.outbox.failed} status=${outcome.status}',
+    );
+    return outcome;
+  }
+
+  @override
+  Future<OutboxStatusDto> outboxStatus() async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return emptyOutboxStatus('');
+    return _api.outboxStatus(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<int> retryFailedMutations() async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return 0;
+    return _api.retryFailedMutations(dbPath: dbPath, serverId: serverId);
+  }
+
+  /// 上传节流: a page turn is not a request. The write is already in SQLite and
+  /// the Outbox, so this only coalesces a burst of them into one drain.
+  void _scheduleUpload() {
+    _uploadDebounce?.cancel();
+    _uploadDebounce = Timer(_uploadDebounceWindow, () {
+      unawaited(uploadOutbox());
+    });
+  }
+
+  Timer? _uploadDebounce;
+  static const Duration _uploadDebounceWindow = Duration(seconds: 3);
 
   /// The profile to display: the active server, else the first one.
   Future<String?> _activeServerId() async {
