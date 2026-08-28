@@ -6,6 +6,7 @@ pub mod books;
 pub mod collections;
 pub mod fts;
 pub mod libraries;
+pub mod outbox;
 pub mod prune;
 pub mod query;
 pub mod read_progress;

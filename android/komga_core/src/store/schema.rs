@@ -6,7 +6,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 /// Bump on every migration; stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Individual DDL statements, applied in order. `CREATE TABLE IF NOT EXISTS`
 /// keeps existing databases untouched, so older installs get their missing
@@ -156,6 +156,9 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       cause TEXT NOT NULL DEFAULT 'reconcile',
       PRIMARY KEY (server_id, entity_type, remote_id)
     )",
+    // v7: `state` + `next_retry_at` make the Outbox consumable — a queued write
+    // survives a kill, and its backoff deadline is absolute so a restart cannot
+    // reset the penalty.
     "CREATE TABLE IF NOT EXISTS pending_mutations (
       id TEXT PRIMARY KEY,
       server_id TEXT NOT NULL,
@@ -164,8 +167,12 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       payload TEXT NOT NULL,
       created_at TEXT NOT NULL,
       retry_count INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT
+      last_error TEXT,
+      state TEXT NOT NULL DEFAULT 'pending',
+      next_retry_at TEXT
     )",
+    "CREATE INDEX IF NOT EXISTS pending_mutations_due
+       ON pending_mutations (server_id, state, next_retry_at)",
     "CREATE TABLE IF NOT EXISTS downloads (
       server_id TEXT NOT NULL,
       book_id TEXT NOT NULL,
@@ -296,6 +303,12 @@ pub const V5_ALTER_STATEMENTS: &[&str] = &[
     "ALTER TABLE libraries ADD COLUMN unavailable INTEGER NOT NULL DEFAULT 0",
 ];
 
+/// v6 → v7: the Outbox grew its retry/scheduling columns.
+pub const V7_ALTER_STATEMENTS: &[&str] = &[
+    "ALTER TABLE pending_mutations ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'",
+    "ALTER TABLE pending_mutations ADD COLUMN next_retry_at TEXT",
+];
+
 /// True when a table exists and has the given column.
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
     let mut stmt = conn.prepare(&format!(
@@ -389,6 +402,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let alters: Vec<&str> = V4_ALTER_STATEMENTS
         .iter()
         .chain(V5_ALTER_STATEMENTS)
+        .chain(V7_ALTER_STATEMENTS)
         .copied()
         .collect();
     for statement in &alters {
