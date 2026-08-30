@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/library_repository.dart';
+import 'src/reader_stress.dart';
 import 'src/rust_core_frb.dart';
 import 'src/server_manager.dart';
 import 'src/series_grid.dart';
@@ -9,7 +10,15 @@ import 'src/series_grid.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final (repository, manager, rustStatus) = await createServices();
-  runApp(ComicApp(repository: repository, serverManager: manager, rustStatus: rustStatus));
+  // Printed because the stress entry depends on it: this is the only way to see
+  // which intent extra the platform actually turned into the initial route.
+  debugPrint('BOOT route=${WidgetsBinding.instance.platformDispatcher.defaultRouteName}');
+  runApp(ComicApp(
+    repository: repository,
+    serverManager: manager,
+    rustStatus: rustStatus,
+    initialRoute: WidgetsBinding.instance.platformDispatcher.defaultRouteName,
+  ));
 }
 
 /// Wires the UI to the Rust Core through flutter_rust_bridge; falls back to
@@ -51,22 +60,34 @@ class ComicApp extends StatelessWidget {
     this.repository = const StubLibraryRepository(),
     this.serverManager,
     this.rustStatus,
+    this.initialRoute = '/',
   });
 
   final LibraryRepository repository;
   final ServerManager? serverManager;
   final String? rustStatus;
+  final String initialRoute;
+
+  /// The Stage 8 device acceptance entry. `am start --es route /reader-stress…`
+  /// is the only way this screen is reachable; any other route launches the app
+  /// exactly as before. It drives the real reader, so what a device run measures
+  /// is the reading path itself and not a copy of it.
+  Widget get _home {
+    final stress = ReaderStressParams.parse(initialRoute);
+    if (stress != null) return ReaderStressScreen(params: stress);
+    return SeriesGridScreen(
+      repository: repository,
+      manager: serverManager,
+      rustStatus: rustStatus,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Comic',
       theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      home: SeriesGridScreen(
-        repository: repository,
-        manager: serverManager,
-        rustStatus: rustStatus,
-      ),
+      home: _home,
     );
   }
 }
