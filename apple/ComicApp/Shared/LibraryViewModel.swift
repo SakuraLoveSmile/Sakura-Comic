@@ -422,6 +422,34 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
+    /// Stage 7: build the reader model for one book.
+    ///
+    /// Returns nil when there is no active server to read pages from; the book
+    /// sheet turns that into a disabled 开始阅读 rather than a crash. The cache
+    /// and the store are the ones this view model already owns, so the reader
+    /// sees exactly the mirror the shelf shows.
+    func readerModel(for book: BookRecord) -> ReaderModel? {
+        guard let server else { return nil }
+        let auth = (try? authMethod(for: server)) ?? .apiKey("")
+        let transport = KomgaTransport(baseURL: server.baseURL, auth: auth)
+        let store = self.store
+        return ReaderModel(
+            store: store,
+            serverID: server.id,
+            bookID: book.remoteID,
+            title: book.title,
+            bookMediaType: book.mediaType,
+            baseURL: server.baseURL,
+            auth: auth,
+            disk: cache,
+            flush: {
+                // Draining the queue stays Stage 6's code path; the reader only
+                // nudges it so an explicit mark leaves immediately.
+                _ = try? await OutboxUpload.run(store: store, serverID: server.id, writer: transport)
+            }
+        )
+    }
+
     /// Background Upload Sync: drain whatever the Outbox has made due. A pass
     /// with an empty queue costs one indexed query, so the tick can be short.
     private func outboxTicker(serverID: String, transport: KomgaTransport) async {
