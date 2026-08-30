@@ -1,0 +1,337 @@
+{
+  "$comment": "Stage 7 reading-progress pipeline contract: Reader -> SQLite -> pending_mutations -> throttled upload to Komga. Shared by Rust (komga_core::reader::throttle + store::read_progress + sync::upload) and Swift (KomgaReader.ProgressThrottle). The whole point of this file is that flipping 40 pages must NOT produce 40 PATCHes, while still never losing the user's last statement even if the process dies between two of them.",
+  "version": 1,
+  "stateMachine": {
+    "state": "{ current: page|null, lastUploadAt: ms|null }",
+    "page(n)": "Clamp n into [1, pageCount]. If equal to current, nothing happens. Otherwise: one transaction writes reader_position + read_progress + one coalesced pending_mutations row (READ_PROGRESS). Then the throttle decides whether to attempt an upload.",
+    "markRead": "Write MARK_READ (coalesced over any pending READ_PROGRESS for the same book) and flush immediately.",
+    "markUnread": "Write MARK_UNREAD and flush immediately.",
+    "exit / background": "Flush if a mutation is pending, then close.",
+    "tick": "The periodic timer the UI owns. Flush only if a mutation is pending AND the interval has elapsed.",
+    "flush": "Drain due pending_mutations rows for this book through sync::upload::upload_outbox, in queue order, and record lastUploadAt = now. Wire bodies are exactly Stage 6's outbox::request_for output, so this contract cannot drift from the already-shipped conflict rules."
+  },
+  "rules": {
+    "T1-local-is-always-immediate": "Every real page change hits SQLite at once. The throttle gates NETWORK only, never durability — a kill -9 between two page turns loses nothing, because the outbox row was written with the position.",
+    "T2-coalescing-is-the-second-guard": "pending_mutations holds at most one row per book across the READ_PROGRESS/MARK_READ/MARK_UNREAD family (Stage 6 coalesce). A burst therefore queues one request, not one per turn, even if no flush ever happens.",
+    "T3-interval": "An upload attempt fires when a mutation is pending AND (lastUploadAt is null OR now - lastUploadAt >= intervalMs).",
+    "T4-explicit-statements-are-not-throttled": "markRead / markUnread / exit / background flush immediately. The user's deliberate act must not sit in a queue for the interval to expire.",
+    "T5-page-zero-never-leaves": "Canonical pages are 1-based; a page below 1 clamps to 1. Stage 6 rule R7: the endpoint rejects page 0 outright.",
+    "T6-completed-is-derived-not-declared": "Reaching the last page writes READ_PROGRESS with completed=true. That is NOT MARK_READ: the two produce different wire bodies and only the explicit user action is MARK_READ.",
+    "T7-backwards-is-legitimate": "Turning back to a lower page is a real state change (re-reading). Newest action wins, per the Stage 6 conflict rules — the reader must not suppress it as \"going backwards\".",
+    "T8-idempotent-exit": "Exit with nothing pending produces zero wire requests.",
+    "T9-reflowable-stays-out": "EPUB/PDF positions go to PUT /api/v1/books/{id}/progression and never appear in this stream (Stage 6 rule R8)."
+  },
+  "bodies": {
+    "$comment": "Verbatim from store/outbox.rs::request_for, restated here so both platforms assert the same wire bytes.",
+    "progress": "PATCH /api/v1/books/{bookId}/read-progress {\"page\":P,\"completed\":C}",
+    "progress-no-page": "PATCH ... {\"completed\":C} — only when P < 1, which T5 makes unreachable for image books",
+    "mark-read": "PATCH ... {\"completed\":true} — page deliberately omitted: an explicit mark must not rewrite the server's page",
+    "mark-unread": "DELETE ... (no body)"
+  },
+  "cases": [
+    {
+      "name": "first-page-then-quiet-exit",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": null },
+        "events": [
+          { "at": 0, "kind": "page", "page": 1 },
+          { "at": 9000, "kind": "exit" }
+        ]
+      },
+      "expect": {
+        "localWrites": 1,
+        "wireRequests": [
+          { "at": 9000, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 1, "completed": false } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 1,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "burst-of-12-turns-inside-one-interval-is-silence",
+      "$comment": "No flush event at all: the throttle must emit zero requests while the local rows keep up. This is the 禁止每页一请求 proof in its purest form.",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 2 },
+          { "at": 220, "kind": "page", "page": 3 },
+          { "at": 340, "kind": "page", "page": 4 },
+          { "at": 460, "kind": "page", "page": 5 },
+          { "at": 580, "kind": "page", "page": 6 },
+          { "at": 700, "kind": "page", "page": 7 },
+          { "at": 820, "kind": "page", "page": 8 },
+          { "at": 940, "kind": "page", "page": 9 },
+          { "at": 1060, "kind": "page", "page": 10 },
+          { "at": 1180, "kind": "page", "page": 11 },
+          { "at": 1300, "kind": "page", "page": 12 },
+          { "at": 1420, "kind": "page", "page": 13 }
+        ]
+      },
+      "expect": {
+        "localWrites": 12,
+        "wireRequests": [],
+        "outboxAfter": ["READ_PROGRESS"],
+        "finalPage": 13,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "tick-after-interval-carries-only-the-last-page",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 2 },
+          { "at": 1300, "kind": "page", "page": 3 },
+          { "at": 2400, "kind": "tick" },
+          { "at": 5100, "kind": "tick" }
+        ]
+      },
+      "expect": {
+        "localWrites": 2,
+        "wireRequests": [
+          { "at": 5100, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 3, "completed": false } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 3,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "mark-read-bypasses-the-throttle-and-eats-the-pending-progress",
+      "$comment": "T4 plus T2: one turn was queued, then the user explicitly marked read. Exactly one request leaves, and it is the mark-read body with NO page field — the pending page 7 must not ride along and rewrite the server's page.",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 7 },
+          { "at": 200, "kind": "markRead" }
+        ]
+      },
+      "expect": {
+        "localWrites": 1,
+        "wireRequests": [
+          { "at": 200, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "completed": true } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 7,
+        "finalCompleted": true
+      }
+    },
+    {
+      "name": "mark-unread-is-a-delete-and-not-a-page-write",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": 7, "lastUploadAt": 0 },
+        "events": [{ "at": 500, "kind": "markUnread" }]
+      },
+      "expect": {
+        "localWrites": 0,
+        "wireRequests": [
+          { "at": 500, "method": "DELETE", "path": "/api/v1/books/b1/read-progress", "body": null }
+        ],
+        "outboxAfter": [],
+        "finalPage": 0,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "last-page-completes-without-a-mark-read",
+      "$comment": "T6: the wire body carries both page and completed=true, which is distinguishable from the MARK_READ body on the server journal.",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": 39, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 40 },
+          { "at": 1500, "kind": "exit" }
+        ]
+      },
+      "expect": {
+        "localWrites": 1,
+        "wireRequests": [
+          { "at": 1500, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 40, "completed": true } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 40,
+        "finalCompleted": true
+      }
+    },
+    {
+      "name": "page-zero-from-a-stale-restore-clamps-to-one",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": 0 },
+        "events": [
+          { "at": 0, "kind": "page", "page": 0 },
+          { "at": 6000, "kind": "tick" }
+        ]
+      },
+      "expect": {
+        "localWrites": 1,
+        "wireRequests": [
+          { "at": 6000, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 1, "completed": false } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 1,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "page-beyond-the-end-clamps-to-the-last-page",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": 0 },
+        "events": [
+          { "at": 0, "kind": "page", "page": 500 },
+          { "at": 6000, "kind": "tick" }
+        ]
+      },
+      "expect": {
+        "localWrites": 1,
+        "wireRequests": [
+          { "at": 6000, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 40, "completed": true } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 40,
+        "finalCompleted": true
+      }
+    },
+    {
+      "name": "turning-back-is-a-real-change",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": 30, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 12 },
+          { "at": 6000, "kind": "tick" }
+        ]
+      },
+      "expect": {
+        "localWrites": 1,
+        "wireRequests": [
+          { "at": 6000, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 12, "completed": false } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 12,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "repeats-are-not-writes",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": 5, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 5 },
+          { "at": 200, "kind": "page", "page": 5 },
+          { "at": 300, "kind": "exit" }
+        ]
+      },
+      "expect": {
+        "localWrites": 0,
+        "wireRequests": [],
+        "outboxAfter": [],
+        "finalPage": 5,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "background-flushes-then-a-later-turn-is-a-fresh-window",
+      "input": {
+        "bookId": "b1",
+        "pageCount": 40,
+        "intervalMs": 5000,
+        "initial": { "current": null, "lastUploadAt": 0 },
+        "events": [
+          { "at": 100, "kind": "page", "page": 8 },
+          { "at": 900, "kind": "background" },
+          { "at": 2000, "kind": "page", "page": 9 },
+          { "at": 4000, "kind": "tick" },
+          { "at": 6100, "kind": "tick" }
+        ]
+      },
+      "expect": {
+        "localWrites": 2,
+        "wireRequests": [
+          { "at": 900, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 8, "completed": false } },
+          { "at": 6100, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 9, "completed": false } }
+        ],
+        "outboxAfter": [],
+        "finalPage": 9,
+        "finalCompleted": false
+      }
+    },
+    {
+      "name": "kill-9-mid-burst-replays-on-next-open",
+      "$comment": "Phase 1 ends with no flush event — the process dies. Phase 2 opens the same database: lastUploadAt is unknown again, so the very first opportunity drains the durable row. Losing the user's place is not an option even though 5 page turns were never uploaded.",
+      "phases": [
+        {
+          "input": {
+            "bookId": "b1",
+            "pageCount": 40,
+            "intervalMs": 5000,
+            "initial": { "current": null, "lastUploadAt": 0 },
+            "events": [
+              { "at": 100, "kind": "page", "page": 2 },
+              { "at": 200, "kind": "page", "page": 3 },
+              { "at": 300, "kind": "page", "page": 4 },
+              { "at": 400, "kind": "page", "page": 5 },
+              { "at": 500, "kind": "page", "page": 6 }
+            ]
+          },
+          "expect": {
+            "localWrites": 5,
+            "wireRequests": [],
+            "outboxAfter": ["READ_PROGRESS"],
+            "finalPage": 6,
+            "finalCompleted": false
+          }
+        },
+        {
+          "input": {
+            "bookId": "b1",
+            "pageCount": 40,
+            "intervalMs": 5000,
+            "$initialNote": "current 6 is read_progress.page as phase 1 left it; restore is the pending_mutations row.",
+            "initial": { "current": 6, "lastUploadAt": null },
+            "restore": [ { "type": "READ_PROGRESS", "page": 6, "completed": false } ],
+            "$restoreNote": "What pending_mutations still holds for this book: phase 1 queued it and never flushed it.",
+            "events": [{ "at": 60000, "kind": "tick" }]
+          },
+          "expect": {
+            "localWrites": 0,
+            "wireRequests": [
+              { "at": 60000, "method": "PATCH", "path": "/api/v1/books/b1/read-progress", "body": { "page": 6, "completed": false } }
+            ],
+            "outboxAfter": [],
+            "finalPage": 6,
+            "finalCompleted": false
+          }
+        }
+      ]
+    }
+  ]
+}

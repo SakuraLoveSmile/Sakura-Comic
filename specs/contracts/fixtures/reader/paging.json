@@ -1,0 +1,319 @@
+{
+  "$comment": "Stage 7 reader layout contract. Spread pairing + direction semantics, shared by Rust (komga_core::reader::paging) and Swift (KomgaReader.Paging). Both sides must produce byte-identical results for every case. Canonical page numbers are 1-based and come from the page manifest; nothing here is derived from a swipe or a pixel.",
+  "version": 1,
+  "glossary": {
+    "spread": "One display unit: the set of pages shown together. Pages inside a spread are listed in READING order, not on-screen order.",
+    "pairing": "How pages group into spreads. Depends only on mode + firstPageSingle + pageCount, never on direction.",
+    "scrollAxis": "\"horizontal\" for LTR/RTL paged reading, \"vertical\" for vertical paging and for webtoon.",
+    "reversed": "True only for RTL paged reading: the reading direction runs right-to-left, so a spread's pages appear on screen in reverse and the advance gesture mirrors.",
+    "advance": "Always means the NEXT spread in page order, in every direction. Direction never changes which page is next; it changes where it appears and which gesture reaches it."
+  },
+  "rules": {
+    "pairing.single": "[[1],[2],...,[N]] — also used by webtoon mode, which never pairs.",
+    "pairing.double.firstPageSingle": "[[1],[2,3],[4,5],...] — the cover/title page stands alone, then pairs from page 2.",
+    "pairing.double": "[[1,2],[3,4],[5,6],...] — pairs from page 1.",
+    "pairing.double.trailing": "An unpaired last page forms a one-page spread; a spread is never padded with a phantom page.",
+    "pairing.empty": "pageCount 0 yields zero spreads. The reader must show an empty/error state and must never render page 1.",
+    "scrollAxis": "vertical when mode == webtoon OR direction == vertical; otherwise horizontal.",
+    "reversed": "true only when direction == rtl AND scrollAxis == horizontal. Webtoon ignores RTL for layout because there is nothing to mirror without pairing.",
+    "visualLeftToRight": "horizontal + ltr: spread as listed. horizontal + rtl: spread reversed. vertical: spread listed top-to-bottom.",
+    "advanceSwipe": "horizontal + ltr: \"left\". horizontal + rtl: \"right\". vertical: \"up\".",
+    "retreatSwipe": "The opposite of advanceSwipe.",
+    "tapNext": "The screen half that advances: horizontal + ltr \"right\", horizontal + rtl \"left\", vertical \"bottom\".",
+    "tapPrev": "The opposite half of tapNext.",
+    "spreadIndexForPage": "The index of the spread containing that page. Reading position restore stores a canonical page, never a spread index, so this is recomputed after settings change."
+  },
+  "cases": [
+    {
+      "name": "single-ltr",
+      "input": { "pageCount": 6, "mode": "single", "direction": "ltr", "firstPageSingle": false },
+      "expect": {
+        "spreads": [[1], [2], [3], [4], [5], [6]],
+        "spreadCount": 6,
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "visualLeftToRight": [[1], [2], [3], [4], [5], [6]],
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadIndexForPage": { "1": 0, "3": 2, "6": 5 }
+      }
+    },
+    {
+      "name": "single-rtl",
+      "input": { "pageCount": 6, "mode": "single", "direction": "rtl", "firstPageSingle": false },
+      "expect": {
+        "spreads": [[1], [2], [3], [4], [5], [6]],
+        "spreadCount": 6,
+        "scrollAxis": "horizontal",
+        "reversed": true,
+        "visualLeftToRight": [[1], [2], [3], [4], [5], [6]],
+        "advanceSwipe": "right",
+        "retreatSwipe": "left",
+        "tapNext": "left",
+        "tapPrev": "right",
+        "spreadIndexForPage": { "1": 0, "3": 2, "6": 5 }
+      }
+    },
+    {
+      "name": "single-vertical",
+      "input": { "pageCount": 6, "mode": "single", "direction": "vertical", "firstPageSingle": false },
+      "expect": {
+        "spreads": [[1], [2], [3], [4], [5], [6]],
+        "spreadCount": 6,
+        "scrollAxis": "vertical",
+        "reversed": false,
+        "visualLeftToRight": [[1], [2], [3], [4], [5], [6]],
+        "advanceSwipe": "up",
+        "retreatSwipe": "down",
+        "tapNext": "bottom",
+        "tapPrev": "top",
+        "spreadIndexForPage": { "1": 0, "6": 5 }
+      }
+    },
+    {
+      "name": "double-ltr-pair-from-one",
+      "input": { "pageCount": 8, "mode": "double", "direction": "ltr", "firstPageSingle": false },
+      "expect": {
+        "spreads": [[1, 2], [3, 4], [5, 6], [7, 8]],
+        "spreadCount": 4,
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "visualLeftToRight": [[1, 2], [3, 4], [5, 6], [7, 8]],
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadIndexForPage": { "1": 0, "2": 0, "3": 1, "8": 3 }
+      }
+    },
+    {
+      "name": "double-ltr-first-page-single",
+      "input": { "pageCount": 9, "mode": "double", "direction": "ltr", "firstPageSingle": true },
+      "expect": {
+        "spreads": [[1], [2, 3], [4, 5], [6, 7], [8, 9]],
+        "spreadCount": 5,
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "visualLeftToRight": [[1], [2, 3], [4, 5], [6, 7], [8, 9]],
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadIndexForPage": { "1": 0, "2": 1, "3": 1, "9": 4 }
+      }
+    },
+    {
+      "name": "double-rtl-first-page-single",
+      "$comment": "The manga case. Reading order pairs page 2 with page 3; on screen page 2 sits on the RIGHT and page 3 on the left, so the eye reads right-to-left.",
+      "input": { "pageCount": 5, "mode": "double", "direction": "rtl", "firstPageSingle": true },
+      "expect": {
+        "spreads": [[1], [2, 3], [4, 5]],
+        "spreadCount": 3,
+        "scrollAxis": "horizontal",
+        "reversed": true,
+        "visualLeftToRight": [[1], [3, 2], [5, 4]],
+        "advanceSwipe": "right",
+        "retreatSwipe": "left",
+        "tapNext": "left",
+        "tapPrev": "right",
+        "spreadIndexForPage": { "1": 0, "2": 1, "3": 1, "5": 2 }
+      }
+    },
+    {
+      "name": "double-trailing-odd-page",
+      "input": { "pageCount": 7, "mode": "double", "direction": "ltr", "firstPageSingle": false },
+      "expect": {
+        "spreads": [[1, 2], [3, 4], [5, 6], [7]],
+        "spreadCount": 4,
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "visualLeftToRight": [[1, 2], [3, 4], [5, 6], [7]],
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadIndexForPage": { "6": 2, "7": 3 }
+      }
+    },
+    {
+      "name": "double-trailing-odd-page-first-single",
+      "$comment": "firstPageSingle with an even page count leaves the LAST page alone, not the first.",
+      "input": { "pageCount": 6, "mode": "double", "direction": "rtl", "firstPageSingle": true },
+      "expect": {
+        "spreads": [[1], [2, 3], [4, 5], [6]],
+        "spreadCount": 4,
+        "scrollAxis": "horizontal",
+        "reversed": true,
+        "visualLeftToRight": [[1], [3, 2], [5, 4], [6]],
+        "advanceSwipe": "right",
+        "retreatSwipe": "left",
+        "tapNext": "left",
+        "tapPrev": "right",
+        "spreadIndexForPage": { "6": 3 }
+      }
+    },
+    {
+      "name": "double-vertical-axis",
+      "$comment": "Vertical paging still honors double pairing: the pair stacks top-to-bottom in reading order and nothing is mirrored.",
+      "input": { "pageCount": 5, "mode": "double", "direction": "vertical", "firstPageSingle": false },
+      "expect": {
+        "spreads": [[1, 2], [3, 4], [5]],
+        "spreadCount": 3,
+        "scrollAxis": "vertical",
+        "reversed": false,
+        "visualLeftToRight": [[1, 2], [3, 4], [5]],
+        "advanceSwipe": "up",
+        "retreatSwipe": "down",
+        "tapNext": "bottom",
+        "tapPrev": "top",
+        "spreadIndexForPage": { "2": 0, "3": 1, "5": 2 }
+      }
+    },
+    {
+      "name": "double-with-unpairable-page",
+      "$comment": "A page whose dimensions are unknown cannot be proven to be a spread half (see manifest rule `dimensions`). It becomes a one-page spread and pairing resumes with the NEXT page.",
+      "input": {
+        "pageCount": 6,
+        "mode": "double",
+        "direction": "ltr",
+        "firstPageSingle": false,
+        "unpairable": [3]
+      },
+      "expect": {
+        "spreads": [[1, 2], [3], [4, 5], [6]],
+        "spreadCount": 4,
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "visualLeftToRight": [[1, 2], [3], [4, 5], [6]],
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadIndexForPage": { "2": 0, "3": 1, "4": 2, "5": 2, "6": 3 }
+      }
+    },
+    {
+      "name": "double-unpairable-first-page-makes-first-page-single-redundant",
+      "input": {
+        "pageCount": 5,
+        "mode": "double",
+        "direction": "rtl",
+        "firstPageSingle": true,
+        "unpairable": [1]
+      },
+      "expect": {
+        "spreads": [[1], [2, 3], [4, 5]],
+        "spreadCount": 3,
+        "scrollAxis": "horizontal",
+        "reversed": true,
+        "visualLeftToRight": [[1], [3, 2], [5, 4]],
+        "advanceSwipe": "right",
+        "retreatSwipe": "left",
+        "tapNext": "left",
+        "tapPrev": "right",
+        "spreadIndexForPage": { "1": 0, "2": 1, "5": 2 }
+      }
+    },
+    {
+      "name": "webtoon-ltr",
+      "input": { "pageCount": 4, "mode": "webtoon", "direction": "ltr", "firstPageSingle": true },
+      "expect": {
+        "spreads": [[1], [2], [3], [4]],
+        "spreadCount": 4,
+        "scrollAxis": "vertical",
+        "reversed": false,
+        "visualLeftToRight": [[1], [2], [3], [4]],
+        "advanceSwipe": "up",
+        "retreatSwipe": "down",
+        "tapNext": "bottom",
+        "tapPrev": "top",
+        "spreadIndexForPage": { "1": 0, "4": 3 }
+      }
+    },
+    {
+      "name": "webtoon-rtl-does-not-pair",
+      "$comment": "firstPageSingle is inert in webtoon mode and RTL does not reverse a single-page column.",
+      "input": { "pageCount": 4, "mode": "webtoon", "direction": "rtl", "firstPageSingle": true },
+      "expect": {
+        "spreads": [[1], [2], [3], [4]],
+        "spreadCount": 4,
+        "scrollAxis": "vertical",
+        "reversed": false,
+        "visualLeftToRight": [[1], [2], [3], [4]],
+        "advanceSwipe": "up",
+        "retreatSwipe": "down",
+        "tapNext": "bottom",
+        "tapPrev": "top",
+        "spreadIndexForPage": { "4": 3 }
+      }
+    },
+    {
+      "name": "single-page-book",
+      "input": { "pageCount": 1, "mode": "double", "direction": "rtl", "firstPageSingle": true },
+      "expect": {
+        "spreads": [[1]],
+        "spreadCount": 1,
+        "scrollAxis": "horizontal",
+        "reversed": true,
+        "visualLeftToRight": [[1]],
+        "advanceSwipe": "right",
+        "retreatSwipe": "left",
+        "tapNext": "left",
+        "tapPrev": "right",
+        "spreadIndexForPage": { "1": 0 }
+      }
+    },
+    {
+      "name": "empty-book",
+      "input": { "pageCount": 0, "mode": "single", "direction": "ltr", "firstPageSingle": false },
+      "expect": {
+        "spreads": [],
+        "spreadCount": 0,
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "visualLeftToRight": [],
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadIndexForPage": {}
+      }
+    },
+    {
+      "name": "long-book-500-pairs",
+      "$comment": "Boundary check for a 500-page book: 250 spreads, and the last spread must be reachable.",
+      "input": { "pageCount": 500, "mode": "double", "direction": "ltr", "firstPageSingle": false },
+      "expect": {
+        "scrollAxis": "horizontal",
+        "reversed": false,
+        "advanceSwipe": "left",
+        "retreatSwipe": "right",
+        "tapNext": "right",
+        "tapPrev": "left",
+        "spreadCount": 250,
+        "spreadIndexForPage": { "1": 0, "2": 0, "3": 1, "500": 249 },
+        "spreads": null,
+        "visualLeftToRight": null
+      }
+    },
+    {
+      "name": "long-book-501-first-single",
+      "$comment": "501 pages with a lone cover page: pages 2..501 = 500 pages = 250 pairs, +1 cover = 251.",
+      "input": { "pageCount": 501, "mode": "double", "direction": "rtl", "firstPageSingle": true },
+      "expect": {
+        "scrollAxis": "horizontal",
+        "reversed": true,
+        "advanceSwipe": "right",
+        "retreatSwipe": "left",
+        "tapNext": "left",
+        "tapPrev": "right",
+        "spreadCount": 251,
+        "spreadIndexForPage": { "1": 0, "2": 1, "3": 1, "501": 250 },
+        "spreads": null,
+        "visualLeftToRight": null
+      }
+    }
+  ]
+}

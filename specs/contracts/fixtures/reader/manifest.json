@@ -1,0 +1,212 @@
+{
+  "$comment": "Stage 7 page manifest contract. Normalizes Komga's PageDto array into the canonical page list the reader lays out and caches. Shared by Rust (komga_core::reader::manifest) and Swift (KomgaReader.Manifest).",
+  "version": 1,
+  "endpoints": {
+    "manifest": "GET /api/v1/books/{bookId}/pages -> array<PageDto> (no pagination envelope)",
+    "image": "GET /api/v1/books/{bookId}/pages/{pageNumber}?zero_based=false -> image bytes",
+    "$source": "specs/openapi/komga-openapi.yaml, Komga 1.26.3. The image endpoint's zero_based parameter defaults to false, i.e. 1-based; the reader always sends it explicitly so a server-side default change cannot silently shift every page."
+  },
+  "rules": {
+    "canonicalNumber": "Array position + 1. The manifest array order IS the reading order; PageDto.number is never trusted for ordering.",
+    "requestedNumber": "The canonical number, sent to the 1-based image endpoint.",
+    "drift": "Count of entries whose number != index + 1. Diagnostic only: it never reorders or drops pages, because a server that numbers oddly still returns the pages in reading order.",
+    "looksZeroBased": "True when the first entry's number is 0. Diagnostic only, same reason.",
+    "duplicates": "Kept as distinct canonical pages. A book can legitimately contain the same image twice; deduplicating would lose content.",
+    "size": "Only PageDto.sizeBytes is read (i64). PageDto.size is a display string with rounded 1024-based units, so parsing it would misreport; it is ignored. Unknown size is 0.",
+    "cacheAccounting": "The authoritative byte count is the on-disk file size after the write, never a manifest guess.",
+    "dimensions": "Missing or non-positive width/height becomes 0, meaning unknown. Unknown dimensions make a page ineligible for double-page pairing, because a page of unknown aspect cannot be proven to be a spread half.",
+    "empty": "An empty manifest is a hard error state: pageCount 0, paged false. The reader must not synthesize page 1.",
+    "paged": "True only for image/* pages. EPUB/PDF/CBZ-of-text report non-image media types and must fall back to the file/progression path instead of the image reader (Stage 6 rule R8: reflowable formats never write read-progress page numbers).",
+    "cacheKey": "safe_key(\"{serverId}-{bookId}-p{canonical}\") — same sanitizer as cover keys, so one directory and one LRU pool serve both.",
+    "cacheExtension": "Derived from the RESPONSE Content-Type, not from the manifest mediaType, because the server may transcode (?convert=jpeg) or content-negotiate. The recorded local path in SQLite is the only thing the UI may open; the UI never builds a path or a URL."
+  },
+  "contentTypes": {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/avif": ".avif",
+    "other": ".img"
+  },
+  "cases": [
+    {
+      "name": "komga-happy-path",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-1",
+        "pages": [
+          { "fileName": "001.jpg", "height": 1800, "mediaType": "image/jpeg", "number": 1, "size": "1,2 MB", "sizeBytes": 1258291, "width": 1200 },
+          { "fileName": "002.jpg", "height": 1800, "mediaType": "image/jpeg", "number": 2, "size": "980 KB", "sizeBytes": 1003520, "width": 1200 },
+          { "fileName": "003.png", "height": 2400, "mediaType": "image/png", "number": 3, "size": "4,1 MB", "sizeBytes": 4299161, "width": 1700 }
+        ]
+      },
+      "expect": {
+        "pageCount": 3,
+        "canonical": [1, 2, 3],
+        "drift": 0,
+        "looksZeroBased": false,
+        "paged": true,
+        "reflowable": false,
+        "widths": [1200, 1200, 1700],
+        "heights": [1800, 1800, 2400],
+        "sizeBytes": [1258291, 1003520, 4299161],
+        "cacheKeys": ["srv-1-book-1-p1", "srv-1-book-1-p2", "srv-1-book-1-p3"]
+      }
+    },
+    {
+      "name": "zero-based-looking-server-response",
+      "$comment": "If a server ever returns number starting at 0, canonical pages must STILL be 1..N and the image request must still use the 1-based endpoint, so page 1 of the reading order is not skipped.",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-2",
+        "pages": [
+          { "fileName": "p0.jpg", "height": 100, "mediaType": "image/jpeg", "number": 0, "size": "1 KB", "sizeBytes": 1024, "width": 100 },
+          { "fileName": "p1.jpg", "height": 100, "mediaType": "image/jpeg", "number": 1, "size": "1 KB", "sizeBytes": 1024, "width": 100 }
+        ]
+      },
+      "expect": {
+        "pageCount": 2,
+        "canonical": [1, 2],
+        "requestedNumbers": [1, 2],
+        "$driftNote": "Both entries disagree with their position: number 0 vs canonical 1, number 1 vs canonical 2.",
+        "drift": 2,
+        "looksZeroBased": true,
+        "paged": true,
+        "reflowable": false
+      }
+    },
+    {
+      "name": "gapped-and-duplicate-numbers",
+      "$comment": "Real archives produce junk numbering. Ordering and count come from position; nothing is dropped.",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-3",
+        "pages": [
+          { "fileName": "a.jpg", "height": 100, "mediaType": "image/jpeg", "number": 7, "size": "1 KB", "sizeBytes": 1024, "width": 100 },
+          { "fileName": "b.jpg", "height": 100, "mediaType": "image/jpeg", "number": 7, "size": "1 KB", "sizeBytes": 1024, "width": 100 },
+          { "fileName": "c.jpg", "height": 100, "mediaType": "image/jpeg", "number": 99, "size": "1 KB", "sizeBytes": 1024, "width": 100 }
+        ]
+      },
+      "expect": {
+        "pageCount": 3,
+        "canonical": [1, 2, 3],
+        "drift": 3,
+        "looksZeroBased": false,
+        "paged": true
+      }
+    },
+    {
+      "name": "unknown-dimensions-fall-out-of-pairing",
+      "$comment": "width/height absent => 0 => unknown. page 2 cannot join a spread, so pairing treats it as a one-page spread and the layout stays correct instead of overlapping.",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-4",
+        "pages": [
+          { "fileName": "a.jpg", "mediaType": "image/jpeg", "number": 1, "size": "1 KB", "sizeBytes": 1024 },
+          { "fileName": "b.jpg", "height": 1500, "mediaType": "image/jpeg", "number": 2, "size": "1 KB", "sizeBytes": 1024, "width": 1000 }
+        ]
+      },
+      "expect": {
+        "drift": 0,
+        "looksZeroBased": false,
+        "pageCount": 2,
+        "widths": [0, 1000],
+        "heights": [0, 1500],
+        "unknownDimensions": [1],
+        "paged": true,
+        "unpairable": [1]
+      }
+    },
+    {
+      "name": "empty-manifest",
+      "input": { "serverId": "srv-1", "bookId": "book-5", "pages": [] },
+      "expect": {
+        "pageCount": 0,
+        "canonical": [],
+        "drift": 0,
+        "looksZeroBased": false,
+        "paged": false,
+        "reflowable": false,
+        "emptyError": true
+      }
+    },
+    {
+      "name": "epub-is-reflowable",
+      "$comment": "An EPUB has no image pages. It must not enter the paged reader and must not write read-progress pages.",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-6",
+        "mediaType": "application/epub+zip",
+        "pages": [
+          { "fileName": "chapter1.xhtml", "mediaType": "application/xhtml+xml", "number": 1, "size": "8 KB", "sizeBytes": 8192 }
+        ]
+      },
+      "expect": {
+        "drift": 0,
+        "looksZeroBased": false,
+        "pageCount": 1,
+        "paged": false,
+        "reflowable": true,
+        "progressionApi": true,
+        "fallback": "epub"
+      }
+    },
+    {
+      "name": "pdf-is-paged-but-not-image",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-7",
+        "mediaType": "application/pdf",
+        "pages": [
+          { "fileName": "page-1", "mediaType": "application/pdf", "number": 1, "size": "40 KB", "sizeBytes": 40960 }
+        ]
+      },
+      "expect": {
+        "drift": 0,
+        "looksZeroBased": false,
+        "pageCount": 1,
+        "paged": false,
+        "reflowable": false,
+        "fallback": "pdf"
+      }
+    },
+    {
+      "name": "mixed-image-types-in-one-book",
+      "$comment": "A single archive can mix png and jpeg. The manifest mediaType is a hint only; the stored extension comes from the response Content-Type.",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-8",
+        "pages": [
+          { "fileName": "a.jpg", "height": 100, "mediaType": "image/jpeg", "number": 1, "size": "1 KB", "sizeBytes": 1024, "width": 100 },
+          { "fileName": "b.png", "height": 100, "mediaType": "image/png", "number": 2, "size": "1 KB", "sizeBytes": 1024, "width": 100 }
+        ]
+      },
+      "expect": {
+        "pageCount": 2,
+        "drift": 0,
+        "looksZeroBased": false,
+        "manifestMediaTypes": ["image/jpeg", "image/png"],
+        "paged": true,
+        "responseExtensions": { "image/jpeg": ".jpg", "image/png": ".png" }
+      }
+    },
+    {
+      "name": "missing-sizebytes-is-unknown-not-zero-error",
+      "input": {
+        "serverId": "srv-1",
+        "bookId": "book-9",
+        "pages": [
+          { "fileName": "a.jpg", "height": 100, "mediaType": "image/jpeg", "number": 1, "size": "1,2 MB", "width": 100 }
+        ]
+      },
+      "expect": {
+        "drift": 0,
+        "looksZeroBased": false,
+        "pageCount": 1,
+        "sizeBytes": [0],
+        "paged": true,
+        "$note": "size is a display string and is NOT parsed; 0 means unknown until the file lands on disk."
+      }
+    }
+  ]
+}
