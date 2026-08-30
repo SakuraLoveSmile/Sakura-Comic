@@ -1,3 +1,4 @@
+import 'reader_api.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -25,6 +26,13 @@ import 'rust_core_frb.dart';
 abstract class LibraryRepository {
   const LibraryRepository();
   Future<List<Series>> fetchSeries({int limit = 50, int offset = 0});
+
+  /// The reader's whole surface for one book, wired to the active server.
+  ///
+  /// Defaults to the in-memory reader so a build without the native library
+  /// (or a widget test) can still open the screen; the Rust-backed repository
+  /// overrides it with the FFI one.
+  Future<ReaderApi> readerApi({required String bookId}) async => InMemoryReaderApi();
 
   /// Cover file paths for the active server, resolved from SQLite
   /// (remote_id → local path). Missing covers are rendered as placeholders.
@@ -282,6 +290,24 @@ class RustLibraryRepository extends LibraryRepository {
     }
     final page = await _api.querySeries(dbPath: dbPath, serverId: serverId, limit: limit, offset: offset);
     return page.items.map(SeriesRowToSeries.toSeries).toList();
+  }
+
+  @override
+  Future<ReaderApi> readerApi({required String bookId}) async {
+    final credential = await _activeCredential();
+    if (credential == null) {
+      // No server to read from: an empty in-memory book keeps the screen
+      // honest (it can navigate) instead of throwing on open.
+      return InMemoryReaderApi(pageCount: 0);
+    }
+    final (profile, apiKey) = credential;
+    return FrbReaderApi(
+      dbPath: dbPath,
+      serverId: profile.id,
+      bookId: bookId,
+      baseUrl: profile.baseUrl,
+      apiKey: apiKey,
+    );
   }
 
   @override

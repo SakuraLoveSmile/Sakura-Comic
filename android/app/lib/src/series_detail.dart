@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'library_repository.dart';
+import 'reader_controller.dart';
+import 'reader_screen.dart';
+import 'reader_system_controls.dart';
 import 'models.dart';
 
 /// Series detail: metadata (Tags/Genres/Status/Authors/Publisher) + the
@@ -420,6 +423,12 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
             const SizedBox(height: 12),
             Row(
               children: [
+                FilledButton.icon(
+                  onPressed: () => _openReader(context, book),
+                  icon: const Icon(Icons.menu_book_outlined),
+                  label: const Text('开始阅读'),
+                ),
+                const SizedBox(width: 12),
                 FilledButton(
                   onPressed: () async {
                     await widget.repository.markRead(bookId: book.remoteId);
@@ -463,6 +472,26 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
       return '阅读状态：读到 ${book.progressPage} / ${book.pagesCount ?? '?'} 页（$pct%）';
     }
     return '阅读状态：未读';
+  }
+
+  /// Open the Stage 7 reader for one book. Everything the screen needs — the
+  /// page manifest, the cached files, the reading position — comes from the
+  /// core through ReaderApi; the widget never sees a URL.
+  Future<void> _openReader(BuildContext context, Book book) async {
+    final api = await widget.repository.readerApi(bookId: book.remoteId);
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ReaderScreen(
+          title: book.title,
+          controller: ReaderController(
+            api: api,
+            systemControls: ReaderSystemControls(),
+          ),
+        ),
+      ),
+    );
+    widget.onChanged?.call();
   }
 
   Widget _cell(String label, String value) {

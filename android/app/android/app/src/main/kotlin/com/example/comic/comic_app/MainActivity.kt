@@ -6,6 +6,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -34,6 +35,57 @@ import javax.crypto.spec.GCMParameterSpec
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Stage 7: the two reader settings that belong to the OS rather than to
+        // the database. Both are idempotent, and the reader restores the system
+        // brightness when it closes.
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            READER_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            val window = this.window
+            when (call.method) {
+                "setKeepScreenAwake" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    if (enabled) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    result.success(true)
+                }
+                "setBrightness" -> {
+                    val level = call.argument<Double>("level")
+                    val params = window.attributes
+                    // null (and anything out of range) hands the screen back to
+                    // the system, which is what -1 means on Android.
+                    params.screenBrightness =
+                        if (level == null || level < 0.05 || level > 1.0) {
+                            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                        } else {
+                            level.toFloat()
+                        }
+                    window.attributes = params
+                    result.success(true)
+                }
+                "totalMemory" -> {
+                    // Stage 8: the prefetch window is sized from physical RAM,
+                    // which only the platform knows. This is the device's total,
+                    // not the app's allowance — the Rust planner applies its own
+                    // fraction, floor and ceiling. 0 means "the platform will not
+                    // say", which the planner resolves to its conservative tier.
+                    val manager = this.getSystemService(Context.ACTIVITY_SERVICE)
+                        as? android.app.ActivityManager
+                    // `getMemoryInfo` fills a caller-allocated struct; there is no
+                    // `memoryInfo` property to read. A null manager (no
+                    // ACTIVITY_SERVICE, which should not happen) answers 0, and 0
+                    // means "unknown" to the planner rather than "no memory".
+                    val info = android.app.ActivityManager.MemoryInfo()
+                    manager?.getMemoryInfo(info)
+                    result.success(if (manager == null) 0L else info.totalMem)
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             CHANNEL,
@@ -68,6 +120,7 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val CHANNEL = "com.example.comic/auth_store"
+        const val READER_CHANNEL = "comic/reader"
     }
 }
 
