@@ -17,9 +17,101 @@ pub fn demo_cover_bytes(seed: &str) -> Vec<u8> {
     encode_rgb_png(WIDTH, HEIGHT, (r, g, b))
 }
 
-fn encode_rgb_png(width: u32, height: u32, (r, g, b): (u8, u8, u8)) -> Vec<u8> {
+/// Size of the fixture image for one page.
+///
+/// The width encodes the page number, so a reader can prove from the decoded
+/// bytes that page N is the page it asked for. An off-by-one between the
+/// manifest and the image endpoint is invisible in a wall of identical images
+/// and unmistakable here.
+pub fn page_dimensions(number: u32) -> (u32, u32) {
+    (64 + number, 96 + (number % 5))
+}
+
+/// Fixture page image (RGB PNG) for one canonical 1-based page number.
+pub fn demo_page_bytes(number: u32) -> Vec<u8> {
+    let (width, height) = page_dimensions(number);
+    let (r, g, b) = color_from_seed(&format!("page-{number}"));
+    encode_rgb_png(width, height, (r, g, b))
+}
+
+/// A page of *real* pixel dimensions, for the 4K and tall-strip stress phases.
+///
+/// The size is not simulated: a 3840x2160 RGB page here is the ~25 MB response a
+/// scanner-quality comic actually is, because the encoder emits stored (uncompressed)
+/// deflate blocks. That is what makes "one page larger than the whole memory tier"
+/// a case the cache has to answer to rather than a number in a comment.
+pub fn large_page_bytes(number: u32, width: u32, height: u32) -> Vec<u8> {
+    let (r, g, b) = color_from_seed(&format!("page-{number}"));
+    encode_rgb_png(width, height, (r, g, b))
+}
+
+/// A page padded with a legal ancillary `tEXt` chunk to at least `min_bytes`.
+///
+/// Padding rather than pixels, because a stress run often needs the *byte volume*
+/// of a big response ( eviction, budget, transfer cost ) without needing a big
+/// bitmap, and generating thousands of real 4K frames in a test would cost more
+/// than it measures.
+pub fn padded_page_bytes(number: u32, min_bytes: usize) -> Vec<u8> {
+    let (width, height) = page_dimensions(number);
+    large_page_bytes_padded(number, width, height, min_bytes)
+}
+
+/// A page of the given dimensions, padded to at least `min_bytes` **without
+/// changing what it declares itself to be**.
+///
+/// Padding has to ride in an ancillary chunk of the same image: a "4K page"
+/// implemented by falling back to a small bitmap plus filler would let a size
+/// ceiling be tested against a lie.
+pub fn large_page_bytes_padded(number: u32, width: u32, height: u32, min_bytes: usize) -> Vec<u8> {
+    let (r, g, b) = color_from_seed(&format!("page-{number}"));
+    let bare = large_page_len(width, height);
+    // A tEXt chunk costs 12 framing bytes plus "pad" + NUL + the filler itself.
+    let pad = min_bytes.saturating_sub(bare + 16);
+    encode_rgb_png_padded(width, height, (r, g, b), pad)
+}
+
+/// Exact length [`large_page_bytes_padded`] will produce.
+pub fn large_page_padded_len(width: u32, height: u32, min_bytes: usize) -> usize {
+    large_page_len(width, height).max(min_bytes)
+}
+
+/// Exact byte length [`large_page_bytes`] will produce, without producing it.
+/// The manifest endpoint has to declare a page's size for all 500 pages, and
+/// generating 500 real 4K frames to count their bytes is not a thing.
+pub fn large_page_len(width: u32, height: u32) -> usize {
+    let raw = (height as usize) * (1 + (width as usize) * 3);
+    let header = PNG_SIGNATURE.len()
+        + 12 + 13 // IHDR
+        + 12; // IEND
+    header + 12 + zlib_stored_len(raw)
+}
+
+fn zlib_stored_len(raw: usize) -> usize {
+    // Stored blocks: 2 zlib bytes, then 5 header bytes per block plus its
+    // payload, then the adler32 tail. At least one block, even for nothing.
+    let blocks = raw.div_ceil(0xFFFF).max(1);
+    2 + blocks * 5 + raw + 4
+}
+
+fn encode_rgb_png(width: u32, height: u32, rgb: (u8, u8, u8)) -> Vec<u8> {
+    encode_rgb_png_padded(width, height, rgb, 0)
+}
+
+fn encode_rgb_png_padded(
+    width: u32,
+    height: u32,
+    (r, g, b): (u8, u8, u8),
+    text_pad: usize,
+) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&PNG_SIGNATURE);
+
+    if text_pad > 0 {
+        // tEXt: keyword, NUL, then filler. Ancillary, so it may sit before IDAT.
+        let mut text = b"pad\x00".to_vec();
+        text.extend(std::iter::repeat(b'x').take(text_pad));
+        push_chunk(&mut out, b"tEXt", &text);
+    }
 
     let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&width.to_be_bytes());
@@ -31,11 +123,16 @@ fn encode_rgb_png(width: u32, height: u32, (r, g, b): (u8, u8, u8)) -> Vec<u8> {
     let stride = width as usize * 3;
     let pixel = [r, g, b];
     let mut raw = Vec::with_capacity((stride + 1) * height as usize);
-    for _ in 0..height {
-        raw.extend_from_slice(&[0]);
+    let row = {
+        let mut row = Vec::with_capacity(stride + 1);
+        row.push(0);
         for _ in 0..width {
-            raw.extend_from_slice(&pixel);
+            row.extend_from_slice(&pixel);
         }
+        row
+    };
+    for _ in 0..height {
+        raw.extend_from_slice(&row);
     }
     push_chunk(&mut out, b"IDAT", &zlib_stored(&raw));
     push_chunk(&mut out, b"IEND", &[]);
@@ -179,6 +276,41 @@ mod tests {
         (WIDTH, HEIGHT, idat)
     }
 
+    /// Walk the chunk stream of an image of any size, checking structure/CRCs.
+    fn parse_png_at(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+        assert_eq!(&bytes[..8], &PNG_SIGNATURE);
+        let mut pos = 8usize;
+        let mut width = 0u32;
+        let mut height = 0u32;
+        let mut idat = Vec::new();
+        let mut saw_iend = false;
+        while pos + 8 <= bytes.len() {
+            let len = u32::from_be_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            let kind = &bytes[pos + 4..pos + 8];
+            let data = &bytes[pos + 8..pos + 8 + len];
+            let expected =
+                u32::from_be_bytes(bytes[pos + 8 + len..pos + 12 + len].try_into().unwrap());
+            let mut crc_input = kind.to_vec();
+            crc_input.extend_from_slice(data);
+            assert_eq!(crc32(&crc_input), expected, "CRC of {:?}", kind);
+            match kind {
+                b"IHDR" => {
+                    width = u32::from_be_bytes(data[0..4].try_into().unwrap());
+                    height = u32::from_be_bytes(data[4..8].try_into().unwrap());
+                }
+                b"IDAT" => idat.extend_from_slice(data),
+                b"IEND" => {
+                    saw_iend = true;
+                    assert_eq!(pos + 12 + len, bytes.len(), "IEND is last");
+                }
+                _ => {}
+            }
+            pos += 12 + len;
+        }
+        assert!(saw_iend, "IEND present");
+        (width, height, idat)
+    }
+
     fn unzlib_stored(idat: &[u8]) -> Vec<u8> {
         assert_eq!(&idat[..2], &[0x78, 0x01], "zlib header");
         let mut pos = 2usize;
@@ -223,6 +355,55 @@ mod tests {
         assert_eq!(a, b, "same seed must produce identical bytes");
         let c = demo_cover_bytes("seed-b");
         assert_ne!(a, c, "different seeds must produce different bytes");
+    }
+
+    #[test]
+    fn padding_reaches_the_requested_volume_and_stays_valid() {
+        let padded = padded_page_bytes(4, 40_000);
+        assert!(padded.len() >= 40_000, "got {}", padded.len());
+        // Still a walkable PNG: signature, IHDR, tEXt, IDAT, IEND.
+        let (_w, _h, idat) = parse_png_at(&padded);
+        assert!(!idat.is_empty());
+        // Padding is an ancillary chunk, so the image data stays exactly what it
+        // was: the same page at the same dimensions, just heavier on the wire.
+        // Compared by length and checksum so a failure prints numbers, not 25 MB.
+        let plain_raw = unzlib_stored_idat(&demo_page_bytes(4));
+        let padded_raw = unzlib_stored(&idat);
+        assert_eq!(padded_raw.len(), plain_raw.len());
+        assert_eq!(adler32(&padded_raw), adler32(&plain_raw));
+    }
+
+    #[test]
+    fn the_declared_length_formula_is_exact() {
+        for (width, height) in [(64u32, 96u32), (100, 150), (1080, 2400)] {
+            let real = large_page_bytes(7, width, height).len();
+            assert_eq!(real, large_page_len(width, height), "{width}x{height}");
+        }
+        // The 4K case the stress phase uses: 2160 rows of 3840 RGB pixels plus a
+        // filter byte each. Just under 24 MiB, comfortably over 24 million bytes,
+        // and deliberately stated in both units because a MiB/MB slip is exactly
+        // the kind of error a size ceiling is made of.
+        let four_k = large_page_len(3840, 2160);
+        assert!(four_k > 24_000_000, "4K page is {four_k} bytes");
+        assert!(
+            four_k > 23 * 1024 * 1024 && four_k < 24 * 1024 * 1024,
+            "4K page is {four_k} bytes"
+        );
+    }
+
+    /// The IDAT payload of a page, for comparing a padded page against the plain
+    /// bytes of the same page number.
+    fn unzlib_stored_idat(bytes: &[u8]) -> Vec<u8> {
+        let (_w, _h, idat) = parse_png_at(bytes);
+        unzlib_stored(&idat)
+    }
+
+    #[test]
+    fn a_padded_page_still_reports_its_real_dimensions() {
+        let bytes = padded_page_bytes(2, 5_000);
+        let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        assert_eq!((width, height), page_dimensions(2));
     }
 
     #[test]

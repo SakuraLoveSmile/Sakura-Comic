@@ -105,6 +105,132 @@ class BookDetailRow {
           progressCompleted == other.progressCompleted;
 }
 
+/// What one cleanup sweep removed.
+class CacheCleanupDto {
+  final PlatformInt64 ghostRows;
+  final PlatformInt64 orphanFiles;
+  final PlatformInt64 staleParts;
+  final PlatformInt64 corrupt;
+  final PlatformInt64 kindRepaired;
+  final PlatformInt64 evicted;
+  final PlatformInt64 freedBytes;
+  final PlatformInt64 bytesAfter;
+
+  const CacheCleanupDto({
+    required this.ghostRows,
+    required this.orphanFiles,
+    required this.staleParts,
+    required this.corrupt,
+    required this.kindRepaired,
+    required this.evicted,
+    required this.freedBytes,
+    required this.bytesAfter,
+  });
+
+  @override
+  int get hashCode =>
+      ghostRows.hashCode ^
+      orphanFiles.hashCode ^
+      staleParts.hashCode ^
+      corrupt.hashCode ^
+      kindRepaired.hashCode ^
+      evicted.hashCode ^
+      freedBytes.hashCode ^
+      bytesAfter.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CacheCleanupDto &&
+          runtimeType == other.runtimeType &&
+          ghostRows == other.ghostRows &&
+          orphanFiles == other.orphanFiles &&
+          staleParts == other.staleParts &&
+          corrupt == other.corrupt &&
+          kindRepaired == other.kindRepaired &&
+          evicted == other.evicted &&
+          freedBytes == other.freedBytes &&
+          bytesAfter == other.bytesAfter;
+}
+
+/// Live cache occupancy, tier by tier.
+class CacheStatsDto {
+  final PlatformInt64 pageBytes;
+  final PlatformInt64 prefetchBytes;
+  final PlatformInt64 downloadBytes;
+  final PlatformInt64 poolBudgetBytes;
+  final PlatformInt64 memoryBytes;
+  final PlatformInt64 memoryPeakBytes;
+  final PlatformInt64 memoryEntries;
+  final PlatformInt64 memoryHits;
+  final PlatformInt64 memoryMisses;
+  final PlatformInt64 memoryEvictions;
+  final PlatformInt64 memoryRefused;
+  final PlatformInt64 diskBytes;
+  final PlatformInt64 ledgerBytes;
+
+  /// How many reading sessions the process is holding right now. The registry
+  /// is keyed `server|book` and lives for the process's lifetime, so an open
+  /// that is not paired with a close would accumulate one session per book
+  /// browsed in a sitting — unbounded growth in the exact sense Stage 8 exists
+  /// to rule out.
+  final PlatformInt64 openReaders;
+
+  const CacheStatsDto({
+    required this.pageBytes,
+    required this.prefetchBytes,
+    required this.downloadBytes,
+    required this.poolBudgetBytes,
+    required this.memoryBytes,
+    required this.memoryPeakBytes,
+    required this.memoryEntries,
+    required this.memoryHits,
+    required this.memoryMisses,
+    required this.memoryEvictions,
+    required this.memoryRefused,
+    required this.diskBytes,
+    required this.ledgerBytes,
+    required this.openReaders,
+  });
+
+  @override
+  int get hashCode =>
+      pageBytes.hashCode ^
+      prefetchBytes.hashCode ^
+      downloadBytes.hashCode ^
+      poolBudgetBytes.hashCode ^
+      memoryBytes.hashCode ^
+      memoryPeakBytes.hashCode ^
+      memoryEntries.hashCode ^
+      memoryHits.hashCode ^
+      memoryMisses.hashCode ^
+      memoryEvictions.hashCode ^
+      memoryRefused.hashCode ^
+      diskBytes.hashCode ^
+      ledgerBytes.hashCode ^
+      openReaders.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CacheStatsDto &&
+          runtimeType == other.runtimeType &&
+          pageBytes == other.pageBytes &&
+          prefetchBytes == other.prefetchBytes &&
+          downloadBytes == other.downloadBytes &&
+          poolBudgetBytes == other.poolBudgetBytes &&
+          memoryBytes == other.memoryBytes &&
+          memoryPeakBytes == other.memoryPeakBytes &&
+          memoryEntries == other.memoryEntries &&
+          memoryHits == other.memoryHits &&
+          memoryMisses == other.memoryMisses &&
+          memoryEvictions == other.memoryEvictions &&
+          memoryRefused == other.memoryRefused &&
+          diskBytes == other.diskBytes &&
+          ledgerBytes == other.ledgerBytes &&
+          openReaders == other.openReaders;
+}
+
 /// Collection detail: row + its member series (paged).
 class CollectionDetailRow {
   final String remoteId;
@@ -230,6 +356,58 @@ class ConnectionResult {
           capabilities == other.capabilities;
 }
 
+/// What the device is, as far as the UI can tell the core.
+class DeviceProfileDto {
+  /// Physical RAM in bytes; 0 when the platform will not say.
+  final PlatformInt64 deviceMemoryBytes;
+
+  /// Ceiling for the whole disk cache pool; 0 for the built-in default.
+  final PlatformInt64 cacheBudgetBytes;
+
+  /// Override for the average page size; 0 to let the manifest answer.
+  final PlatformInt64 avgPageBytesHint;
+
+  /// What one decoded page costs on this screen, which only the UI knows.
+  final PlatformInt64 decodedPageBytes;
+
+  /// wifi | cellular | weak | offline | anything else for unknown.
+  final String network;
+
+  /// False while a flip is in progress: the planner then shrinks the window to
+  /// the visible spread instead of queueing a burst per frame.
+  final bool stable;
+
+  const DeviceProfileDto({
+    required this.deviceMemoryBytes,
+    required this.cacheBudgetBytes,
+    required this.avgPageBytesHint,
+    required this.decodedPageBytes,
+    required this.network,
+    required this.stable,
+  });
+
+  @override
+  int get hashCode =>
+      deviceMemoryBytes.hashCode ^
+      cacheBudgetBytes.hashCode ^
+      avgPageBytesHint.hashCode ^
+      decodedPageBytes.hashCode ^
+      network.hashCode ^
+      stable.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeviceProfileDto &&
+          runtimeType == other.runtimeType &&
+          deviceMemoryBytes == other.deviceMemoryBytes &&
+          cacheBudgetBytes == other.cacheBudgetBytes &&
+          avgPageBytesHint == other.avgPageBytesHint &&
+          decodedPageBytes == other.decodedPageBytes &&
+          network == other.network &&
+          stable == other.stable;
+}
+
 /// Distinct filter-chip options derived from the local mirror.
 class FilterOptions {
   final List<String> tags;
@@ -348,6 +526,267 @@ class OutboxStatusDto {
           failed == other.failed &&
           total == other.total &&
           failedEntries == other.failedEntries;
+}
+
+class ReaderBookDto {
+  final String serverId;
+  final String bookId;
+  final PlatformInt64 pageCount;
+  final bool paged;
+  final bool reflowable;
+  final String? fallback;
+  final bool fromMirror;
+  final PlatformInt64 startPage;
+  final ReaderLayoutDto layout;
+
+  const ReaderBookDto({
+    required this.serverId,
+    required this.bookId,
+    required this.pageCount,
+    required this.paged,
+    required this.reflowable,
+    this.fallback,
+    required this.fromMirror,
+    required this.startPage,
+    required this.layout,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      bookId.hashCode ^
+      pageCount.hashCode ^
+      paged.hashCode ^
+      reflowable.hashCode ^
+      fallback.hashCode ^
+      fromMirror.hashCode ^
+      startPage.hashCode ^
+      layout.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReaderBookDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          bookId == other.bookId &&
+          pageCount == other.pageCount &&
+          paged == other.paged &&
+          reflowable == other.reflowable &&
+          fallback == other.fallback &&
+          fromMirror == other.fromMirror &&
+          startPage == other.startPage &&
+          layout == other.layout;
+}
+
+class ReaderLayoutDto {
+  final List<Uint32List> spreads;
+  final PlatformInt64 spread;
+  final PlatformInt64 page;
+  final String axis;
+  final bool reversed;
+  final String advanceSwipe;
+  final String retreatSwipe;
+  final String tapNext;
+  final String tapPrev;
+  final String mode;
+  final String direction;
+  final PlatformInt64 pageGap;
+  final String background;
+
+  const ReaderLayoutDto({
+    required this.spreads,
+    required this.spread,
+    required this.page,
+    required this.axis,
+    required this.reversed,
+    required this.advanceSwipe,
+    required this.retreatSwipe,
+    required this.tapNext,
+    required this.tapPrev,
+    required this.mode,
+    required this.direction,
+    required this.pageGap,
+    required this.background,
+  });
+
+  @override
+  int get hashCode =>
+      spreads.hashCode ^
+      spread.hashCode ^
+      page.hashCode ^
+      axis.hashCode ^
+      reversed.hashCode ^
+      advanceSwipe.hashCode ^
+      retreatSwipe.hashCode ^
+      tapNext.hashCode ^
+      tapPrev.hashCode ^
+      mode.hashCode ^
+      direction.hashCode ^
+      pageGap.hashCode ^
+      background.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReaderLayoutDto &&
+          runtimeType == other.runtimeType &&
+          spreads == other.spreads &&
+          spread == other.spread &&
+          page == other.page &&
+          axis == other.axis &&
+          reversed == other.reversed &&
+          advanceSwipe == other.advanceSwipe &&
+          retreatSwipe == other.retreatSwipe &&
+          tapNext == other.tapNext &&
+          tapPrev == other.tapPrev &&
+          mode == other.mode &&
+          direction == other.direction &&
+          pageGap == other.pageGap &&
+          background == other.background;
+}
+
+class ReaderSettingsDto {
+  final String mode;
+  final String direction;
+  final bool firstPageSingle;
+  final PlatformInt64 pageGap;
+  final String background;
+  final bool keepScreenAwake;
+  final double? brightness;
+  final bool restorePosition;
+  final PlatformInt64 prefetchForward;
+  final PlatformInt64 prefetchBack;
+  final PlatformInt64 prefetchCap;
+
+  const ReaderSettingsDto({
+    required this.mode,
+    required this.direction,
+    required this.firstPageSingle,
+    required this.pageGap,
+    required this.background,
+    required this.keepScreenAwake,
+    this.brightness,
+    required this.restorePosition,
+    required this.prefetchForward,
+    required this.prefetchBack,
+    required this.prefetchCap,
+  });
+
+  @override
+  int get hashCode =>
+      mode.hashCode ^
+      direction.hashCode ^
+      firstPageSingle.hashCode ^
+      pageGap.hashCode ^
+      background.hashCode ^
+      keepScreenAwake.hashCode ^
+      brightness.hashCode ^
+      restorePosition.hashCode ^
+      prefetchForward.hashCode ^
+      prefetchBack.hashCode ^
+      prefetchCap.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReaderSettingsDto &&
+          runtimeType == other.runtimeType &&
+          mode == other.mode &&
+          direction == other.direction &&
+          firstPageSingle == other.firstPageSingle &&
+          pageGap == other.pageGap &&
+          background == other.background &&
+          keepScreenAwake == other.keepScreenAwake &&
+          brightness == other.brightness &&
+          restorePosition == other.restorePosition &&
+          prefetchForward == other.prefetchForward &&
+          prefetchBack == other.prefetchBack &&
+          prefetchCap == other.prefetchCap;
+}
+
+class ReaderTurnDto {
+  final PlatformInt64 page;
+  final PlatformInt64 spread;
+  final bool uploadNow;
+
+  const ReaderTurnDto({
+    required this.page,
+    required this.spread,
+    required this.uploadNow,
+  });
+
+  @override
+  int get hashCode => page.hashCode ^ spread.hashCode ^ uploadNow.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReaderTurnDto &&
+          runtimeType == other.runtimeType &&
+          page == other.page &&
+          spread == other.spread &&
+          uploadNow == other.uploadNow;
+}
+
+/// The numbers the core derived from a profile, all of which the UI must apply.
+class ReaderWindowDto {
+  final PlatformInt64 forward;
+  final PlatformInt64 back;
+  final PlatformInt64 cap;
+  final PlatformInt64 memoryBudgetBytes;
+  final PlatformInt64 inFlight;
+  final PlatformInt64 decodeSlots;
+  final PlatformInt64 avgPageBytes;
+  final PlatformInt64 pagesPerSpread;
+  final PlatformInt64 poolBudgetBytes;
+  final PlatformInt64 sweptFreedBytes;
+  final PlatformInt64 sweptCorrupt;
+
+  const ReaderWindowDto({
+    required this.forward,
+    required this.back,
+    required this.cap,
+    required this.memoryBudgetBytes,
+    required this.inFlight,
+    required this.decodeSlots,
+    required this.avgPageBytes,
+    required this.pagesPerSpread,
+    required this.poolBudgetBytes,
+    required this.sweptFreedBytes,
+    required this.sweptCorrupt,
+  });
+
+  @override
+  int get hashCode =>
+      forward.hashCode ^
+      back.hashCode ^
+      cap.hashCode ^
+      memoryBudgetBytes.hashCode ^
+      inFlight.hashCode ^
+      decodeSlots.hashCode ^
+      avgPageBytes.hashCode ^
+      pagesPerSpread.hashCode ^
+      poolBudgetBytes.hashCode ^
+      sweptFreedBytes.hashCode ^
+      sweptCorrupt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReaderWindowDto &&
+          runtimeType == other.runtimeType &&
+          forward == other.forward &&
+          back == other.back &&
+          cap == other.cap &&
+          memoryBudgetBytes == other.memoryBudgetBytes &&
+          inFlight == other.inFlight &&
+          decodeSlots == other.decodeSlots &&
+          avgPageBytes == other.avgPageBytes &&
+          pagesPerSpread == other.pagesPerSpread &&
+          poolBudgetBytes == other.poolBudgetBytes &&
+          sweptFreedBytes == other.sweptFreedBytes &&
+          sweptCorrupt == other.sweptCorrupt;
 }
 
 /// Readlist detail: row + its ordered books (paged).

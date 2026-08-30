@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1456177181;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1178445856;
 
 // Section: executor
 
@@ -1218,6 +1218,755 @@ fn wire__crate__ffi__bridge__query_series_impl(
         },
     )
 }
+fn wire__crate__ffi__bridge__reader_background_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_background",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_background(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_cache_stats_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_cache_stats",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_cache_stats(api_db_path)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_clear_prefetch_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_clear_prefetch",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_clear_prefetch(api_db_path)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_close_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_close",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::ffi::bridge::reader_close(api_db_path, api_server_id, api_book_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_configure_device_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_configure_device",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_device =
+                <crate::ffi::application::DeviceProfileDto>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_configure_device(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                        api_device,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_mark_read_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_mark_read",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_mark_read(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_mark_unread_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_mark_unread",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_mark_unread(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_open_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_open",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_base_url = <String>::sse_decode(&mut deserializer);
+            let api_api_key = <String>::sse_decode(&mut deserializer);
+            let api_mode = <String>::sse_decode(&mut deserializer);
+            let api_direction = <String>::sse_decode(&mut deserializer);
+            let api_first_page_single = <Option<bool>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::ffi::bridge::reader_open(
+                            api_db_path,
+                            api_server_id,
+                            api_book_id,
+                            api_base_url,
+                            api_api_key,
+                            api_mode,
+                            api_direction,
+                            api_first_page_single,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_page_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_page",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_page = <i64>::sse_decode(&mut deserializer);
+            let api_base_url = <String>::sse_decode(&mut deserializer);
+            let api_api_key = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::ffi::bridge::reader_page(
+                            api_db_path,
+                            api_server_id,
+                            api_book_id,
+                            api_page,
+                            api_base_url,
+                            api_api_key,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_page_path_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_page_path",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_page = <i64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_page_path(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                        api_page,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_prefetch_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_prefetch",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_spread = <i64>::sse_decode(&mut deserializer);
+            let api_base_url = <String>::sse_decode(&mut deserializer);
+            let api_api_key = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::ffi::bridge::reader_prefetch(
+                            api_db_path,
+                            api_server_id,
+                            api_book_id,
+                            api_spread,
+                            api_base_url,
+                            api_api_key,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_reconcile_cache_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_reconcile_cache",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_reconcile_cache(api_db_path)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_release_prefetch_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_release_prefetch",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_release_prefetch(api_db_path)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_set_layout_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_set_layout",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_mode = <String>::sse_decode(&mut deserializer);
+            let api_direction = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_set_layout(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                        api_mode,
+                        api_direction,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_set_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_set_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_settings =
+                <crate::ffi::application::ReaderSettingsDto>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::ffi::bridge::reader_set_settings(api_db_path, api_settings)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_settings(api_db_path)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_step_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_step",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_delta = <i64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_step(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                        api_delta,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_tick_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_tick",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::ffi::bridge::reader_tick(api_db_path, api_server_id, api_book_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__reader_turn_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "reader_turn",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_page = <i64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::reader_turn(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                        api_page,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__ffi__bridge__readlist_detail_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2051,6 +2800,66 @@ impl SseDecode for crate::model::server::BuildInfo {
     }
 }
 
+impl SseDecode for crate::ffi::application::CacheCleanupDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_ghostRows = <i64>::sse_decode(deserializer);
+        let mut var_orphanFiles = <i64>::sse_decode(deserializer);
+        let mut var_staleParts = <i64>::sse_decode(deserializer);
+        let mut var_corrupt = <i64>::sse_decode(deserializer);
+        let mut var_kindRepaired = <i64>::sse_decode(deserializer);
+        let mut var_evicted = <i64>::sse_decode(deserializer);
+        let mut var_freedBytes = <i64>::sse_decode(deserializer);
+        let mut var_bytesAfter = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::CacheCleanupDto {
+            ghost_rows: var_ghostRows,
+            orphan_files: var_orphanFiles,
+            stale_parts: var_staleParts,
+            corrupt: var_corrupt,
+            kind_repaired: var_kindRepaired,
+            evicted: var_evicted,
+            freed_bytes: var_freedBytes,
+            bytes_after: var_bytesAfter,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::CacheStatsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_pageBytes = <i64>::sse_decode(deserializer);
+        let mut var_prefetchBytes = <i64>::sse_decode(deserializer);
+        let mut var_downloadBytes = <i64>::sse_decode(deserializer);
+        let mut var_poolBudgetBytes = <i64>::sse_decode(deserializer);
+        let mut var_memoryBytes = <i64>::sse_decode(deserializer);
+        let mut var_memoryPeakBytes = <i64>::sse_decode(deserializer);
+        let mut var_memoryEntries = <i64>::sse_decode(deserializer);
+        let mut var_memoryHits = <i64>::sse_decode(deserializer);
+        let mut var_memoryMisses = <i64>::sse_decode(deserializer);
+        let mut var_memoryEvictions = <i64>::sse_decode(deserializer);
+        let mut var_memoryRefused = <i64>::sse_decode(deserializer);
+        let mut var_diskBytes = <i64>::sse_decode(deserializer);
+        let mut var_ledgerBytes = <i64>::sse_decode(deserializer);
+        let mut var_openReaders = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::CacheStatsDto {
+            page_bytes: var_pageBytes,
+            prefetch_bytes: var_prefetchBytes,
+            download_bytes: var_downloadBytes,
+            pool_budget_bytes: var_poolBudgetBytes,
+            memory_bytes: var_memoryBytes,
+            memory_peak_bytes: var_memoryPeakBytes,
+            memory_entries: var_memoryEntries,
+            memory_hits: var_memoryHits,
+            memory_misses: var_memoryMisses,
+            memory_evictions: var_memoryEvictions,
+            memory_refused: var_memoryRefused,
+            disk_bytes: var_diskBytes,
+            ledger_bytes: var_ledgerBytes,
+            open_readers: var_openReaders,
+        };
+    }
+}
+
 impl SseDecode for crate::ffi::application::CollectionDetailRow {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2158,6 +2967,26 @@ impl SseDecode for crate::store::read_progress::ContinueReadingRow {
             total_pages: var_totalPages,
             progress_pct: var_progressPct,
             local_updated_at: var_localUpdatedAt,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::DeviceProfileDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_deviceMemoryBytes = <i64>::sse_decode(deserializer);
+        let mut var_cacheBudgetBytes = <i64>::sse_decode(deserializer);
+        let mut var_avgPageBytesHint = <i64>::sse_decode(deserializer);
+        let mut var_decodedPageBytes = <i64>::sse_decode(deserializer);
+        let mut var_network = <String>::sse_decode(deserializer);
+        let mut var_stable = <bool>::sse_decode(deserializer);
+        return crate::ffi::application::DeviceProfileDto {
+            device_memory_bytes: var_deviceMemoryBytes,
+            cache_budget_bytes: var_cacheBudgetBytes,
+            avg_page_bytes_hint: var_avgPageBytesHint,
+            decoded_page_bytes: var_decodedPageBytes,
+            network: var_network,
+            stable: var_stable,
         };
     }
 }
@@ -2429,6 +3258,18 @@ impl SseDecode for Vec<crate::store::query::LibraryCountRow> {
     }
 }
 
+impl SseDecode for Vec<Vec<u32>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<Vec<u32>>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::ffi::application::OutboxEntryDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2438,6 +3279,18 @@ impl SseDecode for Vec<crate::ffi::application::OutboxEntryDto> {
             ans_.push(<crate::ffi::application::OutboxEntryDto>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<u32>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -2730,6 +3583,140 @@ impl SseDecode for crate::ffi::application::OutboxStatusDto {
             failed: var_failed,
             total: var_total,
             failed_entries: var_failedEntries,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::ReaderBookDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_serverId = <String>::sse_decode(deserializer);
+        let mut var_bookId = <String>::sse_decode(deserializer);
+        let mut var_pageCount = <i64>::sse_decode(deserializer);
+        let mut var_paged = <bool>::sse_decode(deserializer);
+        let mut var_reflowable = <bool>::sse_decode(deserializer);
+        let mut var_fallback = <Option<String>>::sse_decode(deserializer);
+        let mut var_fromMirror = <bool>::sse_decode(deserializer);
+        let mut var_startPage = <i64>::sse_decode(deserializer);
+        let mut var_layout = <crate::ffi::application::ReaderLayoutDto>::sse_decode(deserializer);
+        return crate::ffi::application::ReaderBookDto {
+            server_id: var_serverId,
+            book_id: var_bookId,
+            page_count: var_pageCount,
+            paged: var_paged,
+            reflowable: var_reflowable,
+            fallback: var_fallback,
+            from_mirror: var_fromMirror,
+            start_page: var_startPage,
+            layout: var_layout,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::ReaderLayoutDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_spreads = <Vec<Vec<u32>>>::sse_decode(deserializer);
+        let mut var_spread = <i64>::sse_decode(deserializer);
+        let mut var_page = <i64>::sse_decode(deserializer);
+        let mut var_axis = <String>::sse_decode(deserializer);
+        let mut var_reversed = <bool>::sse_decode(deserializer);
+        let mut var_advanceSwipe = <String>::sse_decode(deserializer);
+        let mut var_retreatSwipe = <String>::sse_decode(deserializer);
+        let mut var_tapNext = <String>::sse_decode(deserializer);
+        let mut var_tapPrev = <String>::sse_decode(deserializer);
+        let mut var_mode = <String>::sse_decode(deserializer);
+        let mut var_direction = <String>::sse_decode(deserializer);
+        let mut var_pageGap = <i64>::sse_decode(deserializer);
+        let mut var_background = <String>::sse_decode(deserializer);
+        return crate::ffi::application::ReaderLayoutDto {
+            spreads: var_spreads,
+            spread: var_spread,
+            page: var_page,
+            axis: var_axis,
+            reversed: var_reversed,
+            advance_swipe: var_advanceSwipe,
+            retreat_swipe: var_retreatSwipe,
+            tap_next: var_tapNext,
+            tap_prev: var_tapPrev,
+            mode: var_mode,
+            direction: var_direction,
+            page_gap: var_pageGap,
+            background: var_background,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::ReaderSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_mode = <String>::sse_decode(deserializer);
+        let mut var_direction = <String>::sse_decode(deserializer);
+        let mut var_firstPageSingle = <bool>::sse_decode(deserializer);
+        let mut var_pageGap = <i64>::sse_decode(deserializer);
+        let mut var_background = <String>::sse_decode(deserializer);
+        let mut var_keepScreenAwake = <bool>::sse_decode(deserializer);
+        let mut var_brightness = <Option<f64>>::sse_decode(deserializer);
+        let mut var_restorePosition = <bool>::sse_decode(deserializer);
+        let mut var_prefetchForward = <i64>::sse_decode(deserializer);
+        let mut var_prefetchBack = <i64>::sse_decode(deserializer);
+        let mut var_prefetchCap = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::ReaderSettingsDto {
+            mode: var_mode,
+            direction: var_direction,
+            first_page_single: var_firstPageSingle,
+            page_gap: var_pageGap,
+            background: var_background,
+            keep_screen_awake: var_keepScreenAwake,
+            brightness: var_brightness,
+            restore_position: var_restorePosition,
+            prefetch_forward: var_prefetchForward,
+            prefetch_back: var_prefetchBack,
+            prefetch_cap: var_prefetchCap,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::ReaderTurnDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_page = <i64>::sse_decode(deserializer);
+        let mut var_spread = <i64>::sse_decode(deserializer);
+        let mut var_uploadNow = <bool>::sse_decode(deserializer);
+        return crate::ffi::application::ReaderTurnDto {
+            page: var_page,
+            spread: var_spread,
+            upload_now: var_uploadNow,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::ReaderWindowDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_forward = <i64>::sse_decode(deserializer);
+        let mut var_back = <i64>::sse_decode(deserializer);
+        let mut var_cap = <i64>::sse_decode(deserializer);
+        let mut var_memoryBudgetBytes = <i64>::sse_decode(deserializer);
+        let mut var_inFlight = <i64>::sse_decode(deserializer);
+        let mut var_decodeSlots = <i64>::sse_decode(deserializer);
+        let mut var_avgPageBytes = <i64>::sse_decode(deserializer);
+        let mut var_pagesPerSpread = <i64>::sse_decode(deserializer);
+        let mut var_poolBudgetBytes = <i64>::sse_decode(deserializer);
+        let mut var_sweptFreedBytes = <i64>::sse_decode(deserializer);
+        let mut var_sweptCorrupt = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::ReaderWindowDto {
+            forward: var_forward,
+            back: var_back,
+            cap: var_cap,
+            memory_budget_bytes: var_memoryBudgetBytes,
+            in_flight: var_inFlight,
+            decode_slots: var_decodeSlots,
+            avg_page_bytes: var_avgPageBytes,
+            pages_per_spread: var_pagesPerSpread,
+            pool_budget_bytes: var_poolBudgetBytes,
+            swept_freed_bytes: var_sweptFreedBytes,
+            swept_corrupt: var_sweptCorrupt,
         };
     }
 }
@@ -3141,25 +4128,58 @@ fn pde_ffi_dispatcher_primary_impl(
         27 => wire__crate__ffi__bridge__outbox_status_impl(port, ptr, rust_vec_len, data_len),
         28 => wire__crate__ffi__bridge__query_books_impl(port, ptr, rust_vec_len, data_len),
         29 => wire__crate__ffi__bridge__query_series_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__ffi__bridge__readlist_detail_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__ffi__bridge__reconcile_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__ffi__bridge__reader_background_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__ffi__bridge__reader_cache_stats_impl(port, ptr, rust_vec_len, data_len),
         32 => {
+            wire__crate__ffi__bridge__reader_clear_prefetch_impl(port, ptr, rust_vec_len, data_len)
+        }
+        33 => wire__crate__ffi__bridge__reader_close_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__ffi__bridge__reader_configure_device_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        35 => wire__crate__ffi__bridge__reader_mark_read_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__ffi__bridge__reader_mark_unread_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__ffi__bridge__reader_open_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__ffi__bridge__reader_page_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__ffi__bridge__reader_page_path_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__ffi__bridge__reader_prefetch_impl(port, ptr, rust_vec_len, data_len),
+        41 => {
+            wire__crate__ffi__bridge__reader_reconcile_cache_impl(port, ptr, rust_vec_len, data_len)
+        }
+        42 => wire__crate__ffi__bridge__reader_release_prefetch_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        43 => wire__crate__ffi__bridge__reader_set_layout_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__ffi__bridge__reader_set_settings_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__ffi__bridge__reader_settings_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__ffi__bridge__reader_step_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__ffi__bridge__reader_tick_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__ffi__bridge__reader_turn_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__ffi__bridge__readlist_detail_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__ffi__bridge__reconcile_impl(port, ptr, rust_vec_len, data_len),
+        51 => {
             wire__crate__ffi__bridge__retry_failed_mutations_impl(port, ptr, rust_vec_len, data_len)
         }
-        33 => wire__crate__ffi__bridge__save_libraries_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__ffi__bridge__save_server_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__ffi__bridge__series_detail_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__ffi__bridge__set_active_server_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__ffi__bridge__set_read_progress_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__ffi__bridge__should_reconcile_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__ffi__bridge__sse_poll_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__ffi__bridge__sse_reconciled_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__ffi__bridge__sse_resume_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__ffi__bridge__sse_stop_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__ffi__bridge__sync_states_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__ffi__bridge__test_connection_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__ffi__bridge__tombstones_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__ffi__bridge__upload_outbox_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__ffi__bridge__save_libraries_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__ffi__bridge__save_server_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__ffi__bridge__series_detail_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__ffi__bridge__set_active_server_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__ffi__bridge__set_read_progress_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__ffi__bridge__should_reconcile_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__ffi__bridge__sse_poll_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__ffi__bridge__sse_reconciled_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__ffi__bridge__sse_resume_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__ffi__bridge__sse_stop_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__ffi__bridge__sync_states_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__ffi__bridge__test_connection_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__ffi__bridge__tombstones_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__ffi__bridge__upload_outbox_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3353,6 +4373,66 @@ impl flutter_rust_bridge::IntoIntoDart<crate::model::server::BuildInfo>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::CacheCleanupDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.ghost_rows.into_into_dart().into_dart(),
+            self.orphan_files.into_into_dart().into_dart(),
+            self.stale_parts.into_into_dart().into_dart(),
+            self.corrupt.into_into_dart().into_dart(),
+            self.kind_repaired.into_into_dart().into_dart(),
+            self.evicted.into_into_dart().into_dart(),
+            self.freed_bytes.into_into_dart().into_dart(),
+            self.bytes_after.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::CacheCleanupDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::CacheCleanupDto>
+    for crate::ffi::application::CacheCleanupDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::CacheCleanupDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::CacheStatsDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.page_bytes.into_into_dart().into_dart(),
+            self.prefetch_bytes.into_into_dart().into_dart(),
+            self.download_bytes.into_into_dart().into_dart(),
+            self.pool_budget_bytes.into_into_dart().into_dart(),
+            self.memory_bytes.into_into_dart().into_dart(),
+            self.memory_peak_bytes.into_into_dart().into_dart(),
+            self.memory_entries.into_into_dart().into_dart(),
+            self.memory_hits.into_into_dart().into_dart(),
+            self.memory_misses.into_into_dart().into_dart(),
+            self.memory_evictions.into_into_dart().into_dart(),
+            self.memory_refused.into_into_dart().into_dart(),
+            self.disk_bytes.into_into_dart().into_dart(),
+            self.ledger_bytes.into_into_dart().into_dart(),
+            self.open_readers.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::CacheStatsDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::CacheStatsDto>
+    for crate::ffi::application::CacheStatsDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::CacheStatsDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::ffi::application::CollectionDetailRow {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -3494,6 +4574,31 @@ impl flutter_rust_bridge::IntoIntoDart<crate::store::read_progress::ContinueRead
     for crate::store::read_progress::ContinueReadingRow
 {
     fn into_into_dart(self) -> crate::store::read_progress::ContinueReadingRow {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::DeviceProfileDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.device_memory_bytes.into_into_dart().into_dart(),
+            self.cache_budget_bytes.into_into_dart().into_dart(),
+            self.avg_page_bytes_hint.into_into_dart().into_dart(),
+            self.decoded_page_bytes.into_into_dart().into_dart(),
+            self.network.into_into_dart().into_dart(),
+            self.stable.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::DeviceProfileDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::DeviceProfileDto>
+    for crate::ffi::application::DeviceProfileDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::DeviceProfileDto {
         self
     }
 }
@@ -3710,6 +4815,148 @@ impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::OutboxStatusDto>
     for crate::ffi::application::OutboxStatusDto
 {
     fn into_into_dart(self) -> crate::ffi::application::OutboxStatusDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::ReaderBookDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.server_id.into_into_dart().into_dart(),
+            self.book_id.into_into_dart().into_dart(),
+            self.page_count.into_into_dart().into_dart(),
+            self.paged.into_into_dart().into_dart(),
+            self.reflowable.into_into_dart().into_dart(),
+            self.fallback.into_into_dart().into_dart(),
+            self.from_mirror.into_into_dart().into_dart(),
+            self.start_page.into_into_dart().into_dart(),
+            self.layout.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::ReaderBookDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::ReaderBookDto>
+    for crate::ffi::application::ReaderBookDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::ReaderBookDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::ReaderLayoutDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.spreads.into_into_dart().into_dart(),
+            self.spread.into_into_dart().into_dart(),
+            self.page.into_into_dart().into_dart(),
+            self.axis.into_into_dart().into_dart(),
+            self.reversed.into_into_dart().into_dart(),
+            self.advance_swipe.into_into_dart().into_dart(),
+            self.retreat_swipe.into_into_dart().into_dart(),
+            self.tap_next.into_into_dart().into_dart(),
+            self.tap_prev.into_into_dart().into_dart(),
+            self.mode.into_into_dart().into_dart(),
+            self.direction.into_into_dart().into_dart(),
+            self.page_gap.into_into_dart().into_dart(),
+            self.background.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::ReaderLayoutDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::ReaderLayoutDto>
+    for crate::ffi::application::ReaderLayoutDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::ReaderLayoutDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::ReaderSettingsDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.mode.into_into_dart().into_dart(),
+            self.direction.into_into_dart().into_dart(),
+            self.first_page_single.into_into_dart().into_dart(),
+            self.page_gap.into_into_dart().into_dart(),
+            self.background.into_into_dart().into_dart(),
+            self.keep_screen_awake.into_into_dart().into_dart(),
+            self.brightness.into_into_dart().into_dart(),
+            self.restore_position.into_into_dart().into_dart(),
+            self.prefetch_forward.into_into_dart().into_dart(),
+            self.prefetch_back.into_into_dart().into_dart(),
+            self.prefetch_cap.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::ReaderSettingsDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::ReaderSettingsDto>
+    for crate::ffi::application::ReaderSettingsDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::ReaderSettingsDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::ReaderTurnDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.page.into_into_dart().into_dart(),
+            self.spread.into_into_dart().into_dart(),
+            self.upload_now.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::ReaderTurnDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::ReaderTurnDto>
+    for crate::ffi::application::ReaderTurnDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::ReaderTurnDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::ReaderWindowDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.forward.into_into_dart().into_dart(),
+            self.back.into_into_dart().into_dart(),
+            self.cap.into_into_dart().into_dart(),
+            self.memory_budget_bytes.into_into_dart().into_dart(),
+            self.in_flight.into_into_dart().into_dart(),
+            self.decode_slots.into_into_dart().into_dart(),
+            self.avg_page_bytes.into_into_dart().into_dart(),
+            self.pages_per_spread.into_into_dart().into_dart(),
+            self.pool_budget_bytes.into_into_dart().into_dart(),
+            self.swept_freed_bytes.into_into_dart().into_dart(),
+            self.swept_corrupt.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::ReaderWindowDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::ReaderWindowDto>
+    for crate::ffi::application::ReaderWindowDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::ReaderWindowDto {
         self
     }
 }
@@ -4193,6 +5440,40 @@ impl SseEncode for crate::model::server::BuildInfo {
     }
 }
 
+impl SseEncode for crate::ffi::application::CacheCleanupDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.ghost_rows, serializer);
+        <i64>::sse_encode(self.orphan_files, serializer);
+        <i64>::sse_encode(self.stale_parts, serializer);
+        <i64>::sse_encode(self.corrupt, serializer);
+        <i64>::sse_encode(self.kind_repaired, serializer);
+        <i64>::sse_encode(self.evicted, serializer);
+        <i64>::sse_encode(self.freed_bytes, serializer);
+        <i64>::sse_encode(self.bytes_after, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::CacheStatsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.page_bytes, serializer);
+        <i64>::sse_encode(self.prefetch_bytes, serializer);
+        <i64>::sse_encode(self.download_bytes, serializer);
+        <i64>::sse_encode(self.pool_budget_bytes, serializer);
+        <i64>::sse_encode(self.memory_bytes, serializer);
+        <i64>::sse_encode(self.memory_peak_bytes, serializer);
+        <i64>::sse_encode(self.memory_entries, serializer);
+        <i64>::sse_encode(self.memory_hits, serializer);
+        <i64>::sse_encode(self.memory_misses, serializer);
+        <i64>::sse_encode(self.memory_evictions, serializer);
+        <i64>::sse_encode(self.memory_refused, serializer);
+        <i64>::sse_encode(self.disk_bytes, serializer);
+        <i64>::sse_encode(self.ledger_bytes, serializer);
+        <i64>::sse_encode(self.open_readers, serializer);
+    }
+}
+
 impl SseEncode for crate::ffi::application::CollectionDetailRow {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4257,6 +5538,18 @@ impl SseEncode for crate::store::read_progress::ContinueReadingRow {
         <Option<i64>>::sse_encode(self.total_pages, serializer);
         <Option<i64>>::sse_encode(self.progress_pct, serializer);
         <Option<String>>::sse_encode(self.local_updated_at, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::DeviceProfileDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.device_memory_bytes, serializer);
+        <i64>::sse_encode(self.cache_budget_bytes, serializer);
+        <i64>::sse_encode(self.avg_page_bytes_hint, serializer);
+        <i64>::sse_encode(self.decoded_page_bytes, serializer);
+        <String>::sse_encode(self.network, serializer);
+        <bool>::sse_encode(self.stable, serializer);
     }
 }
 
@@ -4450,12 +5743,32 @@ impl SseEncode for Vec<crate::store::query::LibraryCountRow> {
     }
 }
 
+impl SseEncode for Vec<Vec<u32>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Vec<u32>>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::ffi::application::OutboxEntryDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::ffi::application::OutboxEntryDto>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<u32> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <u32>::sse_encode(item, serializer);
         }
     }
 }
@@ -4683,6 +5996,83 @@ impl SseEncode for crate::ffi::application::OutboxStatusDto {
         <i64>::sse_encode(self.failed, serializer);
         <i64>::sse_encode(self.total, serializer);
         <Vec<crate::ffi::application::OutboxEntryDto>>::sse_encode(self.failed_entries, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::ReaderBookDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.server_id, serializer);
+        <String>::sse_encode(self.book_id, serializer);
+        <i64>::sse_encode(self.page_count, serializer);
+        <bool>::sse_encode(self.paged, serializer);
+        <bool>::sse_encode(self.reflowable, serializer);
+        <Option<String>>::sse_encode(self.fallback, serializer);
+        <bool>::sse_encode(self.from_mirror, serializer);
+        <i64>::sse_encode(self.start_page, serializer);
+        <crate::ffi::application::ReaderLayoutDto>::sse_encode(self.layout, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::ReaderLayoutDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<Vec<u32>>>::sse_encode(self.spreads, serializer);
+        <i64>::sse_encode(self.spread, serializer);
+        <i64>::sse_encode(self.page, serializer);
+        <String>::sse_encode(self.axis, serializer);
+        <bool>::sse_encode(self.reversed, serializer);
+        <String>::sse_encode(self.advance_swipe, serializer);
+        <String>::sse_encode(self.retreat_swipe, serializer);
+        <String>::sse_encode(self.tap_next, serializer);
+        <String>::sse_encode(self.tap_prev, serializer);
+        <String>::sse_encode(self.mode, serializer);
+        <String>::sse_encode(self.direction, serializer);
+        <i64>::sse_encode(self.page_gap, serializer);
+        <String>::sse_encode(self.background, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::ReaderSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.mode, serializer);
+        <String>::sse_encode(self.direction, serializer);
+        <bool>::sse_encode(self.first_page_single, serializer);
+        <i64>::sse_encode(self.page_gap, serializer);
+        <String>::sse_encode(self.background, serializer);
+        <bool>::sse_encode(self.keep_screen_awake, serializer);
+        <Option<f64>>::sse_encode(self.brightness, serializer);
+        <bool>::sse_encode(self.restore_position, serializer);
+        <i64>::sse_encode(self.prefetch_forward, serializer);
+        <i64>::sse_encode(self.prefetch_back, serializer);
+        <i64>::sse_encode(self.prefetch_cap, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::ReaderTurnDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.page, serializer);
+        <i64>::sse_encode(self.spread, serializer);
+        <bool>::sse_encode(self.upload_now, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::ReaderWindowDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.forward, serializer);
+        <i64>::sse_encode(self.back, serializer);
+        <i64>::sse_encode(self.cap, serializer);
+        <i64>::sse_encode(self.memory_budget_bytes, serializer);
+        <i64>::sse_encode(self.in_flight, serializer);
+        <i64>::sse_encode(self.decode_slots, serializer);
+        <i64>::sse_encode(self.avg_page_bytes, serializer);
+        <i64>::sse_encode(self.pages_per_spread, serializer);
+        <i64>::sse_encode(self.pool_budget_bytes, serializer);
+        <i64>::sse_encode(self.swept_freed_bytes, serializer);
+        <i64>::sse_encode(self.swept_corrupt, serializer);
     }
 }
 

@@ -6,7 +6,12 @@
 use rusqlite::{Connection, OptionalExtension};
 
 /// Bump on every migration; stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 7;
+///
+/// v8 (Stage 7): `book_pages` mirrors the page manifest so a book can be opened
+/// with no network, `reader_position` stores the display page plus the mode and
+/// direction the reader was left in, and `cache_entries` gains an LRU index —
+/// the table existed since v3 with no writer, and the page cache is its first.
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// Individual DDL statements, applied in order. `CREATE TABLE IF NOT EXISTS`
 /// keeps existing databases untouched, so older installs get their missing
@@ -208,6 +213,38 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       path TEXT NOT NULL,
       size INTEGER NOT NULL,
       last_access TEXT NOT NULL
+    )",
+    // v8: the page cache's LRU walk reads (kind, last_access) on every eviction
+    // pass, and `kind` is how offline downloads stay out of it.
+    "CREATE INDEX IF NOT EXISTS cache_entries_lru ON cache_entries (kind, last_access)",
+    // v8: mirrored page manifest. Reading a book is a local operation: the
+    // manifest is normalized on first open and served from here afterwards, so
+    // a book that was opened once can be re-opened (and its cached pages laid
+    // out) with the server unreachable.
+    "CREATE TABLE IF NOT EXISTS book_pages (
+      server_id TEXT NOT NULL,
+      book_id TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      width INTEGER NOT NULL DEFAULT 0,
+      height INTEGER NOT NULL DEFAULT 0,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      fetched_at TEXT NOT NULL,
+      PRIMARY KEY (server_id, book_id, number)
+    )",
+    // v8: what the reader was actually showing when it closed — the display
+    // page and the layout it was displayed with. `read_progress.page` is the
+    // value that syncs to Komga; this is the value that restores the screen,
+    // and they differ as soon as a book is read in double-page mode.
+    "CREATE TABLE IF NOT EXISTS reader_position (
+      server_id TEXT NOT NULL,
+      book_id TEXT NOT NULL,
+      page INTEGER NOT NULL,
+      mode TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (server_id, book_id)
     )",
     // v4: normalized filter tables — tags / genres / authors are queryable
     // (本地查询：筛选全部发生在 SQLite，避免 JSON 解析)。

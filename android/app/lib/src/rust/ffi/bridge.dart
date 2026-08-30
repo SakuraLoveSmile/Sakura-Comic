@@ -467,3 +467,175 @@ Future<PlatformInt64> ensureBookCovers(
         seriesId: seriesId,
         baseUrl: baseUrl,
         apiKey: apiKey);
+
+/// Open a book: mirror-or-read the page manifest, restore the position, and
+/// return the spread layout to draw. `mode` / `direction` / `firstPageSingle`
+/// may be empty / null to mean "use what is stored".
+Future<ReaderBookDto> readerOpen(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required String baseUrl,
+        required String apiKey,
+        required String mode,
+        required String direction,
+        bool? firstPageSingle}) =>
+    RustLib.instance.api.crateFfiBridgeReaderOpen(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        mode: mode,
+        direction: direction,
+        firstPageSingle: firstPageSingle);
+
+/// Where a page already is on disk, if anywhere. Never touches the network.
+Future<String?> readerPagePath(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required PlatformInt64 page}) =>
+    RustLib.instance.api.crateFfiBridgeReaderPagePath(
+        dbPath: dbPath, serverId: serverId, bookId: bookId, page: page);
+
+/// Resolve one page for display (cache first, then fetch).
+Future<String> readerPage(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required PlatformInt64 page,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeReaderPage(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        page: page,
+        baseUrl: baseUrl,
+        apiKey: apiKey);
+
+/// Pull the pages around one spread into the cache; returns how many landed.
+Future<PlatformInt64> readerPrefetch(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required PlatformInt64 spread,
+        required String baseUrl,
+        required String apiKey}) =>
+    RustLib.instance.api.crateFfiBridgeReaderPrefetch(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        spread: spread,
+        baseUrl: baseUrl,
+        apiKey: apiKey);
+
+/// Report the device and link, and get back the window and cache numbers the
+/// core derived. Called on open and again when the network changes.
+Future<ReaderWindowDto> readerConfigureDevice(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required DeviceProfileDto device}) =>
+    RustLib.instance.api.crateFfiBridgeReaderConfigureDevice(
+        dbPath: dbPath, serverId: serverId, bookId: bookId, device: device);
+
+/// What the cache tiers and the memory tier hold right now.
+Future<CacheStatsDto> readerCacheStats({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeReaderCacheStats(dbPath: dbPath);
+
+/// Run the cleanup sweep now: ghost rows, orphan files, stale `.part` debris and
+/// entries whose bytes are no longer a whole image.
+Future<CacheCleanupDto> readerReconcileCache({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeReaderReconcileCache(dbPath: dbPath);
+
+/// Drop the prefetched-but-never-displayed bytes. Displayed pages and offline
+/// downloads are untouched by construction.
+Future<PlatformInt64> readerClearPrefetch({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeReaderClearPrefetch(dbPath: dbPath);
+
+/// Release the RAM the prefetch tier mirrors, keeping the tier. This is the
+/// `onTrimMemory` answer: a stored file costs no RAM, and deleting the tier here
+/// made every backgrounding cost a fresh window of downloads on resume.
+Future<PlatformInt64> readerReleasePrefetch({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeReaderReleasePrefetch(dbPath: dbPath);
+
+/// Turn to a page. Returns the resolved page/spread and whether an upload is due.
+Future<ReaderTurnDto> readerTurn(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required PlatformInt64 page}) =>
+    RustLib.instance.api.crateFfiBridgeReaderTurn(
+        dbPath: dbPath, serverId: serverId, bookId: bookId, page: page);
+
+/// Move one spread forward (delta >= 0) or backward (delta < 0).
+Future<ReaderTurnDto> readerStep(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required PlatformInt64 delta}) =>
+    RustLib.instance.api.crateFfiBridgeReaderStep(
+        dbPath: dbPath, serverId: serverId, bookId: bookId, delta: delta);
+
+/// Change mode / direction mid-book without losing the place.
+Future<ReaderLayoutDto> readerSetLayout(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required String mode,
+        required String direction}) =>
+    RustLib.instance.api.crateFfiBridgeReaderSetLayout(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        mode: mode,
+        direction: direction);
+
+/// Mark read / mark unread: explicit statements, so they are never throttled.
+Future<bool> readerMarkRead(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeReaderMarkRead(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+Future<bool> readerMarkUnread(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeReaderMarkUnread(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// The UI's periodic beat. True means: run `upload_outbox` now.
+Future<bool> readerTick(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeReaderTick(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Backgrounding: flush-worthy now, reader stays open.
+Future<bool> readerBackground(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeReaderBackground(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Leaving the reader for good. True means one last upload should be attempted.
+Future<bool> readerClose(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeReaderClose(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+Future<ReaderSettingsDto> readerSettings({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeReaderSettings(dbPath: dbPath);
+
+Future<ReaderSettingsDto> readerSetSettings(
+        {required String dbPath, required ReaderSettingsDto settings}) =>
+    RustLib.instance.api
+        .crateFfiBridgeReaderSetSettings(dbPath: dbPath, settings: settings);

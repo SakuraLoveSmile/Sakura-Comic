@@ -13,9 +13,10 @@
 
 use crate::api::server::Library;
 use crate::ffi::application::{
-    BookDetailRow, CollectionDetailRow, CollectionPageResult, ConnectionResult, FilterOptions,
-    OutboxStatusDto, ReadlistDetailRow, ReadlistPageResult, SeriesDetailRow, SsePollResult,
-    UploadOutcomeDto,
+    BookDetailRow, CacheCleanupDto, CacheStatsDto, CollectionDetailRow, CollectionPageResult,
+    ConnectionResult, DeviceProfileDto, FilterOptions, OutboxStatusDto, ReaderBookDto,
+    ReaderLayoutDto, ReaderSettingsDto, ReaderTurnDto, ReaderWindowDto, ReadlistDetailRow,
+    ReadlistPageResult, SeriesDetailRow, SsePollResult, UploadOutcomeDto,
 };
 use crate::model::server_profile::ServerProfile;
 use crate::store::prune::Tombstone;
@@ -546,4 +547,217 @@ pub async fn ensure_book_covers(
         .await
         .map(|n| n as i64)
         .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Stage 7 — reader. The UI asks for pages and gets local file paths; the
+// manifest fetch, the page fetch, the cache and the progress write all live on
+// the Rust side, which is what keeps transport out of the widget tree.
+// ---------------------------------------------------------------------------
+
+/// Open a book: mirror-or-read the page manifest, restore the position, and
+/// return the spread layout to draw. `mode` / `direction` / `firstPageSingle`
+/// may be empty / null to mean "use what is stored".
+#[allow(clippy::too_many_arguments)]
+pub async fn reader_open(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    base_url: String,
+    api_key: String,
+    mode: String,
+    direction: String,
+    first_page_single: Option<bool>,
+) -> Result<ReaderBookDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_open(
+        server_id,
+        book_id,
+        base_url,
+        api_key,
+        mode,
+        direction,
+        first_page_single,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Where a page already is on disk, if anywhere. Never touches the network.
+pub fn reader_page_path(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    page: i64,
+) -> Result<Option<String>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_page_path(server_id, book_id, page)
+        .map_err(|e| e.to_string())
+}
+
+/// Resolve one page for display (cache first, then fetch).
+pub async fn reader_page(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    page: i64,
+    base_url: String,
+    api_key: String,
+) -> Result<String, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_page(server_id, book_id, page, base_url, api_key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Pull the pages around one spread into the cache; returns how many landed.
+pub async fn reader_prefetch(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    spread: i64,
+    base_url: String,
+    api_key: String,
+) -> Result<i64, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_prefetch(server_id, book_id, spread, base_url, api_key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Report the device and link, and get back the window and cache numbers the
+/// core derived. Called on open and again when the network changes.
+pub fn reader_configure_device(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    device: DeviceProfileDto,
+) -> Result<ReaderWindowDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_configure_device(server_id, book_id, device)
+        .map_err(|e| e.to_string())
+}
+
+/// What the cache tiers and the memory tier hold right now.
+pub fn reader_cache_stats(db_path: String) -> Result<CacheStatsDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_cache_stats().map_err(|e| e.to_string())
+}
+
+/// Run the cleanup sweep now: ghost rows, orphan files, stale `.part` debris and
+/// entries whose bytes are no longer a whole image.
+pub fn reader_reconcile_cache(db_path: String) -> Result<CacheCleanupDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_reconcile_cache().map_err(|e| e.to_string())
+}
+
+/// Drop the prefetched-but-never-displayed bytes. Displayed pages and offline
+/// downloads are untouched by construction.
+pub fn reader_clear_prefetch(db_path: String) -> Result<i64, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_clear_prefetch().map_err(|e| e.to_string())
+}
+
+/// Release the RAM the prefetch tier mirrors, keeping the tier. This is the
+/// `onTrimMemory` answer: a stored file costs no RAM, and deleting the tier here
+/// made every backgrounding cost a fresh window of downloads on resume.
+pub fn reader_release_prefetch(db_path: String) -> Result<i64, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_release_prefetch().map_err(|e| e.to_string())
+}
+
+/// Turn to a page. Returns the resolved page/spread and whether an upload is due.
+pub fn reader_turn(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    page: i64,
+) -> Result<ReaderTurnDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_turn(server_id, book_id, page)
+        .map_err(|e| e.to_string())
+}
+
+/// Move one spread forward (delta >= 0) or backward (delta < 0).
+pub fn reader_step(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    delta: i64,
+) -> Result<ReaderTurnDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_step(server_id, book_id, delta)
+        .map_err(|e| e.to_string())
+}
+
+/// Change mode / direction mid-book without losing the place.
+pub fn reader_set_layout(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    mode: String,
+    direction: String,
+) -> Result<ReaderLayoutDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_set_layout(server_id, book_id, mode, direction)
+        .map_err(|e| e.to_string())
+}
+
+/// Mark read / mark unread: explicit statements, so they are never throttled.
+pub fn reader_mark_read(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<bool, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_mark_read(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+pub fn reader_mark_unread(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<bool, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_mark_unread(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// The UI's periodic beat. True means: run `upload_outbox` now.
+pub fn reader_tick(db_path: String, server_id: String, book_id: String) -> Result<bool, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_tick(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Backgrounding: flush-worthy now, reader stays open.
+pub fn reader_background(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<bool, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_background(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Leaving the reader for good. True means one last upload should be attempted.
+pub fn reader_close(db_path: String, server_id: String, book_id: String) -> Result<bool, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_close(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+pub fn reader_settings(db_path: String) -> Result<ReaderSettingsDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_settings().map_err(|e| e.to_string())
+}
+
+pub fn reader_set_settings(
+    db_path: String,
+    settings: ReaderSettingsDto,
+) -> Result<ReaderSettingsDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_set_settings(settings).map_err(|e| e.to_string())
 }

@@ -73,6 +73,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CollectionDetailRow dco_decode_box_autoadd_collection_detail_row(dynamic raw);
 
   @protected
+  DeviceProfileDto dco_decode_box_autoadd_device_profile_dto(dynamic raw);
+
+  @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
@@ -88,6 +91,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   LibraryCountRow dco_decode_box_autoadd_library_count_row(dynamic raw);
 
   @protected
+  ReaderSettingsDto dco_decode_box_autoadd_reader_settings_dto(dynamic raw);
+
+  @protected
   ReadlistDetailRow dco_decode_box_autoadd_readlist_detail_row(dynamic raw);
 
   @protected
@@ -101,6 +107,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BuildInfo dco_decode_build_info(dynamic raw);
+
+  @protected
+  CacheCleanupDto dco_decode_cache_cleanup_dto(dynamic raw);
+
+  @protected
+  CacheStatsDto dco_decode_cache_stats_dto(dynamic raw);
 
   @protected
   CollectionDetailRow dco_decode_collection_detail_row(dynamic raw);
@@ -119,6 +131,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ContinueReadingRow dco_decode_continue_reading_row(dynamic raw);
+
+  @protected
+  DeviceProfileDto dco_decode_device_profile_dto(dynamic raw);
 
   @protected
   EntitySyncState dco_decode_entity_sync_state(dynamic raw);
@@ -178,7 +193,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<LibraryCountRow> dco_decode_list_library_count_row(dynamic raw);
 
   @protected
+  List<Uint32List> dco_decode_list_list_prim_u_32_strict(dynamic raw);
+
+  @protected
   List<OutboxEntryDto> dco_decode_list_outbox_entry_dto(dynamic raw);
+
+  @protected
+  Uint32List dco_decode_list_prim_u_32_strict(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -247,6 +268,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   OutboxStatusDto dco_decode_outbox_status_dto(dynamic raw);
+
+  @protected
+  ReaderBookDto dco_decode_reader_book_dto(dynamic raw);
+
+  @protected
+  ReaderLayoutDto dco_decode_reader_layout_dto(dynamic raw);
+
+  @protected
+  ReaderSettingsDto dco_decode_reader_settings_dto(dynamic raw);
+
+  @protected
+  ReaderTurnDto dco_decode_reader_turn_dto(dynamic raw);
+
+  @protected
+  ReaderWindowDto dco_decode_reader_window_dto(dynamic raw);
 
   @protected
   ReadlistDetailRow dco_decode_readlist_detail_row(dynamic raw);
@@ -338,6 +374,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  DeviceProfileDto sse_decode_box_autoadd_device_profile_dto(
+      SseDeserializer deserializer);
+
+  @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
@@ -351,6 +391,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LibraryCountRow sse_decode_box_autoadd_library_count_row(
+      SseDeserializer deserializer);
+
+  @protected
+  ReaderSettingsDto sse_decode_box_autoadd_reader_settings_dto(
       SseDeserializer deserializer);
 
   @protected
@@ -373,6 +417,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BuildInfo sse_decode_build_info(SseDeserializer deserializer);
 
   @protected
+  CacheCleanupDto sse_decode_cache_cleanup_dto(SseDeserializer deserializer);
+
+  @protected
+  CacheStatsDto sse_decode_cache_stats_dto(SseDeserializer deserializer);
+
+  @protected
   CollectionDetailRow sse_decode_collection_detail_row(
       SseDeserializer deserializer);
 
@@ -392,6 +442,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   ContinueReadingRow sse_decode_continue_reading_row(
       SseDeserializer deserializer);
+
+  @protected
+  DeviceProfileDto sse_decode_device_profile_dto(SseDeserializer deserializer);
 
   @protected
   EntitySyncState sse_decode_entity_sync_state(SseDeserializer deserializer);
@@ -456,8 +509,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<Uint32List> sse_decode_list_list_prim_u_32_strict(
+      SseDeserializer deserializer);
+
+  @protected
   List<OutboxEntryDto> sse_decode_list_outbox_entry_dto(
       SseDeserializer deserializer);
+
+  @protected
+  Uint32List sse_decode_list_prim_u_32_strict(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -535,6 +595,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   OutboxStatusDto sse_decode_outbox_status_dto(SseDeserializer deserializer);
+
+  @protected
+  ReaderBookDto sse_decode_reader_book_dto(SseDeserializer deserializer);
+
+  @protected
+  ReaderLayoutDto sse_decode_reader_layout_dto(SseDeserializer deserializer);
+
+  @protected
+  ReaderSettingsDto sse_decode_reader_settings_dto(
+      SseDeserializer deserializer);
+
+  @protected
+  ReaderTurnDto sse_decode_reader_turn_dto(SseDeserializer deserializer);
+
+  @protected
+  ReaderWindowDto sse_decode_reader_window_dto(SseDeserializer deserializer);
 
   @protected
   ReadlistDetailRow sse_decode_readlist_detail_row(
@@ -631,6 +707,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       CollectionDetailRow self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_device_profile_dto(
+      DeviceProfileDto self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -647,6 +727,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_library_count_row(
       LibraryCountRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_reader_settings_dto(
+      ReaderSettingsDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_readlist_detail_row(
@@ -666,6 +750,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_build_info(BuildInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_cache_cleanup_dto(
+      CacheCleanupDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_cache_stats_dto(CacheStatsDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_collection_detail_row(
@@ -688,6 +779,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_continue_reading_row(
       ContinueReadingRow self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_device_profile_dto(
+      DeviceProfileDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_entity_sync_state(
@@ -756,8 +851,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<LibraryCountRow> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_list_prim_u_32_strict(
+      List<Uint32List> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_outbox_entry_dto(
       List<OutboxEntryDto> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_prim_u_32_strict(
+      Uint32List self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -843,6 +946,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_outbox_status_dto(
       OutboxStatusDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reader_book_dto(ReaderBookDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reader_layout_dto(
+      ReaderLayoutDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reader_settings_dto(
+      ReaderSettingsDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reader_turn_dto(ReaderTurnDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reader_window_dto(
+      ReaderWindowDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_readlist_detail_row(
