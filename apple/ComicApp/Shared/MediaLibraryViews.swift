@@ -257,6 +257,7 @@ private struct BookDetailView: View {
     let book: BookRecord
     @ObservedObject var model: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showReader = false
 
     var body: some View {
         NavigationStack {
@@ -287,6 +288,9 @@ private struct BookDetailView: View {
                         Text("阅读状态：未读").font(.subheadline).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 12) {
+                        Button("开始阅读") { showReader = true }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.readerModel(for: book) == nil)
                         Button("标记已读") {
                             model.markRead(book)
                             dismiss()
@@ -316,12 +320,39 @@ private struct BookDetailView: View {
             }
             .navigationTitle("Book")
             #if os(iOS)
+            // The reader takes the whole screen on iOS: 屏幕常亮 and brightness are
+            // part of what it promises, and a sheet would keep the shelf's chrome in
+            // the way. `fullScreenCover` is unavailable on macOS, where a sheet is the
+            // equivalent presentation.
+            .fullScreenCover(isPresented: $showReader) { readerCover }
+            #else
+            .sheet(isPresented: $showReader) { readerCover }
+            #endif
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
                 }
+            }
+        }
+    }
+
+    /// The Stage 7 reader for this book, presented by `fullScreenCover` (iOS) or
+    /// `sheet` (macOS). With no active server there is no model to build, and the
+    /// 开始阅读 button is disabled rather than showing an empty screen.
+    @ViewBuilder
+    private var readerCover: some View {
+        if let reader = model.readerModel(for: book) {
+            NavigationStack {
+                ReaderScreen(model: reader)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("关闭") { showReader = false }
+                                .foregroundStyle(.white)
+                        }
+                    }
             }
         }
     }

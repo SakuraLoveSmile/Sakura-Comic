@@ -26,7 +26,7 @@ let package = Package(
             dependencies: ["KomgaAPI", .product(name: "GRDB", package: "GRDB.swift")]
         ),
         .target(name: "KomgaSync", dependencies: ["KomgaAPI", "KomgaStore"]),
-        .target(name: "KomgaReader", dependencies: ["KomgaAPI"]),
+        .target(name: "KomgaReader", dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync"]),
         .target(
             name: "KomgaFeatures",
             dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaReader"]
