@@ -28,6 +28,50 @@ read_progress / series_metadata / book_metadata / **sync_state (v6 复合主键)
 **series_genres / series_tags / series_authors / book_tags / book_authors /
 collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服务器作用域）
 
+## v8 变更（Stage 7 阅读器）
+
+版本戳 `PRAGMA user_version = 8`。三处新增，都是「本地负责展示」在阅读链路上的延伸。
+
+### `book_pages` — 页清单镜像
+
+| 列 | 说明 |
+| --- | --- |
+| `server_id, book_id, number` | 复合主键。`number` 是**规范页号**（数组位置 + 1，1 起），不是服务器给的 `PageDto.number` |
+| `file_name, media_type` | 归一化后的页属性；`media_type` 决定这本书能不能进图像阅读器 |
+| `width, height` | 0 = 未知；未知的页不参与双页配对 |
+| `size_bytes` | 清单给的字节数（`PageDto.size` 是给人看的字符串，不解析） |
+| `fetched_at` | 镜像新鲜度 |
+
+整本替换（先删后插，一个事务）：清单没有「部分更新」这种合法状态，半份清单会让每个规范页号错位。
+有了它，**开过的书离线也能打开** —— 第二次 open 是数据库读取，回环验收用服务器日志的零增长证明。
+
+### `reader_position` — 屏幕上显示的那一页
+
+| 列 | 说明 |
+| --- | --- |
+| `server_id, book_id` | 主键，一本书一行 |
+| `page` | 阅读器当时显示的那一页 |
+| `mode, direction` | 当时用的版式（`single/double/webtoon` × `ltr/rtl/vertical`） |
+| `updated_at` | 本地时间戳 |
+
+它和 `read_progress` **不是一回事**：`read_progress.page` 是与 Komga 同步的那一份，受 Stage 6 冲突规则约束；
+`reader_position` 是本地显示状态，永不上云。分开才能精确还原 —— 合上书时停在双页 RTL 的某个跨页，
+再打开就该回到那个跨页那个版式，而不是回到第 N 页 + 全局默认方向。
+
+### `cache_entries` 的 LRU 索引
+
+```sql
+CREATE INDEX IF NOT EXISTS cache_entries_lru ON cache_entries (kind, last_access)
+```
+
+表在 v3 就建好了，一直没有写入方；页缓存是它的第一个用户。`kind ∈ {page, prefetch, download}`，
+淘汰按 `last_access`（同刻以 `key` 定序，保证两次运行淘汰结果一致），
+**`download` 不参与淘汰**（离线下载是用户的，见 [离线存储](offline-storage.md)）。
+命中 = 记账在 + 文件在；文件丢了记账行当场删掉，让记账向磁盘收敛。
+
+`delete_server_mirror` 一并级联 `book_pages` 与 `reader_position`；页文件的清理走
+`cache_entries` 的 key 前缀 `{serverId}-{bookId}-p`。
+
 ## v7 变更（Mutation Outbox 可消费）
 
 `pending_mutations` 从「只记录」变成「可消费」，两列：

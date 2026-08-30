@@ -42,7 +42,7 @@ Comic/
 | Phase 0 | Architecture Vertical Slice（真实服务器 → SQLite → 封面墙） |
 | Phase 1 | Media Library（封面墙 / 搜索 / Home / Series Detail） |
 | Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理）— Stage 5 Bootstrap + Reconcile，Stage 6 SSE + Mutation Outbox |
-| Phase 3 | Reader（单页 / 双页 / Webtoon） |
+| Phase 3 | Reader（单页 / 双页 / Webtoon）— Stage 7 阅读器基础版（Product MVP），**Stage 8 性能与缓存** |
 | Phase 4 | Offline（缓存 / 下载 / 离线浏览） |
 | Phase 5 | Platform Polish（macOS / tvOS / visionOS） |
 
@@ -235,6 +235,95 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage6-checklist.md](docs/stage6-checklist.md)。
 
+## Stage 7 — 阅读器基础版（Product MVP）
+
+可以日常使用的漫画阅读器：三种模式 × 三种方向、六项阅读设置、
+`Reader → Page Manifest → Cache → Local File → Decode → Render` 的加载管线、
+节流上传的阅读进度、相邻页预取。
+
+- **语义先行**：`specs/contracts/fixtures/reader/{paging,manifest,prefetch,throttle}.json`
+  是双端唯一事实来源（Rust `reader/*::contract_tests` 与 Swift `ReaderContractTests` 各加载同一批文件）。
+  配对与方向、清单归一化、预取窗口次序、进度节流规则（本地永远立即写、网络只在节拍上走、
+  显式动作与退出/后台立刻冲、末页 ≠ 标已读、回翻合法）逐例钉住；改动契约必改两端。
+- **模式与方向**（`reader/paging.rs` ↔ `KomgaReader/Paging`）：单页 / 双页（含封面单独、末尾落单、
+  宽或高未知的页不配对）/ 条漫；LTR / RTL / Vertical 决定屏内先后与手势，
+  **不改变「下一页是哪一页」**。
+- **页面加载**（`reader/{manifest,cache,loader}.rs` ↔ `KomgaReader/{PageManifest,PageCache,PageLoader}`）：
+  清单镜像进 `book_pages`，开过的书离线可开；页缓存 `cache_entries` 记账 +
+  `cache/pages/<key>.<ext>` 落盘（`.part` + rename，半文件不可能是命中），
+  LRU 按预算淘汰且永不删离线下载。**UI 只拿到本地文件路径，结构上无法自己发请求。**
+- **阅读进度**（`reader/{session,throttle}.rs` ↔ `KomgaReader/{ReaderSession,ProgressThrottle}`，
+  Schema v8 的 `reader_position`）：翻页在同一个调用里落
+  位置 + `read_progress` + `pending_mutations`，节流只管网络；30 页突发 = 1 行队列 = 1 个请求；
+  普通进度 / Mark Read / Mark Unread 三者各自送达（线上 body 复用 Stage 6 的 `request_for`，不另写一份）。
+- **Android**：FFI 面 `reader_*`（`ffi/bridge.rs`）+ `lib/src/reader_{api,controller,screen}.dart`；
+  屏幕常亮与亮度走平台通道 `comic/reader`（`MainActivity.kt`），不新增 pub 依赖。
+  **Apple**：`KomgaReader` + `ComicApp/Shared/Reader{Model,Screen}.swift`，
+  iOS 全屏 / macOS 弹窗，包依赖图已声明 `KomgaReader → KomgaSync`（复用 Stage 6 的线上格式）。
+- **验收**：
+  ```bash
+  bash scripts/e2e_stage7.sh   # 打开 / 三种模式 / 快翻只发一次 / 重开原位 / 断网续读 / 预取 / 三路同步
+                               # 真机腿：真实书的清单尺寸 == 实际像素，翻页写进去再原样还原
+  bash scripts/verify.sh       # cargo fmt+clippy+test · swift build+test · flutter analyze+test
+  ```
+  勾选状态、已知限制与本阶段顺带修掉的回环服务器路由遮蔽缺陷，见
+  [docs/stage7-checklist.md](docs/stage7-checklist.md)。
+
+## Stage 8 — Reader 性能与缓存
+
+Stage 7 让阅读器能用，这一阶段让它经得起长期日常使用：大图、大页数、长会话三类
+压力场景下的内存、请求数与延迟都有实测数字，缓存坏掉能自愈。
+
+- **语义先行**：`specs/contracts/fixtures/reader/window.json`（20 例 + 6 例 slot）
+  是「预取多少、并发几个、内存层多大」的唯一事实来源，Rust `reader/window.rs` 与
+  Swift `KomgaReader/WindowPlanner` 各加载同一文件。七步次序（内存 → 页成本 → 装得下
+  几页 → 模式 → 字节上限 → 网络 → 是否稳定）逐例钉住；反空转断言要求五个命名输入里
+  每一个都至少有一对「只差它且结果不同」的用例，而 `direction` 反过来要求
+  「只差方向的用例结果必须相同」——它不该改变窗口。
+- **缓存分三层**（`cache/mod.rs` ↔ `DiskImageCache`）：`thumbnails/` · `pages/`（读者
+  真看过的）· `prefetch/`（猜来的、还没看过的）。淘汰次序 download 永不参与 → prefetch
+  先于 page（**与新旧无关**）→ 同层按 `last_access`；且触发淘汰的那一条本身不可淘汰。
+- **内存层是字节预算 LRU**（`reader/memory.rs` ↔ `ByteBudgetCache`）：峰值恒 ≤ 预算，
+  单项超预算只拒绝不驱逐，重插替换不重复计数；预取页落盘的同时驻留内存，所以磁盘被
+  淘汰的预取页能从内存重新落盘而不是重下。Swift 侧原先那个**永不淘汰**的
+  `[UInt32: Data]` 就是本阶段要修的 iOS 泄漏。
+- **完整性即自愈**（`reader/integrity.rs`）：写入时全量走容器（PNG 逐 chunk CRC、
+  JPEG 段长与 EOI、GIF 结束符、WebP RIFF 长度），命中时只读头尾；截断页与「被当成 .jpg
+  缓存下来的 HTML 错误页」一律拒收并丢弃，连拒两次停止重试。AVIF/HEIC/BMP/JXL 判为
+  「看不懂但保留」——不能走它的容器不等于它坏了。
+- **Android 图片链路的两条硬规则由测试守着**（`tests/reader_architecture.rs` +
+  Dart 源码断言）：页面/封面接口出现 `u8`/`Uint8List` 即失败；`flutter_rust_bridge`
+  出现在 `src/ffi/` 之外即失败；手写 reader 层出现 `Image.network` / `Image.memory` 即失败。
+- **UI 侧落地**：`reader_device.dart` 是唯一能回答「这设备有多少内存、这块屏解码一页
+  要多少字节」的地方，核心探不到也不猜；`ImageCache` 的 `maximumSizeBytes` /
+  `maximumSize` 全部来自核心下发的计划，关书即还原；路径 memo 从「无界」改成按窗口定界。
+- **下载保护是结构不是约定**：`store::cache::protected_paths` 把 `downloads` /
+  `download_pages` 两张表与账本里的 download 行一起当作不可删除集合，淘汰、清层、
+  清书、开书清扫四处都问它——因为离线下载（Phase 4）还是空壳，保护若依赖"将来有人会
+  写那行账"，忘记的那一天就是用户书架被清扫删掉的那一天。
+- **对外接口也被走了一遍**：`--phase facade` 用 App 真正暴露的 `reader_*` 入口驱动，
+  证明清扫发生在设备档案上报时、预取字节确实镜像进内存、显示预取页会把文件从
+  `prefetch/` 改名进 `pages/`（目录文件数 4→3 与 2→3）、用户清理只丢猜来的字节。
+- **验收**：
+  ```bash
+  bash scripts/e2e_stage8.sh   # 63 项检查：520 页整本 / 真 4K / 120 次跳翻 / 300 次条漫滚动 /
+                               # 弱网 / 断网 / 网络切换 / 内存压力 / 后台恢复 / 截断页自愈
+                               # 每个相位独立进程，同时采样 RSS 与服务端日志的请求增量
+  bash scripts/verify.sh       # cargo fmt+clippy+test · Android 目标交叉检查 · swift · flutter
+  ```
+  数字、六条被证据逼出来的真实缺陷、以及尚未验证的部分（真机帧率与低内存边界、真实
+  Komga 大书、iOS 模拟器），见 [docs/stage8-checklist.md](docs/stage8-checklist.md)。
+- **真机腿**：`bash scripts/e2e_stage8_device.sh` 构建 profile APK 装进 Android 模拟器，
+  用路由 `/reader-stress` 驱动**真实阅读器**读真 HTTP 服务器，采样 `dumpsys meminfo` 与
+  服务端页日志：160 次翻页 PSS 108.4→108.4 MB（后 1/4 与首采样持平）、82 次页读取全是
+  不同页（零重复请求）、中途窗口从 13 收到 1、平台通道真的报出了 4.1 GB 物理内存、
+  ImageCache 上限等于核心下发的预算；`am send-trim-memory` 让进程真的交还 49 MB PSS
+  而屏幕上那页仍在；`svc wifi disable` 把网络栈真的关掉之后，读者把链路认成 `offline`
+  并且此后一个请求都不再发出；强迫 1.5 GB 设备类别时同一份构建把层从 256 MiB/25 槽
+  收到 192 MiB/19 槽。16 项检查全绿。
+  帧成本：暖页 p50 25ms / p95 36ms，4K 暖页 p95 21ms（`-gpu host`；换回软件光栅这两
+  个数字会变成 1020ms / 36ms，脚本因此默认 host 并把它写进注释）。
+
 ## 文档入口
 
 - [架构](docs/architecture.md)
@@ -242,4 +331,6 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
 - [数据库 Schema](docs/database-schema.md)
 - [阅读器](docs/reader.md)
 - [离线存储](docs/offline-storage.md)
+- [Stage 7 验收清单](docs/stage7-checklist.md)
+- [Stage 8 验收清单](docs/stage8-checklist.md)
 - [Behavior 契约与 Fixtures](specs/behavior.md)
