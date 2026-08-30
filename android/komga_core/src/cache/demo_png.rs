@@ -56,7 +56,23 @@ pub fn padded_page_bytes(number: u32, min_bytes: usize) -> Vec<u8> {
     large_page_bytes_padded(number, width, height, min_bytes)
 }
 
-/// A page of the given dimensions, padded to at least `min_bytes` **without
+/// Filler bytes the `tEXt` chunk must carry for the whole encoding to reach
+/// `min_bytes`; zero means "emit no `tEXt` at all".
+///
+/// A `tEXt` costs 12 framing bytes plus `pad`, a NUL and the filler — so the
+/// shortest padded page is `bare + 17`. Flooring the filler at one byte is what
+/// makes a target inside `bare + 1 ..= bare + 16` reachable at all; without the
+/// floor the encoder would emit the bare page while the length formula promised
+/// more, and the manifest would declare a size the bytes do not have.
+fn text_pad(bare: usize, min_bytes: usize) -> usize {
+    if min_bytes <= bare {
+        0
+    } else {
+        (min_bytes - bare).saturating_sub(16).max(1)
+    }
+}
+
+/// A page of *real* pixel dimensions, padded to at least `min_bytes` **without
 /// changing what it declares itself to be**.
 ///
 /// Padding has to ride in an ancillary chunk of the same image: a "4K page"
@@ -64,15 +80,17 @@ pub fn padded_page_bytes(number: u32, min_bytes: usize) -> Vec<u8> {
 /// ceiling be tested against a lie.
 pub fn large_page_bytes_padded(number: u32, width: u32, height: u32, min_bytes: usize) -> Vec<u8> {
     let (r, g, b) = color_from_seed(&format!("page-{number}"));
-    let bare = large_page_len(width, height);
-    // A tEXt chunk costs 12 framing bytes plus "pad" + NUL + the filler itself.
-    let pad = min_bytes.saturating_sub(bare + 16);
+    let pad = text_pad(large_page_len(width, height), min_bytes);
     encode_rgb_png_padded(width, height, (r, g, b), pad)
 }
 
 /// Exact length [`large_page_bytes_padded`] will produce.
 pub fn large_page_padded_len(width: u32, height: u32, min_bytes: usize) -> usize {
-    large_page_len(width, height).max(min_bytes)
+    let bare = large_page_len(width, height);
+    match text_pad(bare, min_bytes) {
+        0 => bare,
+        pad => bare + 16 + pad,
+    }
 }
 
 /// Exact byte length [`large_page_bytes`] will produce, without producing it.
@@ -106,18 +124,19 @@ fn encode_rgb_png_padded(
     let mut out = Vec::new();
     out.extend_from_slice(&PNG_SIGNATURE);
 
-    if text_pad > 0 {
-        // tEXt: keyword, NUL, then filler. Ancillary, so it may sit before IDAT.
-        let mut text = b"pad\x00".to_vec();
-        text.extend(std::iter::repeat(b'x').take(text_pad));
-        push_chunk(&mut out, b"tEXt", &text);
-    }
-
     let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&width.to_be_bytes());
     ihdr.extend_from_slice(&height.to_be_bytes());
     ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // bit depth 8, color type 2 (RGB)
     push_chunk(&mut out, b"IHDR", &ihdr);
+
+    if text_pad > 0 {
+        // tEXt: keyword, NUL, then filler. Ancillary, so it may sit between IHDR
+        // and IEND — but IHDR itself has to stay first after the signature.
+        let mut text = b"pad\x00".to_vec();
+        text.extend(std::iter::repeat(b'x').take(text_pad));
+        push_chunk(&mut out, b"tEXt", &text);
+    }
 
     // Raw scanlines, each prefixed with filter byte 0 (None).
     let stride = width as usize * 3;
@@ -398,12 +417,72 @@ mod tests {
         unzlib_stored(&idat)
     }
 
+    /// The unpadded formula had an exactness test; the padded one never had one,
+    /// which is how a band of unreachable targets survived in it.
+    #[test]
+    fn the_padded_length_formula_is_exact_across_the_text_chunk_band() {
+        let bare = large_page_len(66, 98);
+        let mut targets = vec![
+            0usize,
+            bare / 2,
+            bare,
+            bare + 1,
+            bare + 8,
+            bare + 16,
+            bare + 17,
+        ];
+        targets.extend([bare + 4096, bare + 65_536]);
+        for min_bytes in targets {
+            let real = large_page_bytes_padded(7, 66, 98, min_bytes).len();
+            assert_eq!(
+                real,
+                large_page_padded_len(66, 98, min_bytes),
+                "declared and produced disagree when padding to {min_bytes}"
+            );
+            assert!(
+                real >= min_bytes,
+                "a page padded to {min_bytes} came out {real} bytes"
+            );
+        }
+    }
+
     #[test]
     fn a_padded_page_still_reports_its_real_dimensions() {
-        let bytes = padded_page_bytes(2, 5_000);
+        // The bare encoding of page 2 is ~19.5 KB, so a 5000-byte floor asks for no
+        // padding at all — this used to be a test of the unpadded path.
+        let bare = large_page_len(66, 98);
+        let bytes = padded_page_bytes(2, bare + 4096);
+        assert!(
+            bytes.windows(4).any(|w| w == b"tEXt"),
+            "no tEXt chunk was emitted, so this proved nothing about padding"
+        );
         let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
         let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
         assert_eq!((width, height), page_dimensions(2));
+    }
+
+    /// The fixture must not be looser than the checker that judges its output.
+    /// `IHDR` has to be the first chunk after the signature; a `tEXt` in front of
+    /// it is what `inspect_png` calls "tEXt precedes IHDR", so every padded stress
+    /// book would have been refused as corrupt — and no `--stress` run asked for
+    /// padding, so nobody saw it.
+    #[test]
+    fn a_padded_page_passes_the_readers_own_integrity_walk() {
+        use crate::reader::integrity::{inspect, Verdict};
+        let bare = large_page_len(66, 98);
+        for min_bytes in [bare + 1, bare + 4096, bare + 200_000] {
+            let bytes = padded_page_bytes(2, min_bytes);
+            assert_eq!(
+                bytes.len(),
+                large_page_padded_len(66, 98, min_bytes),
+                "the manifest endpoint would declare a size the bytes do not have"
+            );
+            let verdict = inspect(&bytes, "image/png", Some(bytes.len() as i64));
+            assert!(
+                matches!(verdict, Verdict::Valid(_) | Verdict::Reclassified { .. }),
+                "pad to {min_bytes}: {verdict:?}"
+            );
+        }
     }
 
     #[test]

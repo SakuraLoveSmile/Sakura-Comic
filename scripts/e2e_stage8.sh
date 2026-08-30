@@ -12,7 +12,12 @@
 # while it runs, so "memory does not grow" is a measured curve, not an opinion,
 # and no phase can inherit another's caches.
 #
-#   scripts/e2e_stage8.sh [--rust-only] [--keep] [--only PHASE[,PHASE]]
+#   scripts/e2e_stage8.sh [--rust-only] [--keep]
+#
+# One phase at a time is not a flag here: drive the built binary directly, e.g.
+#   android/komga_core/target/debug/stage8_smoke --phase resume-loop --db /tmp/x.sqlite \
+#     --cache /tmp/cache --base-url http://127.0.0.1:PORT --key fixture-key \
+#     --server-id A --book small-520
 #
 # Live leg: KOMGA_BASE_URL + KOMGA_API_KEY run the same big-book walk against a
 # real Komga. Without them the leg is skipped and says so.
@@ -27,7 +32,6 @@ SERVER_PID=""
 SAMPLE_PID=""
 PEAK_RSS=0
 FAILURES=0
-ONLY=""
 KEEP=0
 RUST_ONLY=0
 KEY="fixture-key"
@@ -45,7 +49,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --rust-only) RUST_ONLY=1 ;;
     --keep) KEEP=1 ;;
-    --only) ONLY="$2"; shift ;;
+    --only) echo "--only is not implemented — see the header: run one phase by driving stage8_smoke directly" >&2; exit 2 ;;
     *) echo "unknown flag $1" >&2; exit 2 ;;
   esac
   shift
@@ -66,6 +70,11 @@ check_le() { # check_le <description> <actual> <limit>
   if [ "$(awk -v a="$2" -v b="$3" 'BEGIN{print (a<=b)?1:0}')" = 1 ]; then
     printf '   ok   %s (%s <= %s)\n' "$1" "$2" "$3"
   else fail "$1: $2 exceeds $3"; fi
+}
+check_ge() { # check_ge <description> <actual> <floor>
+  if [ "$(awk -v a="$2" -v b="$3" 'BEGIN{print (a>=b)?1:0}')" = 1 ]; then
+    printf '   ok   %s (%s >= %s)\n' "$1" "$2" "$3"
+  else fail "$1: $2 below the floor $3"; fi
 }
 
 say "1/4 build"
@@ -104,6 +113,10 @@ BASE_4K="stress-4k,6,3840,2160,0"
 BASE_SLOW="slow-40,40,160,220,0"
 BASE_ROTTEN="rotten-12,12,140,200,0"
 BASE_WARM="warm-40,40,140,200,0"
+# The only book whose pages carry an ancillary chunk (tEXt padding). Every other
+# shape asks for PAD=0, so a fixture writing chunks in an order the reader rejects
+# would never have been served by a gate.
+BASE_PADDED="padded-6,6,120,180,300000"
 
 say "2/4 fixture servers"
 start_server small "$BASE_SMALL"
@@ -111,11 +124,13 @@ start_server fourk "$BASE_4K"
 start_server slow "$BASE_SLOW" --delay-ms 120
 start_server rotten "$BASE_ROTTEN" --truncate-every 3
 start_server warm "$BASE_WARM"
+start_server padded "$BASE_PADDED"
 SMALL_URL="http://127.0.0.1:$(cat "$WORK/small.port")"
 FOURK_URL="http://127.0.0.1:$(cat "$WORK/fourk.port")"
 SLOW_URL="http://127.0.0.1:$(cat "$WORK/slow.port")"
 ROTTEN_URL="http://127.0.0.1:$(cat "$WORK/rotten.port")"
 WARM_URL="http://127.0.0.1:$(cat "$WORK/warm.port")"
+PADDED_URL="http://127.0.0.1:$(cat "$WORK/padded.port")"
 # Port 1 is reserved and nothing can listen on it: a genuinely unreachable server.
 OFFLINE_URL="http://127.0.0.1:1"
 # An unreachable *host* is not the same as an unreachable port; this is the
@@ -252,6 +267,19 @@ else
   fail "reading slowed across the book: $(metric "$BIG" mean_first_quarter_us)us -> $(metric "$BIG" mean_last_quarter_us)us"
 fi
 printf '   ok   turn p95 %sus over %s turns\n' "$(metric "$BIG" p95_us)" "520"
+
+# The padded book is the only shape whose pages carry an ancillary tEXt chunk, and
+# the cache refuses any page the integrity walk calls corrupt — so this walk is what
+# makes "the fixture is looser than the checker" fail loudly instead of quietly.
+start_sampling padded-walk padded "$SMOKE" --phase big-book --db "$WORK/padded.sqlite" \
+  --cache "$WORK/cache-padded" --base-url "$PADDED_URL" --offline-url "$OFFLINE_URL" \
+  --key "$KEY" --server-id A --book padded-6 --min-pages 6 \
+  --device-memory $PHONE_RAM --pool-budget $POOL --network wifi
+PAD="$WORK/padded-walk.out"
+check_ge "the pages really carried their padding" "$(metric "$PAD" avg_page_bytes)" "300000"
+check "a padded page is not corrupt to the reader" "$(metric "$PAD" page_count)" "6"
+check "every padded page was displayed" "$(metric "$PAD" distinct_pages)" "6"
+check_no_duplicates padded-walk page_requests
 
 # 4K pages in a 40 MiB pool: two pages fill it. The plan has to notice.
 start_sampling large-pages fourk "$SMOKE" --phase large-pages --db "$WORK/4k.sqlite" \

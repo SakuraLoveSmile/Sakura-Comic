@@ -390,6 +390,7 @@ fn phase_big_book(args: &Args) -> Smoke {
     let plan = plan_for(args, avg);
     report_window(&plan);
     metric("page_count", count);
+    metric("avg_page_bytes", avg);
 
     let spreads = loader
         .layout_for(ReadMode::parse(&args.mode), Direction::Ltr, false)
