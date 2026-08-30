@@ -1,12 +1,14 @@
-//! Disk cache (thumbnails / pages) with LRU-friendly layout:
+//! Disk cache with the three tiers the reader needs:
 //!
 //!   cache/
-//!   ├── thumbnails/
-//!   └── pages/
+//!   ├── thumbnails/   covers, keyed per entity
+//!   ├── pages/        bytes the reader actually displayed, plus offline downloads
+//!   └── prefetch/     bytes pulled ahead of the reader and not yet looked at
 //!
-//! Phase 0 ships filesystem primitives; LRU eviction and size limits land
-//! with cache_entries bookkeeping (docs/offline-storage.md). LRU must never
-//! evict offline downloads.
+//! The split between `pages/` and `prefetch/` is what makes eviction honest:
+//! unseen bytes are worth less than seen bytes, so they are always the first
+//! victims (`store::cache::evict_to_budget`). LRU accounting lives in the
+//! `cache_entries` ledger, not on the filesystem; these are the primitives.
 
 pub mod cover;
 pub mod demo_png;
@@ -14,19 +16,29 @@ pub mod demo_png;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const THUMBNAILS: &str = "thumbnails";
-const PAGES: &str = "pages";
+pub const THUMBNAILS_DIR: &str = "thumbnails";
+pub const PAGES_DIR: &str = "pages";
+pub const PREFETCH_DIR: &str = "prefetch";
+
+/// Every tier, in the order a sweep should walk them.
+pub const TIERS: [&str; 3] = [THUMBNAILS_DIR, PAGES_DIR, PREFETCH_DIR];
+
+/// Suffix a partially written file carries. It is never a cache candidate, so
+/// anything found with it during a sweep is debris from an interrupted write.
+pub const PART_SUFFIX: &str = ".part";
 
 pub struct DiskCache {
     root: PathBuf,
 }
 
 impl DiskCache {
-    /// root is the .../cache directory; thumbnails/ and pages/ are created below it.
+    /// root is the .../cache directory; the three tier directories are created
+    /// below it so a later path build never needs to mkdir.
     pub fn new(root: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = root.as_ref().to_path_buf();
-        fs::create_dir_all(root.join(THUMBNAILS))?;
-        fs::create_dir_all(root.join(PAGES))?;
+        for tier in TIERS {
+            fs::create_dir_all(root.join(tier))?;
+        }
         Ok(Self { root })
     }
 
@@ -35,11 +47,35 @@ impl DiskCache {
     }
 
     pub fn thumbnail_path(&self, key: &str) -> PathBuf {
-        self.root.join(THUMBNAILS).join(safe_key(key))
+        self.root.join(THUMBNAILS_DIR).join(safe_key(key))
     }
 
     pub fn page_path(&self, key: &str) -> PathBuf {
-        self.root.join(PAGES).join(safe_key(key))
+        self.root.join(PAGES_DIR).join(safe_key(key))
+    }
+
+    pub fn prefetch_path(&self, key: &str) -> PathBuf {
+        self.root.join(PREFETCH_DIR).join(safe_key(key))
+    }
+
+    /// Move a file from one tier's directory to another's, keeping its name.
+    /// This is the prefetch-to-page promotion, and it must stay a rename:
+    /// copying a 24 MB page to promote it would cost the reader a frame.
+    pub fn relocate(&self, from: &Path, to_tier: &str) -> std::io::Result<PathBuf> {
+        let name = from
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("cache path has no file name"))?;
+        let target = self.root.join(to_tier).join(name);
+        match fs::rename(from, &target) {
+            Ok(()) => Ok(target),
+            // Same filesystem by construction, so this is the rare
+            // cross-device/exfat case; a copy is slow but correct.
+            Err(_) => {
+                fs::copy(from, &target)?;
+                fs::remove_file(from)?;
+                Ok(target)
+            }
+        }
     }
 
     /// Write bytes under thumbnails/ and return the file path.
@@ -66,10 +102,46 @@ impl DiskCache {
         }
     }
 
-    /// Total bytes currently stored in thumbnails/ and pages/.
+    /// File names present in one tier directory. Empty when the directory is
+    /// gone, which is a legitimate state for a sweep (nothing to reconcile).
+    pub fn files_in(&self, tier: &str) -> std::io::Result<Vec<String>> {
+        let Ok(entries) = fs::read_dir(self.root.join(tier)) else {
+            return Ok(Vec::new());
+        };
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                if let Some(name) = entry.file_name().to_str() {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    /// Delete every `*.part` staging file. A download that was interrupted
+    /// leaves one behind, and nothing ever reads it, so it is pure waste.
+    /// Returns how many files were removed.
+    pub fn remove_stale_parts(&self) -> std::io::Result<usize> {
+        let mut removed = 0usize;
+        for tier in TIERS {
+            for name in self.files_in(tier)? {
+                if name.ends_with(PART_SUFFIX) {
+                    let path = self.root.join(tier).join(name);
+                    fs::remove_file(&path)?;
+                    removed += 1;
+                }
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Total bytes currently stored in all three tiers.
     pub fn bytes_used(&self) -> std::io::Result<u64> {
         let mut total = 0u64;
-        for dir in [THUMBNAILS, PAGES] {
+        for dir in TIERS {
             for entry in fs::read_dir(self.root.join(dir))? {
                 let entry = entry?;
                 if entry.file_type()?.is_file() {

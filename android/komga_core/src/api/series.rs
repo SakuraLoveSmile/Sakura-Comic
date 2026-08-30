@@ -62,6 +62,15 @@ pub fn series_thumbnail_url(base_url: &str, series_id: &str) -> String {
     )
 }
 
+/// The process-wide client pool, keyed by base URL.
+fn pool() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, KomgaClient>> {
+    static POOL: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::BTreeMap<String, KomgaClient>>,
+    > = std::sync::OnceLock::new();
+    POOL.get_or_init(Default::default)
+}
+
+#[derive(Clone)]
 pub struct KomgaClient {
     pub(crate) base_url: String,
     pub(crate) auth: AuthMethod,
@@ -82,6 +91,53 @@ impl KomgaClient {
             auth,
             http,
         })
+    }
+
+    /// A client that reuses the process-wide connection pool for this server.
+    ///
+    /// `new` above builds a fresh `reqwest::Client`, which means a fresh pool and
+    /// a fresh TCP connection. Reading a comic is one request per page, so with
+    /// `new` every page turn pays a handshake the previous page could have
+    /// skipped — measured on an Android emulator as roughly a second per
+    /// previously-unseen page. This is the same client with the same keep-alive
+    /// connections, keyed by base URL; a changed credential replaces the entry,
+    /// so switching servers or signing in again never reuses the wrong auth.
+    pub fn shared(base_url: String, auth: AuthMethod) -> Result<Self> {
+        let mut guard = pool()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(existing) = guard.get(&base_url) {
+            if existing.auth == auth {
+                return Ok(existing.clone());
+            }
+        }
+        // A different credential for the same URL replaces that entry. It must
+        // not touch any other server's — an earlier version retained by
+        // credential across the whole map, which quietly dropped every other
+        // server's pooled client, and a test now forbids.
+        let client = Self::new(base_url.clone(), auth)?;
+        guard.insert(base_url, client.clone());
+        Ok(client)
+    }
+
+    /// Drop one server's pooled client. Called when a server is deleted (or its
+    /// credential revoked), so the pool cannot keep a useable credential alive
+    /// for a server the user has removed.
+    pub fn forget(base_url: &str) {
+        if let Ok(mut guard) = pool().lock() {
+            guard.remove(base_url);
+        }
+    }
+
+    /// What credential is pooled for one URL, for tests only. Reads the same
+    /// static `shared` writes, so it cannot drift from the real pool.
+    #[cfg(test)]
+    pub(crate) fn pooled_auth(base_url: &str) -> Option<AuthMethod> {
+        pool()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(base_url)
+            .map(|client| client.auth.clone())
     }
 
     pub async fn series_page(&self, request: &PageRequest) -> Result<SeriesPage> {
@@ -113,6 +169,47 @@ impl KomgaClient {
 
 #[cfg(test)]
 mod tests {
+    /// The pool exists so a page turn does not pay a fresh handshake the previous
+    /// page could have reused — and it must never hand a URL the wrong
+    /// credential, which would be an auth leak dressed up as an optimisation.
+    #[test]
+    fn shared_reuses_one_client_per_url_and_never_the_wrong_credential() {
+        let url = "http://pool.test.invalid:1";
+        let other = "http://pool-other.test.invalid:1";
+        let first = KomgaClient::shared(url.to_string(), AuthMethod::ApiKey { key: "k1".into() })
+            .expect("client");
+        let second = KomgaClient::shared(url.to_string(), AuthMethod::ApiKey { key: "k1".into() })
+            .expect("client");
+        assert_eq!(first.base_url, second.base_url);
+        assert_eq!(
+            KomgaClient::pooled_auth(url),
+            Some(AuthMethod::ApiKey { key: "k1".into() }),
+            "the pooled entry is the credential we asked for"
+        );
+
+        // Same URL, new credential: replaced, not shadowed.
+        KomgaClient::shared(url.to_string(), AuthMethod::ApiKey { key: "k2".into() })
+            .expect("client");
+        assert_eq!(
+            KomgaClient::pooled_auth(url),
+            Some(AuthMethod::ApiKey { key: "k2".into() }),
+            "an old credential must not stay pooled behind a new one"
+        );
+
+        // Two servers keep their own credentials.
+        KomgaClient::shared(other.to_string(), AuthMethod::ApiKey { key: "k3".into() })
+            .expect("client");
+        assert_eq!(
+            KomgaClient::pooled_auth(other),
+            Some(AuthMethod::ApiKey { key: "k3".into() })
+        );
+        assert_eq!(
+            KomgaClient::pooled_auth(url),
+            Some(AuthMethod::ApiKey { key: "k2".into() }),
+            "pooling a second server must not disturb the first"
+        );
+    }
+
     use super::*;
     use crate::model::series::Series;
 

@@ -103,6 +103,9 @@ pub fn upsert_synced_read_progress(
         "INSERT INTO read_progress (server_id, book_id, page, completed, server_updated_at, mutation_pending)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(server_id, book_id) DO UPDATE SET
+           -- `page` is None for MARK_READ: keep the page already mirrored,
+           -- because the wire body omits it too and the mirror must not drift
+           -- ahead of what the server is being told.
            page = excluded.page,
            completed = excluded.completed,
            server_updated_at = excluded.server_updated_at,
@@ -121,6 +124,33 @@ pub fn upsert_synced_read_progress(
 }
 
 /// The queued local intent for one book, if any (tests + the upload phase).
+/// What the local mirror holds for one book. `page` is 0 when the row exists
+/// but carries no page (mark-unread leaves it that way).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoredProgress {
+    pub page: i64,
+    pub completed: bool,
+}
+
+pub fn stored_progress(
+    conn: &Connection,
+    server_id: &str,
+    book_id: &str,
+) -> rusqlite::Result<Option<StoredProgress>> {
+    conn.query_row(
+        "SELECT COALESCE(page, 0), completed FROM read_progress
+         WHERE server_id = ?1 AND book_id = ?2",
+        params![server_id, book_id],
+        |row| {
+            Ok(StoredProgress {
+                page: row.get(0)?,
+                completed: row.get::<_, i64>(1)? != 0,
+            })
+        },
+    )
+    .optional()
+}
+
 pub fn pending_mutation_for(conn: &Connection, server_id: &str, book_id: &str) -> Option<String> {
     conn.query_row(
         "SELECT mutation_type FROM pending_mutations
@@ -192,7 +222,10 @@ fn local_mutation(
         "INSERT INTO read_progress (server_id, book_id, page, completed, local_updated_at, mutation_pending)
          VALUES (?1, ?2, ?3, ?4, ?5, 1)
          ON CONFLICT(server_id, book_id) DO UPDATE SET
-           page = excluded.page,
+           -- `page` is None for MARK_READ: keep the page already mirrored,
+           -- because the wire body omits it too and the mirror must not drift
+           -- ahead of what the server is being told.
+           page = COALESCE(excluded.page, read_progress.page),
            completed = excluded.completed,
            local_updated_at = excluded.local_updated_at,
            mutation_pending = 1",

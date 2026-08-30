@@ -24,6 +24,13 @@
 //!   DELETE /api/v1/books/{id}/read-progress   204            (mark unread)
 //!   GET    /sse/v1/events                     text/event-stream
 //!
+//! Stage 7 adds the reader's two read endpoints: the page manifest
+//! (`GET /api/v1/books/{id}/pages`) and page images
+//! (`GET /api/v1/books/{id}/pages/{n}?zero_based=false`), the latter serving
+//! deterministic PNGs whose width encodes the page number. Every page read is
+//! appended to `--page-journal`, so a script can prove what the reader asked
+//! for and — equally important — that a second open asked for nothing.
+//!
 //! Accepted writes are journalled (one JSON object per line) so a script can
 //! assert what the client actually put on the wire, and merged into a progress
 //! overlay so a later `GET /api/v1/books/{id}` reports them — that is what makes
@@ -45,6 +52,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use komga_core::cache::demo_png::{
+    demo_page_bytes, large_page_bytes, large_page_bytes_padded, large_page_padded_len,
+    page_dimensions,
+};
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut config = Config::default();
@@ -65,12 +77,27 @@ fn main() {
             "--progress-file" => take(&mut |v| config.progress_file = PathBuf::from(v)),
             "--fault-file" => take(&mut |v| config.fault_file = PathBuf::from(v)),
             "--sse-file" => take(&mut |v| config.sse_file = PathBuf::from(v)),
+            "--page-journal" => take(&mut |v| config.page_journal = PathBuf::from(v)),
+            // Stage 8 stress knobs. `--stress BOOK,PAGES,WIDTH,HEIGHT,PAD` makes
+            // the server answer for one extra book whose pages are `PAGES` deep
+            // and `WIDTH`x`HEIGHT` big, padded to at least `PAD` bytes each —
+            // which is how a 500-page webtoon and a 4K scan are testable at all.
+            "--stress" => take(&mut |v| config.stress = StressSpec::parse(&v)),
+            // Sleep before every page response: the weak-link verdict is only
+            // testable if something can be slow.
+            "--delay-ms" => {
+                take(&mut |v| config.delay_ms = v.parse().expect("--delay-ms takes a number"))
+            }
+            // Answer one page in `N` with only part of its bytes, under the size
+            // the manifest declared: the short read a real truncated download is.
+            "--truncate-every" => take(&mut |v| config.truncate_every = v.parse().unwrap_or(0)),
             "--port" => take(&mut |v| config.port = v.parse().expect("--port takes a number")),
             "--help" | "-h" => {
                 println!(
                     "usage: komga_fixture_server --scenario PATH --snapshot-file PATH \
                      [--expect-key KEY] [--port N] [--journal PATH] [--progress-file PATH] \
-                     [--fault-file PATH] [--sse-file PATH]"
+                     [--fault-file PATH] [--sse-file PATH] [--page-journal PATH] \
+                     [--stress BOOK,PAGES,WIDTH,HEIGHT,PAD] [--delay-ms N] [--truncate-every N]"
                 );
                 return;
             }
@@ -105,8 +132,53 @@ struct Config {
     fault_file: PathBuf,
     journal: PathBuf,
     sse_file: PathBuf,
+    page_journal: PathBuf,
     expect_key: String,
     port: u16,
+    stress: Option<StressSpec>,
+    delay_ms: u64,
+    truncate_every: u32,
+}
+
+/// The synthetic stress book: id, page depth, pixel dimensions, minimum bytes.
+#[derive(Clone, Debug)]
+struct StressSpec {
+    book: String,
+    pages: u32,
+    width: u32,
+    height: u32,
+    pad_bytes: usize,
+}
+
+impl StressSpec {
+    fn parse(value: &str) -> Option<StressSpec> {
+        let mut parts = value.split(',');
+        let book = parts.next()?.to_string();
+        let pages = parts.next()?.parse().ok()?;
+        let width = parts.next()?.parse().ok()?;
+        let height = parts.next()?.parse().ok()?;
+        let pad_bytes = parts.next().map(|v| v.parse().unwrap_or(0)).unwrap_or(0);
+        Some(StressSpec {
+            book,
+            pages,
+            width,
+            height,
+            pad_bytes,
+        })
+    }
+}
+
+/// A padded page is only correct if its declared size matches the body, so both
+/// endpoints go through the same helper.
+/// Both endpoints ask the same helper, so the declared size and the served body
+/// can never disagree — which is exactly the difference the short-read check has
+/// to be able to trust.
+fn stress_bytes(spec: &StressSpec, number: u32) -> Vec<u8> {
+    if spec.pad_bytes > 0 {
+        large_page_bytes_padded(number, spec.width, spec.height, spec.pad_bytes)
+    } else {
+        large_page_bytes(number, spec.width, spec.height)
+    }
 }
 
 /// The snapshot named in `snapshot_file`, looked up in the scenario JSON.
@@ -226,11 +298,34 @@ fn route(stream: &mut TcpStream, config: &Config, request: &Request) -> std::io:
             return page_response(stream, &items, page, size);
         }
     }
+    // ---- Stage 7: the reader's read endpoints -------------------------------
+    if let Some(book_id) = path
+        .strip_prefix("/api/v1/books/")
+        .and_then(|rest| rest.strip_suffix("/pages"))
+    {
+        if !book_id.contains('/') {
+            return pages_route(stream, config, book_id);
+        }
+    }
+    if let Some(rest) = path.strip_prefix("/api/v1/books/") {
+        if let Some((book_id, tail)) = rest.split_once("/pages/") {
+            if !book_id.contains('/') && !tail.contains('/') {
+                return page_image_route(stream, config, book_id, tail, &request.query);
+            }
+        }
+    }
+    // The literal book routes must be answered BEFORE the `{bookId}` pattern
+    // below, which otherwise swallows them: `/api/v1/books/ondeck` matching
+    // "a book whose id is ondeck" answers 404 and silently breaks every
+    // bootstrap that reads the on-deck shelf.
+    if path == "/api/v1/books/ondeck" {
+        return page_response(stream, &page_items(&state, &["onDeck"]), page, size);
+    }
     // `GET /api/v1/books/{id}` — the Targeted Re-fetch the uploader must do
     // before it writes anything.
     if let Some(book_id) = path
         .strip_prefix("/api/v1/books/")
-        .filter(|id| !id.contains('/'))
+        .filter(|id| !id.contains('/') && *id != "ondeck" && *id != "duplicates" && *id != "latest")
     {
         let found = all_books(&state)
             .into_iter()
@@ -254,7 +349,6 @@ fn route(stream: &mut TcpStream, config: &Config, request: &Request) -> std::io:
             );
         }
         "/api/v1/series" => page_items(&state, &["series"]),
-        "/api/v1/books/ondeck" => page_items(&state, &["onDeck"]),
         "/api/v1/collections" => page_items(&state, &["collections"]),
         "/api/v1/readlists" => page_items(&state, &["readlists"]),
         _ => return respond(stream, 404, r#"{"message":"not found"}"#),
@@ -446,6 +540,171 @@ fn now_rfc3339() -> String {
     // Must be RFC 3339: the client parses this stamp to decide conflict rule R4,
     // and an unreadable stamp would make every remote change look old.
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// Pages declared for one book in the live snapshot. The reader must see
+/// exactly what the mirrored `books.pages_count` already promised it.
+fn declared_pages(config: &Config, book_id: &str) -> Option<u32> {
+    if let Some(spec) = &config.stress {
+        if spec.book == book_id {
+            return Some(spec.pages);
+        }
+    }
+    let state = current_snapshot(config)?;
+    let book = all_books(&state)
+        .into_iter()
+        .find(|book| book.get("id").and_then(Value::as_str) == Some(book_id))?;
+    Some(book["media"]["pagesCount"].as_u64().unwrap_or(24) as u32)
+}
+
+/// `GET /api/v1/books/{id}/pages` -> `array<PageDto>`, 1-based `number`, with
+/// the dimensions the image endpoint will actually answer with.
+fn pages_route(stream: &mut TcpStream, config: &Config, book_id: &str) -> std::io::Result<()> {
+    page_journal(config, &json!({ "kind": "manifest", "bookId": book_id }));
+    if let Some(spec) = &config.stress {
+        if spec.book == book_id {
+            let size = large_page_padded_len(spec.width, spec.height, spec.pad_bytes);
+            let pages: Vec<Value> = (1..=spec.pages)
+                .map(|number| {
+                    json!({
+                        "fileName": format!("{number:04}.png"),
+                        "mediaType": "image/png",
+                        "number": number,
+                        "size": format!("{:.1} MB", size as f64 / 1_000_000.0),
+                        "sizeBytes": size,
+                        "width": spec.width,
+                        "height": spec.height,
+                    })
+                })
+                .collect();
+            return respond(stream, 200, &serde_json::to_string(&pages).unwrap());
+        }
+    }
+    let Some(count) = declared_pages(config, book_id) else {
+        return respond(stream, 404, r#"{"message":"book not found"}"#);
+    };
+    let pages: Vec<Value> = (1..=count)
+        .map(|number| {
+            let (width, height) = page_dimensions(number);
+            let bytes = demo_page_bytes(number).len();
+            json!({
+                "fileName": format!("{number:03}.png"),
+                "mediaType": "image/png",
+                "number": number,
+                "size": format!("{:.1} MB", bytes as f64 / 1_000_000.0),
+                "sizeBytes": bytes,
+                "width": width,
+                "height": height,
+            })
+        })
+        .collect();
+    respond(stream, 200, &serde_json::to_string(&pages).unwrap())
+}
+
+/// `GET /api/v1/books/{id}/pages/{n}` -> image bytes.
+///
+/// `zero_based` is honoured the way Komga honours it (absent means 1-based),
+/// but the read is journalled either way: the client contract is to send
+/// `zero_based=false` explicitly, and the journal is how a script proves it.
+fn page_image_route(
+    stream: &mut TcpStream,
+    config: &Config,
+    book_id: &str,
+    raw_number: &str,
+    query: &str,
+) -> std::io::Result<()> {
+    let asked: u32 = match raw_number.parse() {
+        Ok(number) => number,
+        Err(_) => {
+            return respond(
+                stream,
+                400,
+                r#"{"message":"pageNumber must be an integer"}"#,
+            )
+        }
+    };
+    // `query_param` parses numbers, so the boolean flag is read directly off
+    // the query string. Absent means 1-based, which is Komga's own default.
+    let zero_based = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("zero_based="))
+        .is_some_and(|value| value != "0" && value != "false");
+    page_journal(
+        config,
+        &json!({
+            "kind": "page",
+            "bookId": book_id,
+            "asked": asked,
+            "zeroBasedSent": query.contains("zero_based"),
+        }),
+    );
+    let number = if zero_based { asked + 1 } else { asked };
+    if config.delay_ms > 0 {
+        thread::sleep(std::time::Duration::from_millis(config.delay_ms));
+    }
+    if let Some(spec) = &config.stress {
+        if spec.book == book_id && number >= 1 && number <= spec.pages {
+            let mut bytes = stress_bytes(spec, number);
+            let wounded = config.truncate_every > 0 && number % config.truncate_every == 0;
+            // This request was already journalled above, once. A second entry
+            // would double every count the acceptance script reads, and the
+            // journal is the witness that is supposed to be independent.
+            if wounded {
+                // Shorter than the manifest declared, and complete as an HTTP
+                // response: only the declared-size comparison can catch this.
+                let keep = bytes.len() / 2;
+                bytes.truncate(keep);
+            }
+            return respond_bytes(stream, 200, "image/png", &bytes);
+        }
+    }
+    let Some(count) = declared_pages(config, book_id) else {
+        return respond(stream, 404, r#"{"message":"book not found"}"#);
+    };
+    if number == 0 || number > count {
+        // A reader that asks for page 0 or page N+1 must hear 404 rather than
+        // be handed a clamped image it would happily render.
+        return respond(stream, 404, r#"{"message":"page out of range"}"#);
+    }
+    let bytes = demo_page_bytes(number);
+    respond_bytes(stream, 200, "image/png", &bytes)
+}
+
+fn page_journal(config: &Config, entry: &Value) {
+    if config.page_journal.as_os_str().is_empty() {
+        return;
+    }
+    use std::fs::OpenOptions;
+    let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&config.page_journal)
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{entry}");
+    let _ = file.flush();
+}
+
+fn respond_bytes(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let reason = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        _ => "Server Error",
+    };
+    let head = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
 }
 
 fn all_books(state: &Value) -> Vec<Value> {

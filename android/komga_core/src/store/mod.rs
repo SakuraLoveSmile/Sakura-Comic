@@ -3,10 +3,13 @@
 
 pub mod app_state;
 pub mod books;
+pub mod cache;
 pub mod collections;
 pub mod fts;
 pub mod libraries;
 pub mod outbox;
+pub mod pages;
+pub mod position;
 pub mod prune;
 pub mod query;
 pub mod read_progress;
@@ -41,6 +44,8 @@ pub fn delete_server_mirror(conn: &Connection, server_id: &str) -> rusqlite::Res
     for table in [
         "series",
         "books",
+        "book_pages",
+        "reader_position",
         "series_metadata",
         "book_metadata",
         "series_tags",
@@ -95,6 +100,14 @@ fn configure(conn: &Connection) -> rusqlite::Result<()> {
     // reconcile take 11s, which is far too slow for a foreground trigger.
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
+    // Wait rather than fail when another connection is mid-write. The reader opens
+    // a fresh connection per FFI call, and a prefetch pass commits a batch of
+    // `cache_entries` rows while position writes and the sync tick can be running:
+    // without a busy timeout SQLite returns SQLITE_BUSY *immediately*, the
+    // transaction is dropped, and the page files already written become orphans
+    // that the next sweep deletes — so the same pages get downloaded again on
+    // every resume. Observed on an Android device as 20 reads for 4 distinct pages.
+    conn.pragma_update(None, "busy_timeout", "5000")?;
     conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.pragma_update(None, "cache_size", "-8000")?;
     Ok(())
@@ -103,6 +116,40 @@ fn configure(conn: &Connection) -> rusqlite::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The setting that stops a contended commit from silently discarding work.
+    #[test]
+    fn a_connection_waits_for_another_writer_instead_of_failing() {
+        let conn = open_in_memory().unwrap();
+        let timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, 5000, "busy_timeout is what makes WAL usable");
+    }
+
+    /// WAL has to be checked on a file: SQLite refuses it for `:memory:` and
+    /// answers `memory` no matter what `configure` asked for, so an in-memory
+    /// assertion here would be testing a mode the production store never uses.
+    #[test]
+    fn a_file_backed_connection_runs_in_wal() {
+        let dir = std::env::temp_dir().join(format!("komga_store_wal_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("komga.db");
+        let conn = open(&path).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(mode.to_lowercase(), "wal");
+        // 1 == NORMAL: the fsync-per-commit that made a no-op reconcile take 11s.
+        assert_eq!(
+            sync, 1,
+            "WAL without NORMAL loses the speedup it exists for"
+        );
+    }
 
     #[test]
     fn open_in_memory_migrates() {

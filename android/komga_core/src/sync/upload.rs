@@ -424,8 +424,15 @@ mod tests {
         let conn = open_in_memory().unwrap();
         read_progress::upsert_local_read_progress(&conn, "A", "b1", 90, false).unwrap();
         let server = ScriptedServer::default();
-        // Another device read further, later than us.
-        server.serve("b1", vec![remote(91, false, "2026-08-28T23:00:00Z")]);
+        // Another device read further, later than us. "Later" has to be relative
+        // to the wall clock, because `upsert_local_read_progress` stamps our own
+        // intent with `now_rfc3339()` — a fixed date here silently stops being
+        // in the future the day after the test is written.
+        let later = {
+            let when = chrono::Utc::now() + chrono::TimeDelta::hours(1);
+            when.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        };
+        server.serve("b1", vec![remote(91, false, &later)]);
         server.then(vec![Attempt::Succeeded]);
         let summary = upload_outbox(&conn, "A", &server, "2026-08-28T12:00:00Z")
             .await

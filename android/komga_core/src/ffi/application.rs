@@ -7,6 +7,7 @@ use crate::api::auth::AuthMethod;
 use crate::api::contract::{check_server_version, version_capabilities};
 use crate::api::error::{ApiError, Result as ApiResult};
 use crate::api::mutation::ProgressWriter;
+use crate::api::page::PageStreaming;
 use crate::api::series::KomgaClient;
 use crate::api::server::ConnectionFetching;
 use crate::api::sse::{SseClient, SseEvent, SseStream};
@@ -14,6 +15,7 @@ use crate::cache::cover::{BytesFetcher, CoverStore};
 use crate::cache::DiskCache;
 use crate::model::server::{Library, ServerInfo};
 use crate::model::server_profile::ServerProfile;
+use crate::reader;
 use crate::store;
 use crate::store::collections::CollectionRow;
 use crate::store::outbox::OutboxEntry;
@@ -85,8 +87,21 @@ impl App {
             .into_iter()
             .map(|row| PathBuf::from(row.local_path))
             .collect();
+        // Read the URL before the row goes away: the connection pool is keyed by
+        // it, and a deleted server must not keep a live client (and therefore a
+        // usable credential) behind.
+        let base_url: Option<String> = conn
+            .query_row(
+                "SELECT base_url FROM servers WHERE id = ?1",
+                rusqlite::params![server_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
         let deleted = store::servers::delete_server(&conn, server_id).map_err(db_err)?;
         if deleted {
+            if let Some(url) = base_url.as_deref() {
+                crate::api::series::KomgaClient::forget(url);
+            }
             let _ = store::app_state::clear_active_server(&conn);
             store::delete_server_mirror(&conn, server_id).map_err(db_err)?;
             let cache = DiskCache::new(self.cache_root()).map_err(storage_err)?;
@@ -133,7 +148,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<ConnectionResult, ApiError> {
-        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
         self.test_connection_with(&client).await
     }
 
@@ -170,7 +185,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<BootstrapSummary, ApiError> {
-        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
         self.bootstrap_with(&client, &server_id).await
     }
 
@@ -252,7 +267,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<String, ApiError> {
-        let client = KomgaClient::new(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
         self.ensure_cover_with(&client, &base_url, &server_id, &series_id)
             .await
     }
@@ -300,7 +315,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<usize, ApiError> {
-        let client = KomgaClient::new(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
         self.ensure_covers_with(&client, &base_url, &server_id)
             .await
     }
@@ -394,7 +409,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<FullSyncSummary, ApiError> {
-        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
         sync::full_sync(&self.db_path, &server_id, &client).await
     }
 
@@ -418,7 +433,7 @@ impl App {
         api_key: String,
         fresh: bool,
     ) -> Result<FullSyncSummary, ApiError> {
-        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
         let start = if fresh {
             sync::StartAt::Fresh
         } else {
@@ -437,7 +452,7 @@ impl App {
         api_key: String,
         trigger: String,
     ) -> Result<ReconcileSummary, ApiError> {
-        let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
         self.reconcile_with(&client, &server_id, &trigger).await
     }
 
@@ -866,7 +881,7 @@ impl App {
         tokio::task::spawn_blocking(move || {
             let runtime = owned_runtime()?;
             runtime.block_on(async move {
-                let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+                let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
                 let conn = store::open(&db_path).map_err(db_err)?;
                 let summary = sync::upload::upload_outbox(&conn, &server_id, &client, &now)
                     .await
@@ -961,7 +976,7 @@ impl App {
         let (report, orphans) = tokio::task::spawn_blocking(move || {
             let runtime = owned_runtime()?;
             runtime.block_on(async move {
-                let client = KomgaClient::new(base_url, AuthMethod::ApiKey { key: api_key })?;
+                let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
                 let conn = store::open(&db_path).map_err(db_err)?;
                 Ok::<_, ApiError>(
                     sync::sse::apply_dirty(&conn, &streaming_for, &hints, &client).await,
@@ -1095,7 +1110,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<String, ApiError> {
-        let client = KomgaClient::new(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
         self.ensure_book_cover_with(&client, &base_url, &server_id, &book_id)
             .await
     }
@@ -1140,7 +1155,7 @@ impl App {
         base_url: String,
         api_key: String,
     ) -> Result<usize, ApiError> {
-        let client = KomgaClient::new(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
+        let client = KomgaClient::shared(base_url.clone(), AuthMethod::ApiKey { key: api_key })?;
         self.ensure_book_covers_with(&client, &base_url, &server_id, &series_id)
             .await
     }
@@ -1934,6 +1949,1007 @@ impl SsePollResult {
             // open; dropping it there would make the first tick after the sweep
             // read a handle that nothing reconnects.
             keep_socket: matches!(phase, Phase::Connected | Phase::Reconciling),
+        }
+    }
+}
+
+// ==========================================================================
+/// Stage 7: the reader facade. See the rules at the top of the impl below.
+impl App {
+    // MARK: - Stage 7 reader facade
+    //
+    // Three rules shape everything below, and they are the reason it looks
+    // indirect:
+    //
+    // 1. A page leaves this boundary as a LOCAL FILE PATH, never a URL. The
+    //    Flutter/SwiftUI layer therefore cannot make a request even by accident.
+    // 2. No `Connection` and no lock guard is ever held across an `await`; the
+    //    transport runs first and the synchronous pipeline lands the bytes.
+    // 3. Anything that must survive a crash is in SQLite (position, progress,
+    //    outbox). The in-process registry below only holds the throttle clock
+    //    and the layout the user is looking at, and is rebuilt on open.
+
+    /// Open a book in the reader: mirror-or-fetch the manifest, restore the
+    /// position, and hand back the layout the UI should draw.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn reader_open(
+        &self,
+        server_id: String,
+        book_id: String,
+        base_url: String,
+        api_key: String,
+        mode: String,
+        direction: String,
+        first_page_single: Option<bool>,
+    ) -> Result<ReaderBookDto, ApiError> {
+        let (mirrored, media_type) = {
+            let conn = store::open(&self.db_path).map_err(db_err)?;
+            let rows = store::pages::list(&conn, &server_id, &book_id).map_err(db_err)?;
+            let media: Option<String> = conn
+                .query_row(
+                    "SELECT media_type FROM books WHERE server_id = ?1 AND remote_id = ?2",
+                    rusqlite::params![server_id, book_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(None);
+            (rows, media)
+        };
+        let from_mirror = !mirrored.is_empty();
+        let raw = if from_mirror {
+            Vec::new()
+        } else {
+            let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
+            let dtos = client.pages(&book_id).await?;
+            dtos.iter()
+                .map(|page| reader::manifest::RawPage {
+                    file_name: page.file_name.clone(),
+                    media_type: page.media_type.clone(),
+                    number: i64::from(page.number),
+                    width: page.width.map(i64::from),
+                    height: page.height.map(i64::from),
+                    size_bytes: page.size_bytes,
+                })
+                .collect()
+        };
+
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let manifest = if from_mirror {
+            reader::manifest::PageManifest::from_rows(
+                &server_id,
+                &book_id,
+                media_type.as_deref(),
+                &mirrored,
+            )
+        } else {
+            let built = reader::manifest::PageManifest::from_raw(
+                &server_id,
+                &book_id,
+                media_type.as_deref(),
+                &raw,
+            );
+            if built.empty_error() {
+                return Err(ApiError::InvalidInput {
+                    message: format!("book {book_id} reports no pages"),
+                });
+            }
+            let rows: Vec<_> = built.pages.iter().map(|page| page.to_row()).collect();
+            store::pages::replace(&conn, &server_id, &book_id, &rows, &thumbnails_now())
+                .map_err(db_err)?;
+            built
+        };
+        if manifest.empty_error() {
+            return Err(ApiError::InvalidInput {
+                message: format!("book {book_id} has no mirrored pages"),
+            });
+        }
+
+        let mut settings = reader::settings::ReaderSettings::load(&conn).map_err(db_err)?;
+        if !mode.is_empty() {
+            settings.mode = reader::paging::ReadMode::parse(&mode);
+        }
+        if !direction.is_empty() {
+            // Per-book last-used direction wins over the global default; an
+            // explicit request from the UI beats both.
+            settings.direction = reader::settings::resolve_direction(
+                store::position::get(&conn, &server_id, &book_id)
+                    .map_err(db_err)?
+                    .as_ref()
+                    .map(|saved| reader::paging::Direction::parse(&saved.direction)),
+                None,
+                reader::paging::Direction::parse(&direction),
+            );
+        }
+        if let Some(first) = first_page_single {
+            settings.first_page_single = first;
+        }
+        let session = reader::session::ReaderSession::open(
+            &conn,
+            &server_id,
+            &book_id,
+            manifest.page_count(),
+            manifest.writes_page_progress(),
+            &settings,
+            &reader::session::Clock::now(),
+        )
+        .map_err(db_err)?;
+        let summary = (
+            manifest.page_count() as i64,
+            manifest.is_paged(),
+            manifest.reflowable,
+            manifest.fallback.map(|kind| kind.as_str().to_string()),
+        );
+        let layout = layout_dto(&session, &settings);
+        readers().insert(
+            reader_key(&server_id, &book_id),
+            LiveReader {
+                session,
+                settings,
+                window: None,
+                pool_budget_bytes: reader::cache::DEFAULT_BUDGET_BYTES,
+            },
+        );
+        Ok(ReaderBookDto {
+            server_id,
+            book_id,
+            page_count: summary.0,
+            paged: summary.1,
+            reflowable: summary.2,
+            fallback: summary.3,
+            from_mirror,
+            start_page: layout.page,
+            layout,
+        })
+    }
+
+    /// Where this page already is on disk, if anywhere. No network: this is what
+    /// the UI paints first, and what tells it whether a fetch is needed.
+    pub fn reader_page_path(
+        &self,
+        server_id: String,
+        book_id: String,
+        page: i64,
+    ) -> Result<Option<String>, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let manifest = self.mirrored_manifest(&conn, &server_id, &book_id)?;
+        let cache = self.reader_cache_for(&server_id, &book_id)?;
+        let hit = cache
+            .lookup(&conn, &manifest.cache_key(page as u32), &thumbnails_now())
+            .map_err(storage_err)?;
+        Ok(hit.map(|location| location.path.to_string_lossy().into_owned()))
+    }
+
+    /// Resolve one page for display, fetching only on a cache miss.
+    pub async fn reader_page(
+        &self,
+        server_id: String,
+        book_id: String,
+        page: i64,
+        base_url: String,
+        api_key: String,
+    ) -> Result<String, ApiError> {
+        if let Some(path) = self.reader_page_path(server_id.clone(), book_id.clone(), page)? {
+            return Ok(path);
+        }
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let (bytes, content_type) = client.page_bytes(&book_id, page as u32).await?;
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let manifest = self.mirrored_manifest(&conn, &server_id, &book_id)?;
+        let cache = self.reader_cache_for(&server_id, &book_id)?;
+        let location = cache
+            .store(
+                &conn,
+                &manifest.cache_key(page as u32),
+                &bytes,
+                &content_type,
+                &thumbnails_now(),
+            )
+            .map_err(storage_err)?;
+        Ok(location.path.to_string_lossy().into_owned())
+    }
+
+    /// Pull the pages around one spread into the cache. The window is computed
+    /// locally, so a warm neighbourhood costs nothing.
+    pub async fn reader_prefetch(
+        &self,
+        server_id: String,
+        book_id: String,
+        spread: i64,
+        base_url: String,
+        api_key: String,
+    ) -> Result<i64, ApiError> {
+        let (mut plan, manifest) = {
+            let conn = store::open(&self.db_path).map_err(db_err)?;
+            let manifest = self.mirrored_manifest(&conn, &server_id, &book_id)?;
+            let window = self.reader_window_for(&server_id, &book_id);
+            let spreads = match self.reader_spreads(&server_id, &book_id)? {
+                Some(spreads) => spreads,
+                None => return Ok(0),
+            };
+            let cached = self.open_reader_cache()?.cached_pages(&conn, &manifest);
+            (
+                reader::prefetch::plan(&spreads, spread.max(0) as usize, window, &cached).queue,
+                manifest,
+            )
+        };
+        let budget = self.reader_prefetch_budget(&server_id, &book_id);
+        plan.truncate(budget);
+        if plan.is_empty() {
+            return Ok(0);
+        }
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
+
+        // Transport first, storage second, and never the two interleaved: a
+        // `Connection` may not be held across an `await`, because the frb async
+        // runtime moves the future between threads and rusqlite's handle is
+        // neither `Send` nor `Sync`. Fetching the whole (short) window into memory
+        // first is also what makes the write half one transaction.
+        // The manifest mirror answers "how big should this page be" for the whole
+        // window in one query. Reading it per page would open the database again
+        // for every download, which is the opposite of what this pass is for.
+        let declared_sizes: std::collections::BTreeMap<i64, i64> = {
+            let conn = store::open(&self.db_path).map_err(db_err)?;
+            let mut rows = conn
+                .prepare(
+                    "SELECT number, size_bytes FROM book_pages
+                     WHERE server_id = ?1 AND book_id = ?2",
+                )
+                .map_err(db_err)?;
+            let collected = rows
+                .query_map(rusqlite::params![server_id, book_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(db_err)?;
+            collected.filter_map(Result::ok).collect()
+        };
+        let mut fetched: Vec<(String, Vec<u8>, String, i64)> = Vec::new();
+        for number in plan {
+            let key = manifest.cache_key(number);
+            let declared = declared_sizes.get(&(number as i64)).copied().unwrap_or(0);
+            match client.page_bytes(&book_id, number).await {
+                Ok((bytes, content_type)) => fetched.push((key, bytes, content_type, declared)),
+                // One outage must not become N requests, and prefetch failures
+                // are never surfaced to the page on screen.
+                Err(error) => {
+                    log::warn!("prefetch {book_id} page {number}: {error}");
+                    break;
+                }
+            }
+        }
+
+        let cache = self.reader_cache_for(&server_id, &book_id)?;
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        // One transaction for the whole pass: every landed page writes a
+        // `cache_entries` row, and one commit per page is write amplification the
+        // reader pays for on the thread it wants to keep responsive with.
+        let tx = conn.unchecked_transaction().map_err(db_err)?;
+        let mut landed = 0i64;
+        for (key, bytes, content_type, declared) in &fetched {
+            if cache.is_cached(&tx, key) {
+                continue;
+            }
+            // The prefetch tier, and with the manifest's own declared size: bytes
+            // that arrive short must be refused here rather than cached and
+            // discovered later as a broken image.
+            match cache.store_tier(
+                &tx,
+                key,
+                bytes,
+                content_type,
+                &thumbnails_now(),
+                reader::cache::Tier::Prefetch,
+                if *declared > 0 { Some(*declared) } else { None },
+            ) {
+                Ok(_) => landed += 1,
+                Err(error) => log::warn!("page cache {key}: {error}"),
+            }
+        }
+        // Losing this commit is not cosmetic: the page files are already on disk,
+        // so vanished rows turn them into orphans that the next sweep deletes and
+        // the resume after that re-downloads. `busy_timeout` on every connection
+        // (`store::configure`) is what prevents the contention that causes it;
+        // retrying here cannot, because `commit` consumes the transaction.
+        if let Err(error) = tx.commit() {
+            log::error!("prefetch commit for {book_id}: {error}");
+            return Err(db_err(error));
+        }
+        Ok(landed)
+    }
+
+    /// Turn to a page: writes position + progress + outbox row, and says whether
+    /// an upload is due now.
+    pub fn reader_turn(
+        &self,
+        server_id: String,
+        book_id: String,
+        page: i64,
+    ) -> Result<ReaderTurnDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        let live = guard.get_mut(&key).ok_or_else(|| ApiError::InvalidInput {
+            message: "reader is not open".to_string(),
+        })?;
+        let upload = live
+            .session
+            .turn_to(&conn, page.max(1) as u32, &reader::session::Clock::now())
+            .map_err(db_err)?;
+        Ok(ReaderTurnDto {
+            page: live.session.page() as i64,
+            spread: live.session.spread() as i64,
+            upload_now: upload == reader::session::Upload::Now,
+        })
+    }
+
+    /// Advance (delta = +1) or retreat (delta = -1) one spread, in whatever
+    /// direction the reader is currently set to.
+    pub fn reader_step(
+        &self,
+        server_id: String,
+        book_id: String,
+        delta: i64,
+    ) -> Result<ReaderTurnDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        let live = guard.get_mut(&key).ok_or_else(|| ApiError::InvalidInput {
+            message: "reader is not open".to_string(),
+        })?;
+        let clock = reader::session::Clock::now();
+        let upload = if delta >= 0 {
+            live.session.next(&conn, &clock)
+        } else {
+            live.session.previous(&conn, &clock)
+        }
+        .map_err(db_err)?;
+        Ok(ReaderTurnDto {
+            page: live.session.page() as i64,
+            spread: live.session.spread() as i64,
+            upload_now: upload == reader::session::Upload::Now,
+        })
+    }
+
+    /// Change mode/direction mid-book: the layout is recomputed and the same
+    /// spread the reader was on survives the re-pairing.
+    pub fn reader_set_layout(
+        &self,
+        server_id: String,
+        book_id: String,
+        mode: String,
+        direction: String,
+    ) -> Result<ReaderLayoutDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        let live = guard.get_mut(&key).ok_or_else(|| ApiError::InvalidInput {
+            message: "reader is not open".to_string(),
+        })?;
+        live.settings.mode = reader::paging::ReadMode::parse(&mode);
+        live.settings.direction = reader::paging::Direction::parse(&direction);
+        live.settings = live.settings.clone().sanitized();
+        live.session
+            .relayout(
+                &conn,
+                live.settings.mode,
+                live.settings.direction,
+                &reader::session::Clock::now(),
+            )
+            .map_err(db_err)?;
+        Ok(layout_dto(&live.session, &live.settings))
+    }
+
+    pub fn reader_mark_read(&self, server_id: String, book_id: String) -> Result<bool, ApiError> {
+        self.reader_mark(&server_id, &book_id, true)
+    }
+
+    pub fn reader_mark_unread(&self, server_id: String, book_id: String) -> Result<bool, ApiError> {
+        self.reader_mark(&server_id, &book_id, false)
+    }
+
+    fn reader_mark(&self, server_id: &str, book_id: &str, read: bool) -> Result<bool, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let key = reader_key(server_id, book_id);
+        let mut guard = readers();
+        let live = guard.get_mut(&key).ok_or_else(|| ApiError::InvalidInput {
+            message: "reader is not open".to_string(),
+        })?;
+        let clock = reader::session::Clock::now();
+        let upload = if read {
+            live.session.mark_read(&conn, &clock)
+        } else {
+            live.session.mark_unread(&conn, &clock)
+        }
+        .map_err(db_err)?;
+        Ok(upload == reader::session::Upload::Now)
+    }
+
+    /// The UI's periodic beat: may flush a queued page, and always says whether
+    /// `upload_outbox` should run now.
+    pub fn reader_tick(&self, server_id: String, book_id: String) -> Result<bool, ApiError> {
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        match guard.get_mut(&key) {
+            Some(live) => {
+                Ok(live.session.tick(&reader::session::Clock::now())
+                    == reader::session::Upload::Now)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Leaving the reader. The position is already durable; this only decides
+    /// whether one last upload should be attempted before the screen goes.
+    pub fn reader_close(&self, server_id: String, book_id: String) -> Result<bool, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        match guard.remove(&key) {
+            Some(mut live) => Ok(live
+                .session
+                .close(&conn, &reader::session::Clock::now())
+                .map_err(db_err)?
+                == reader::session::Upload::Now),
+            None => Ok(false),
+        }
+    }
+
+    /// Backgrounding: same urgency as closing, but the reader stays open.
+    pub fn reader_background(&self, server_id: String, book_id: String) -> Result<bool, ApiError> {
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        match guard.get_mut(&key) {
+            Some(live) => Ok(live.session.background(&reader::session::Clock::now())
+                == reader::session::Upload::Now),
+            None => Ok(false),
+        }
+    }
+
+    pub fn reader_settings(&self) -> Result<ReaderSettingsDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        Ok(settings_dto(
+            reader::settings::ReaderSettings::load(&conn).map_err(db_err)?,
+        ))
+    }
+
+    pub fn reader_set_settings(
+        &self,
+        settings: ReaderSettingsDto,
+    ) -> Result<ReaderSettingsDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let parsed = settings_of(settings);
+        reader::settings::ReaderSettings::save(&conn, &parsed).map_err(db_err)?;
+        Ok(settings_dto(
+            reader::settings::ReaderSettings::load(&conn).map_err(db_err)?,
+        ))
+    }
+
+    /// Manifest straight out of SQLite; an error only when it was never mirrored.
+    fn mirrored_manifest(
+        &self,
+        conn: &rusqlite::Connection,
+        server_id: &str,
+        book_id: &str,
+    ) -> Result<reader::manifest::PageManifest, ApiError> {
+        let rows = store::pages::list(conn, server_id, book_id).map_err(db_err)?;
+        if rows.is_empty() {
+            return Err(ApiError::InvalidInput {
+                message: format!(
+                    "book {book_id} has no mirrored manifest — open it online once first"
+                ),
+            });
+        }
+        let media: Option<String> = conn
+            .query_row(
+                "SELECT media_type FROM books WHERE server_id = ?1 AND remote_id = ?2",
+                rusqlite::params![server_id, book_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
+        Ok(reader::manifest::PageManifest::from_rows(
+            server_id,
+            book_id,
+            media.as_deref(),
+            &rows,
+        ))
+    }
+
+    fn open_reader_cache(&self) -> Result<reader::cache::PageCache, ApiError> {
+        self.open_reader_cache_with(reader::cache::DEFAULT_BUDGET_BYTES)
+    }
+
+    /// One handle per call, all sharing the process-wide memory tier.
+    ///
+    /// `App` is rebuilt for every FFI call, so a tier owned by the handle would
+    /// be created and dropped between two page turns and warm nothing at all.
+    fn open_reader_cache_with(
+        &self,
+        pool_budget_bytes: i64,
+    ) -> Result<reader::cache::PageCache, ApiError> {
+        let mut cache = reader::cache::PageCache::shared(self.cache_root()).map_err(storage_err)?;
+        cache.set_budget(pool_budget_bytes);
+        Ok(cache)
+    }
+
+    /// The cache as the reader's live profile wants it.
+    fn reader_cache_for(
+        &self,
+        server_id: &str,
+        book_id: &str,
+    ) -> Result<reader::cache::PageCache, ApiError> {
+        let pool = readers()
+            .get(&reader_key(server_id, book_id))
+            .map(|live| live.pool_budget_bytes)
+            .unwrap_or(reader::cache::DEFAULT_BUDGET_BYTES);
+        self.open_reader_cache_with(pool)
+    }
+
+    /// How many pages one prefetch call may pull, from the live plan.
+    ///
+    /// `in_flight` exists because a window is a queue, not a promise to drain it
+    /// in one go: each of these downloads holds the platform thread, and a fast
+    /// reader who turns ten pages while one 13-page window is still being served
+    /// gets ten windows of work for five pages of reading. The rest of the queue
+    /// is picked up by the next call, from wherever the reader has got to.
+    fn reader_prefetch_budget(&self, server_id: &str, book_id: &str) -> usize {
+        readers()
+            .get(&reader_key(server_id, book_id))
+            .and_then(|live| live.window)
+            .map(|plan| plan.in_flight.max(1))
+            .unwrap_or(super::super::reader::window::MAX_IN_FLIGHT)
+    }
+
+    /// The window the live reader should prefetch with: the device-derived plan
+    /// when the UI has reported one, otherwise the stored user setting.
+    fn reader_window_for(&self, server_id: &str, book_id: &str) -> reader::prefetch::Window {
+        let guard = readers();
+        match guard.get(&reader_key(server_id, book_id)) {
+            Some(live) => live
+                .window
+                .map(|plan| plan.window())
+                .unwrap_or(live.settings.prefetch),
+            None => reader::prefetch::Window::default(),
+        }
+    }
+
+    /// Report what this device and link are like, and get back the numbers the
+    /// core derived from them.
+    ///
+    /// This is the only path by which physical RAM, page size and link quality
+    /// reach the prefetch planner — the core cannot probe any of them, and it must
+    /// not guess generously. The UI calls it once on open and again whenever the
+    /// network changes, which is also how a Wi-Fi to cellular handover stops
+    /// pulling 4K pages over a metered link.
+    pub fn reader_configure_device(
+        &self,
+        server_id: String,
+        book_id: String,
+        device: DeviceProfileDto,
+    ) -> Result<ReaderWindowDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let manifest = self.mirrored_manifest(&conn, &server_id, &book_id)?;
+        let key = reader_key(&server_id, &book_id);
+        let (mode, direction, pages_per_spread) = {
+            let guard = readers();
+            match guard.get(&key) {
+                Some(live) => {
+                    let width = live
+                        .session
+                        .layout()
+                        .spreads
+                        .iter()
+                        .map(|spread| spread.len())
+                        .max()
+                        .unwrap_or(1)
+                        .max(1);
+                    (live.session.mode(), live.session.direction(), width)
+                }
+                None => (
+                    reader::paging::ReadMode::Single,
+                    reader::paging::Direction::Ltr,
+                    1,
+                ),
+            }
+        };
+        // The manifest's own reported sizes are the best available answer to
+        // "how big is a page of this book"; a hint from the UI wins when given,
+        // because it can know what the screen will actually decode.
+        let measured = {
+            let sizes: Vec<i64> = manifest
+                .pages
+                .iter()
+                .map(|page| page.size_bytes)
+                .filter(|size| *size > 0)
+                .collect();
+            if sizes.is_empty() {
+                0
+            } else {
+                sizes.iter().sum::<i64>() / sizes.len() as i64
+            }
+        };
+        let avg_page_bytes = if device.avg_page_bytes_hint > 0 {
+            device.avg_page_bytes_hint
+        } else {
+            measured
+        };
+        let pool_budget_bytes = if device.cache_budget_bytes > 0 {
+            device.cache_budget_bytes
+        } else {
+            reader::cache::DEFAULT_BUDGET_BYTES
+        };
+        let profile = reader::window::Profile {
+            device_memory_bytes: device.device_memory_bytes,
+            cache_budget_bytes: pool_budget_bytes,
+            avg_page_bytes,
+            pages_per_spread,
+            mode,
+            direction,
+            network: parse_network(&device.network),
+            stable: device.stable,
+        };
+        let plan = reader::window::plan(&profile);
+        {
+            let mut guard = readers();
+            if let Some(live) = guard.get_mut(&key) {
+                live.window = Some(plan);
+                live.pool_budget_bytes = pool_budget_bytes;
+            }
+        }
+
+        let cache = self.open_reader_cache_with(pool_budget_bytes)?;
+        cache
+            .set_memory_budget(plan.memory_budget_bytes)
+            .map_err(storage_err)?;
+        // A sweep belongs here and not on the hot path: this is the one moment
+        // per open where walking every cached file is affordable, and it is what
+        // turns a permanently-broken cache into a page that simply reloads.
+        let sweep = cache
+            .reconcile(&conn, &thumbnails_now())
+            .map_err(storage_err)?;
+        if sweep.ghost_rows + sweep.orphan_files + sweep.stale_parts + sweep.corrupt > 0 {
+            log::info!(
+                "cache sweep: {} ghost rows, {} orphan files, {} stale parts, {} corrupt, {} evicted, {} bytes freed",
+                sweep.ghost_rows,
+                sweep.orphan_files,
+                sweep.stale_parts,
+                sweep.corrupt,
+                sweep.evicted,
+                sweep.freed_bytes
+            );
+        }
+        Ok(ReaderWindowDto {
+            forward: plan.forward as i64,
+            back: plan.back as i64,
+            cap: plan.cap as i64,
+            memory_budget_bytes: plan.memory_budget_bytes,
+            in_flight: plan.in_flight as i64,
+            decode_slots: reader::window::decode_slots(
+                plan.memory_budget_bytes,
+                device.decoded_page_bytes,
+            ) as i64,
+            avg_page_bytes,
+            pages_per_spread: pages_per_spread as i64,
+            pool_budget_bytes,
+            swept_freed_bytes: sweep.freed_bytes,
+            swept_corrupt: sweep.corrupt as i64,
+        })
+    }
+
+    /// What the cache tiers and the memory tier hold right now. The acceptance
+    /// harness reads this to prove memory does not grow over a long session.
+    pub fn reader_cache_stats(&self) -> Result<CacheStatsDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let cache = self.open_reader_cache()?;
+        let memory = cache.memory_stats().map_err(storage_err)?;
+        let on_disk = cache.disk().bytes_used().map_err(storage_err)? as i64;
+        Ok(CacheStatsDto {
+            page_bytes: cache
+                .bytes_of_tier(&conn, reader::cache::Tier::Page)
+                .map_err(storage_err)?,
+            prefetch_bytes: cache
+                .bytes_of_tier(&conn, reader::cache::Tier::Prefetch)
+                .map_err(storage_err)?,
+            download_bytes: store::cache::bytes_of_kind(&conn, store::cache::KIND_DOWNLOAD)
+                .map_err(db_err)?,
+            pool_budget_bytes: cache.budget(),
+            memory_bytes: memory.bytes,
+            memory_peak_bytes: memory.peak_bytes,
+            memory_entries: memory.entries as i64,
+            memory_hits: memory.hits as i64,
+            memory_misses: memory.misses as i64,
+            memory_evictions: memory.evictions as i64,
+            memory_refused: memory.refused_oversized as i64,
+            disk_bytes: on_disk,
+            ledger_bytes: cache.bytes_used(&conn).map_err(storage_err)?,
+            open_readers: readers().len() as i64,
+        })
+    }
+
+    /// Run the cleanup sweep on demand (the UI can offer it as an action) and
+    /// report exactly what it removed.
+    pub fn reader_reconcile_cache(&self) -> Result<CacheCleanupDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let cache = self.open_reader_cache()?;
+        let report = cache
+            .reconcile(&conn, &thumbnails_now())
+            .map_err(storage_err)?;
+        Ok(CacheCleanupDto {
+            ghost_rows: report.ghost_rows as i64,
+            orphan_files: report.orphan_files as i64,
+            stale_parts: report.stale_parts as i64,
+            corrupt: report.corrupt as i64,
+            kind_repaired: report.kind_repaired as i64,
+            evicted: report.evicted as i64,
+            freed_bytes: report.freed_bytes,
+            bytes_after: cache.bytes_used(&conn).map_err(storage_err)?,
+        })
+    }
+
+    /// Drop the guessed-at bytes and nothing else. Displayed pages and offline
+    /// downloads both survive, which is the point of a separate tier.
+    pub fn reader_clear_prefetch(&self) -> Result<i64, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let cache = self.open_reader_cache()?;
+        let dropped = cache
+            .clear_tier(&conn, reader::cache::Tier::Prefetch)
+            .map_err(storage_err)?;
+        Ok(dropped as i64)
+    }
+
+    /// The memory-pressure response: hand back the RAM the prefetch tier mirrors
+    /// and keep the tier on disk, so coming back to the app does not cost a window
+    /// of downloads. `reader_clear_prefetch` is the user-facing cleanup; this is the
+    /// one the UI calls when the OS squeezes memory.
+    pub fn reader_release_prefetch(&self) -> Result<i64, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let cache = self.open_reader_cache()?;
+        cache.release_prefetch_memory(&conn).map_err(storage_err)
+    }
+
+    /// The spread table for the layout the reader is currently using.
+    fn reader_spreads(
+        &self,
+        server_id: &str,
+        book_id: &str,
+    ) -> Result<Option<Vec<Vec<u32>>>, ApiError> {
+        let guard = readers();
+        Ok(guard
+            .get(&reader_key(server_id, book_id))
+            .map(|live| live.session.layout().spreads.clone()))
+    }
+}
+
+// --------------------------------------------------------------------------
+// Stage 7 reader plumbing: the in-process session registry and the flat DTOs
+// that cross the FFI.
+// --------------------------------------------------------------------------
+
+/// One open reader. `Send` because a Flutter platform thread may service the
+/// next call on a different worker than the one that opened it.
+struct LiveReader {
+    session: reader::session::ReaderSession,
+    settings: reader::settings::ReaderSettings,
+    /// Computed from the device profile the UI reported; `None` until the UI has
+    /// said anything, in which case the user's stored window is used unchanged.
+    window: Option<reader::window::WindowPlan>,
+    /// Pool ceiling in force for this reader, from the same profile.
+    pool_budget_bytes: i64,
+}
+
+fn reader_key(server_id: &str, book_id: &str) -> String {
+    format!("{server_id}|{book_id}")
+}
+
+fn readers() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, LiveReader>> {
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, LiveReader>>,
+    > = std::sync::OnceLock::new();
+    REGISTRY
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn thumbnails_now() -> String {
+    store::thumbnails::now_rfc3339()
+}
+
+/// The UI's own words for the link. Anything unrecognised becomes `Unknown`,
+/// which the planner treats as constrained rather than free — a reader that
+/// cannot describe its network should not assume it is on Wi-Fi.
+fn parse_network(value: &str) -> reader::window::Network {
+    match value {
+        "wifi" => reader::window::Network::Wifi,
+        "cellular" => reader::window::Network::Cellular,
+        "weak" => reader::window::Network::Weak,
+        "offline" => reader::window::Network::Offline,
+        _ => reader::window::Network::Unknown,
+    }
+}
+
+/// What the device is, as far as the UI can tell the core.
+#[derive(Debug, Clone, Default)]
+pub struct DeviceProfileDto {
+    /// Physical RAM in bytes; 0 when the platform will not say.
+    pub device_memory_bytes: i64,
+    /// Ceiling for the whole disk cache pool; 0 for the built-in default.
+    pub cache_budget_bytes: i64,
+    /// Override for the average page size; 0 to let the manifest answer.
+    pub avg_page_bytes_hint: i64,
+    /// What one decoded page costs on this screen, which only the UI knows.
+    pub decoded_page_bytes: i64,
+    /// wifi | cellular | weak | offline | anything else for unknown.
+    pub network: String,
+    /// False while a flip is in progress: the planner then shrinks the window to
+    /// the visible spread instead of queueing a burst per frame.
+    pub stable: bool,
+}
+
+/// The numbers the core derived from a profile, all of which the UI must apply.
+#[derive(Debug, Clone)]
+pub struct ReaderWindowDto {
+    pub forward: i64,
+    pub back: i64,
+    pub cap: i64,
+    pub memory_budget_bytes: i64,
+    pub in_flight: i64,
+    pub decode_slots: i64,
+    pub avg_page_bytes: i64,
+    pub pages_per_spread: i64,
+    pub pool_budget_bytes: i64,
+    pub swept_freed_bytes: i64,
+    pub swept_corrupt: i64,
+}
+
+/// Live cache occupancy, tier by tier.
+#[derive(Debug, Clone)]
+pub struct CacheStatsDto {
+    pub page_bytes: i64,
+    pub prefetch_bytes: i64,
+    pub download_bytes: i64,
+    pub pool_budget_bytes: i64,
+    pub memory_bytes: i64,
+    pub memory_peak_bytes: i64,
+    pub memory_entries: i64,
+    pub memory_hits: i64,
+    pub memory_misses: i64,
+    pub memory_evictions: i64,
+    pub memory_refused: i64,
+    pub disk_bytes: i64,
+    pub ledger_bytes: i64,
+    /// How many reading sessions the process is holding right now. The registry
+    /// is keyed `server|book` and lives for the process's lifetime, so an open
+    /// that is not paired with a close would accumulate one session per book
+    /// browsed in a sitting — unbounded growth in the exact sense Stage 8 exists
+    /// to rule out.
+    pub open_readers: i64,
+}
+
+/// What one cleanup sweep removed.
+#[derive(Debug, Clone)]
+pub struct CacheCleanupDto {
+    pub ghost_rows: i64,
+    pub orphan_files: i64,
+    pub stale_parts: i64,
+    pub corrupt: i64,
+    pub kind_repaired: i64,
+    pub evicted: i64,
+    pub freed_bytes: i64,
+    pub bytes_after: i64,
+}
+
+fn layout_dto(
+    session: &reader::session::ReaderSession,
+    settings: &reader::settings::ReaderSettings,
+) -> ReaderLayoutDto {
+    let layout = session.layout();
+    let nav = layout.nav();
+    ReaderLayoutDto {
+        spreads: layout.spreads.clone(),
+        spread: session.spread() as i64,
+        page: session.page() as i64,
+        axis: layout.axis.as_str().to_string(),
+        reversed: layout.reversed,
+        advance_swipe: nav.advance.as_str().to_string(),
+        retreat_swipe: nav.retreat.as_str().to_string(),
+        tap_next: nav.tap_next.as_str().to_string(),
+        tap_prev: nav.tap_prev.as_str().to_string(),
+        mode: settings.mode.as_str().to_string(),
+        direction: settings.direction.as_str().to_string(),
+        page_gap: settings.page_gap as i64,
+        background: settings.background.as_str().to_string(),
+    }
+}
+
+fn settings_of(value: ReaderSettingsDto) -> reader::settings::ReaderSettings {
+    reader::settings::ReaderSettings {
+        mode: reader::paging::ReadMode::parse(&value.mode),
+        direction: reader::paging::Direction::parse(&value.direction),
+        first_page_single: value.first_page_single,
+        page_gap: value.page_gap.max(0) as u32,
+        background: reader::settings::Background::parse(&value.background).unwrap_or_default(),
+        keep_screen_awake: value.keep_screen_awake,
+        brightness: value.brightness.map(|value| value as f32),
+        restore_position: value.restore_position,
+        prefetch: reader::prefetch::Window {
+            forward: value.prefetch_forward.max(0) as usize,
+            back: value.prefetch_back.max(0) as usize,
+            cap: value.prefetch_cap.max(1) as usize,
+        },
+    }
+}
+
+fn settings_dto(value: reader::settings::ReaderSettings) -> ReaderSettingsDto {
+    ReaderSettingsDto {
+        mode: value.mode.as_str().to_string(),
+        direction: value.direction.as_str().to_string(),
+        first_page_single: value.first_page_single,
+        page_gap: value.page_gap as i64,
+        background: value.background.as_str().to_string(),
+        keep_screen_awake: value.keep_screen_awake,
+        brightness: value.brightness.map(|value| value as f64),
+        restore_position: value.restore_position,
+        prefetch_forward: value.prefetch.forward as i64,
+        prefetch_back: value.prefetch.back as i64,
+        prefetch_cap: value.prefetch.cap as i64,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaderBookDto {
+    pub server_id: String,
+    pub book_id: String,
+    pub page_count: i64,
+    pub paged: bool,
+    pub reflowable: bool,
+    pub fallback: Option<String>,
+    pub from_mirror: bool,
+    pub start_page: i64,
+    pub layout: ReaderLayoutDto,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaderLayoutDto {
+    pub spreads: Vec<Vec<u32>>,
+    pub spread: i64,
+    pub page: i64,
+    pub axis: String,
+    pub reversed: bool,
+    pub advance_swipe: String,
+    pub retreat_swipe: String,
+    pub tap_next: String,
+    pub tap_prev: String,
+    pub mode: String,
+    pub direction: String,
+    pub page_gap: i64,
+    pub background: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaderTurnDto {
+    pub page: i64,
+    pub spread: i64,
+    pub upload_now: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ReaderSettingsDto {
+    pub mode: String,
+    pub direction: String,
+    pub first_page_single: bool,
+    pub page_gap: i64,
+    pub background: String,
+    pub keep_screen_awake: bool,
+    pub brightness: Option<f64>,
+    pub restore_position: bool,
+    pub prefetch_forward: i64,
+    pub prefetch_back: i64,
+    pub prefetch_cap: i64,
+}
+
+impl reader::manifest::Fallback {
+    fn as_str(self) -> &'static str {
+        match self {
+            reader::manifest::Fallback::Epub => "epub",
+            reader::manifest::Fallback::Pdf => "pdf",
         }
     }
 }
