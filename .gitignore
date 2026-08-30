@@ -24,5 +24,9 @@ android/app/*.iml
 # Rust
 android/komga_core/target/
 
+# The frb-drift check's own scratch copy (scripts/verify.sh restores and deletes it;
+# a leftover means the run was interrupted, never work in progress)
+android/app/.frb-verify-backup.*/
+
 # FRB cross-compiled Android libraries (regenerate with scripts/frb_wire.sh)
 android/app/android/app/src/main/jniLibs/
