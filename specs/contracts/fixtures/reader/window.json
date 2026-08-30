@@ -1,0 +1,489 @@
+{
+  "$comment": "Stage 8 dynamic prefetch-window contract. The numbers are a decision, not a constant: the same rules are loaded by Rust (komga_core::reader::window) and Swift (KomgaReader.WindowPlanner), and the reader re-runs them per session from whatever the device reports. Byte values are written out rather than as expressions so a unit slip cannot hide behind a helper on one platform.",
+  "version": 1,
+  "rules": {
+    "order": "Exactly this sequence, because later steps see earlier results: (1) size the memory tier, (2) divide by page cost to see what fits, (3) shape by mode, (4) clamp by bytes, (5) let the network decide, (6) let motion have the last word.",
+    "memoryTier": "memoryBudgetBytes = clamp(deviceMemoryBytes / memoryFraction, memoryFloorBytes, memoryCeilingBytes); memoryDefaultBytes when deviceMemoryBytes <= 0.",
+    "pageCost": "cost = avgPageBytes when it is > 0, otherwise defaultPageBytes. One page's ENCODED size: the core never decodes, so this is the cost the Rust tier really carries. The UI's decoded cost reaches the plan through slotCases instead.",
+    "fit": "fitPages = max(1, memoryBudgetBytes / cost). lookAheadPages = max(1, fitPages / prefetchShare) — only a share of the tier may be spent on pages that are not on screen yet, because the visible spread and what was just turned past have first claim on it.",
+    "forward": "forward = clamp(lookAheadPages / pagesPerSpread, 1, maxForward). Measured in SPREADS, matching reader/prefetch.json: in double-page mode 2 pages per spread means half as many spreads.",
+    "back": "back = clamp(forward / 2, 1, maxBack) — looking behind is worth about half as much as looking ahead, and never zero while the reader is settled, because turning back one page to check a panel is the commonest non-forward gesture there is.",
+    "mode": "webtoon: forward = clamp(forward * 2, 1, maxForward) and back = min(back, 1). A vertical strip is scrolled forward and rarely flung backwards, so the look-ahead is worth twice as much and the look-behind is barely worth anything. single and double take the rule above unchanged.",
+    "direction": "direction is carried in and deliberately does NOT change the answer. The window is measured in reading-order spreads, so LTR and RTL plan identically; the direction is already spent deciding which page of a spread is entered first, in reader/paging.json. pinning this is the point of the ltr/rtl case pairs — a rule that silently keyed on direction would be a real bug (prefetching what the reader will never reach).",
+    "byteCeiling": "cap = min(cap, max(pagesPerSpread, memoryBudgetBytes * 2 / cost)) — a window may not need more than twice the tier, since half of it is meant to be evictable by the time it is reached. When cacheBudgetBytes > 0 a second ceiling applies: max(pagesPerSpread, cacheBudgetBytes / 2 / cost) — prefetching must never be big enough to evict the pages currently on screen out of the disk pool.",
+    "cap": "cap = (1 + forward + back) * pagesPerSpread before the ceilings, where the 1 is the spread on screen.",
+    "inFlight": "inFlight = min(cap, maxInFlight).",
+    "network": "offline: forward, back, cap and inFlight all become 0 — queuing requests against a connection known to be down turns one honest failure into a wall of them. weak: forward=min(forward,2), back=min(back,1), cap=min(cap,3), inFlight=1 (one at a time; parallel requests over a lossy link compete for the same retransmits). cellular: cap=max(cap/2, min(pagesPerSpread,2)), inFlight=min(inFlight,2) — the user may be paying per byte. unknown: forward=min(forward,2), back=min(back,1), cap=min(cap,(1+forward+back)*pagesPerSpread), inFlight=min(inFlight,2) — not reported is treated as constrained, never as free. wifi: unchanged.",
+    "stable": "When stable is false the center moved within the settle window, i.e. the reader is mid-flip. Then forward=min(forward,1), back=0, cap=min(cap,pagesPerSpread), inFlight=min(inFlight,pagesPerSpread): only the spread being landed on is worth requesting. This is the rule that keeps fast continuous page turns from producing bursts of duplicate requests.",
+    "unknownsAreConservative": "Every input has an unknown value (0, or unknown for network) and every unknown resolves to the smaller answer, never the larger one. A reader on a device it cannot describe should prefetch two pages, not twelve.",
+    "neverBlocksRender": "The plan is advisory. It sizes what the reader will ask for in the background; the visible page always goes through the same pipeline with its own request, and a plan that cannot be satisfied is never an error."
+  },
+  "constants": {
+    "memoryFraction": 8,
+    "memoryFloorBytes": 16777216,
+    "memoryCeilingBytes": 268435456,
+    "memoryDefaultBytes": 33554432,
+    "defaultPageBytes": 2097152,
+    "prefetchShare": 4,
+    "maxForward": 8,
+    "maxBack": 4,
+    "maxInFlight": 4,
+    "minDecodeSlots": 4,
+    "maxDecodeSlots": 32
+  },
+  "cases": [
+    {
+      "name": "flagship-wifi-double",
+      "$comment": "8 GiB device, 2 MiB pages: 26 pages may be in flight across 13 spreads.",
+      "input": {
+        "deviceMemoryBytes": 8589934592,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 4,
+        "cap": 26,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "tablet-single-small-pages",
+      "input": {
+        "deviceMemoryBytes": 2147483648,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 262144,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 4,
+        "cap": 13,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "4k-pages-double-wifi",
+      "$comment": "24 MiB pages, same class of device: the window collapses from 26 pages to 6 because 26 of them could never fit anywhere. The page size, not the device, is the binding constraint.",
+      "input": {
+        "deviceMemoryBytes": 4294967296,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 25165824,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 1,
+        "back": 1,
+        "cap": 6,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "4k-pages-on-a-flagship-device",
+      "$comment": "Differs from flagship-wifi-double by avgPageBytes alone: 8 GiB of RAM cannot buy a wider window when one page is 24 MiB. Also identical in output to 4k-pages-double-wifi, which is the memory ceiling proving itself.",
+      "input": {
+        "deviceMemoryBytes": 8589934592,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 25165824,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 1,
+        "back": 1,
+        "cap": 6,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "4k-pages-double-cellular",
+      "$comment": "The same 4K book on a metered link: cap halves to 3 and only two requests run at once.",
+      "input": {
+        "deviceMemoryBytes": 4294967296,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 25165824,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "cellular",
+        "stable": true
+      },
+      "expect": {
+        "forward": 1,
+        "back": 1,
+        "cap": 3,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 2
+      }
+    },
+    {
+      "name": "webtoon-tall-strips-wifi",
+      "$comment": "8 MiB tall segments, single page per spread, vertical scroll: double the look-ahead of the equivalent single-mode reader and one spread of look-behind at most.",
+      "input": {
+        "deviceMemoryBytes": 1073741824,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 8388608,
+        "pagesPerSpread": 1,
+        "mode": "webtoon",
+        "direction": "vertical",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 1,
+        "cap": 10,
+        "memoryBudgetBytes": 134217728,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "single-same-profile-for-contrast",
+      "$comment": "Identical input except mode: the only difference between this and webtoon-tall-strips-wifi, so the webtoon rule is proven to exist.",
+      "input": {
+        "deviceMemoryBytes": 1073741824,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 8388608,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "vertical",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 4,
+        "back": 2,
+        "cap": 7,
+        "memoryBudgetBytes": 134217728,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "rtl-webtoon-matches-its-ltr-twin",
+      "$comment": "Same input as webtoon-tall-strips-wifi with direction rtl: the expectation is identical, which is what pins the direction rule.",
+      "input": {
+        "deviceMemoryBytes": 1073741824,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 8388608,
+        "pagesPerSpread": 1,
+        "mode": "webtoon",
+        "direction": "rtl",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 1,
+        "cap": 10,
+        "memoryBudgetBytes": 134217728,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "fast-flip-double",
+      "$comment": "Mid-flip on the flagship profile: the visible spread only. 26 requests become 2.",
+      "input": {
+        "deviceMemoryBytes": 8589934592,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": false
+      },
+      "expect": {
+        "forward": 1,
+        "back": 0,
+        "cap": 2,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 2
+      }
+    },
+    {
+      "name": "fast-flip-webtoon",
+      "input": {
+        "deviceMemoryBytes": 1073741824,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 8388608,
+        "pagesPerSpread": 1,
+        "mode": "webtoon",
+        "direction": "vertical",
+        "network": "wifi",
+        "stable": false
+      },
+      "expect": {
+        "forward": 1,
+        "back": 0,
+        "cap": 1,
+        "memoryBudgetBytes": 134217728,
+        "inFlight": 1
+      }
+    },
+    {
+      "name": "offline-queues-nothing",
+      "input": {
+        "deviceMemoryBytes": 8589934592,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "offline",
+        "stable": true
+      },
+      "expect": {
+        "forward": 0,
+        "back": 0,
+        "cap": 0,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 0
+      }
+    },
+    {
+      "name": "weak-network-one-at-a-time",
+      "input": {
+        "deviceMemoryBytes": 2147483648,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 1048576,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "weak",
+        "stable": true
+      },
+      "expect": {
+        "forward": 2,
+        "back": 1,
+        "cap": 3,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 1
+      }
+    },
+    {
+      "name": "nothing-is-known-about-the-device",
+      "$comment": "Every optional input unknown, network unknown: the reader still gets a small, safe window rather than the generous default.",
+      "input": {
+        "deviceMemoryBytes": 0,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 0,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "unknown",
+        "stable": true
+      },
+      "expect": {
+        "forward": 2,
+        "back": 1,
+        "cap": 4,
+        "memoryBudgetBytes": 33554432,
+        "inFlight": 2
+      }
+    },
+    {
+      "name": "low-ram-device-hits-the-floor",
+      "input": {
+        "deviceMemoryBytes": 67108864,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 2,
+        "back": 1,
+        "cap": 4,
+        "memoryBudgetBytes": 16777216,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "huge-ram-hits-the-ceiling",
+      "$comment": "16 GiB does not buy a bigger tier than 256 MiB: past that point the reader is caching past usefulness, and a decoded 4K bitmap is ~32 MiB of it.",
+      "input": {
+        "deviceMemoryBytes": 17179869184,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 4,
+        "cap": 13,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "same-flagship-with-an-unbounded-pool",
+      "$comment": "Differs from small-disk-pool-binds-the-cap by cacheBudgetBytes alone: with no pool ceiling the window is its full 13 pages.",
+      "input": {
+        "deviceMemoryBytes": 8589934592,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 4,
+        "cap": 13,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "small-disk-pool-binds-the-cap",
+      "$comment": "A big memory tier and a 32 MiB disk pool: cap is clamped to 8 pages (half the pool at 2 MiB each) even though the tier would allow 13.",
+      "input": {
+        "deviceMemoryBytes": 8589934592,
+        "cacheBudgetBytes": 33554432,
+        "avgPageBytes": 2097152,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 4,
+        "cap": 8,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 4
+      }
+    },
+    {
+      "name": "tiny-pool-can-only-hold-the-spread",
+      "$comment": "8 MiB pool against 24 MiB pages: the byte ceiling would say 0 pages, and the pagesPerSpread floor keeps the visible spread fetchable anyway. A window that cannot hold one spread would make the reader unable to load anything.",
+      "input": {
+        "deviceMemoryBytes": 67108864,
+        "cacheBudgetBytes": 8388608,
+        "avgPageBytes": 25165824,
+        "pagesPerSpread": 2,
+        "mode": "double",
+        "direction": "ltr",
+        "network": "wifi",
+        "stable": true
+      },
+      "expect": {
+        "forward": 1,
+        "back": 1,
+        "cap": 2,
+        "memoryBudgetBytes": 16777216,
+        "inFlight": 2
+      }
+    },
+    {
+      "name": "cellular-small-pages",
+      "$comment": "Metered link, cheap pages: forward stays at its maximum because the window is only 13 pages of 256 KiB, but the cap halves and concurrency drops.",
+      "input": {
+        "deviceMemoryBytes": 2147483648,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 262144,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "cellular",
+        "stable": true
+      },
+      "expect": {
+        "forward": 8,
+        "back": 4,
+        "cap": 6,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 2
+      }
+    },
+    {
+      "name": "weak-network-while-flipping",
+      "$comment": "Two rules that both shrink the window, stacked: weak caps at 3, then instability caps at the 1 visible page.",
+      "input": {
+        "deviceMemoryBytes": 2147483648,
+        "cacheBudgetBytes": 0,
+        "avgPageBytes": 1048576,
+        "pagesPerSpread": 1,
+        "mode": "single",
+        "direction": "ltr",
+        "network": "weak",
+        "stable": false
+      },
+      "expect": {
+        "forward": 1,
+        "back": 0,
+        "cap": 1,
+        "memoryBudgetBytes": 268435456,
+        "inFlight": 1
+      }
+    }
+  ],
+  "slotCases": [
+    {
+      "name": "1080p-bitmaps-on-a-large-tier",
+      "memoryBudgetBytes": 268435456,
+      "decodedPageBytes": 10485760,
+      "slots": 25
+    },
+    {
+      "name": "4k-bitmaps-on-the-floor-tier",
+      "memoryBudgetBytes": 16777216,
+      "decodedPageBytes": 33177600,
+      "slots": 4
+    },
+    {
+      "name": "small-bitmaps-hit-the-slot-ceiling",
+      "memoryBudgetBytes": 268435456,
+      "decodedPageBytes": 524288,
+      "slots": 32
+    },
+    {
+      "name": "unknown-decode-cost",
+      "memoryBudgetBytes": 268435456,
+      "decodedPageBytes": 0,
+      "slots": 4
+    },
+    {
+      "name": "no-tier-at-all",
+      "memoryBudgetBytes": 0,
+      "decodedPageBytes": 10485760,
+      "slots": 4
+    },
+    {
+      "name": "exact-fit-is-not-rounded-down-past-the-floor",
+      "memoryBudgetBytes": 33554432,
+      "decodedPageBytes": 8388608,
+      "slots": 4
+    }
+  ]
+}

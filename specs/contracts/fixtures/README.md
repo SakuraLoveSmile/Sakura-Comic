@@ -21,3 +21,16 @@
 
 一致性约束：series 的 booksCount 与 books-by-series 实际书数一致（3/2/2）；
 ondeck 的书必须同时存在于 books-by-series（进度来自同一本）。
+
+## `reader/`
+
+| 文件 | 钉住 | 两端实现 |
+| --- | --- | --- |
+| `paging.json` | 页 → 跨页配对、轴、镜像、手势 | `komga_core::reader::paging` / `KomgaReader.Paging` |
+| `manifest.json` | `PageDto[]` 归一化、EPUB/PDF 不进图像阅读器 | `reader::manifest` / `KomgaReader.PageManifest` |
+| `prefetch.json` | 给定窗口时的出队次序与快翻取代 | `reader::prefetch` / `KomgaReader.Prefetch` |
+| `window.json` | **窗口本身该多大**：内存/页尺寸/网络/方向/稳定性 → forward·back·cap·并发·内存层·解码槽位 | `reader::window` / `KomgaReader.WindowPlanner` |
+| `throttle.json` | 进度写的节流与持久性 | `reader::throttle` / `KomgaReader.ProgressThrottle` |
+
+`prefetch.json` 与 `window.json` 是两层：前者只管「给定 F/B/cap 时怎么排队」，
+后者只管「F/B/cap 是多少」。分开是因为排队次序跨阶段不变，而窗口大小是设备事实。
