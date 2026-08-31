@@ -1,0 +1,28 @@
+{
+  "$comment": "Stage 9 download tree. File names are the entire interop: a Swift side writing %03d, or keying a page by the reader's cache key instead of its number, produces a tree the other platform cannot read and no test catches until a user re-downloads a book. Both sides derive paths from THIS file, and `cases` below is asserted against both.",
+  "version": 1,
+  "root": {
+    "name": "downloads",
+    "position": "A sibling of cache/, both derived from the directory holding the database file: <db dir>/cache and <db dir>/downloads. NOT a tier inside it.",
+    "$comment": "This is the load-bearing decision of the whole stage. PageCache can only build a path through DiskCache, which is rooted at the cache directory, so it structurally cannot reach a download — no eviction pass, tier purge, prefix purge or reconcile needs to remember to skip anything. Stage 8's ledger guards stay as a fence for the case where somebody parks a download file inside pages/ anyway; they are not the mechanism.",
+    "mustNotBeUnderCacheRoot": true,
+    "rejectsWhenResolvedUnderCacheRoot": true
+  },
+  "bookDirectory": "{root}/{safeKey(serverId)}/{safeKey(bookId)}",
+  "pageFileName": "%04d.{extension}",
+  "zeroPadWidth": 4,
+  "paddingRule": "width = max(zeroPadWidth, digits(number)), so page 100000 is 100000.png rather than a name that collides with 0000.png. Four digits covers any book a person would read; the growth rule is what keeps the mapping injective.",
+  "manifestFileName": "manifest.json",
+  "partSuffix": ".part",
+  "extensionFrom": "The container the bytes actually are (reader::integrity::Format::extension after the walk), falling back to `img` when nothing can be sniffed. Declared Content-Type is only a fallback, because it is what the server claims and the file is what the decoder will get.",
+  "safeKey": "Keys become file names by keeping only [A-Za-z0-9._-] and mapping everything else to '_'; Komga ids are alphanumeric, so sanitising is about the server id a user typed, not about the book id.",
+  "extensions": { "png": "png", "jpg": "jpg", "gif": "gif", "webp": "webp" },
+  "cases": [
+    { "name": "first-page-png",  "serverId": "s1", "bookId": "b1", "number": 1,     "sniffed": "png",  "expect": "downloads/s1/b1/0001.png" },
+    { "name": "jpeg-uses-jpg",   "serverId": "s1", "bookId": "b1", "number": 42,    "sniffed": "jpg",  "expect": "downloads/s1/b1/0042.jpg" },
+    { "name": "four-digit-page", "serverId": "s1", "bookId": "b1", "number": 292,   "sniffed": "webp", "expect": "downloads/s1/b1/0292.webp" },
+    { "name": "past-the-pad",    "serverId": "s1", "bookId": "b1", "number": 12345, "sniffed": "png",  "expect": "downloads/s1/b1/12345.png" },
+    { "name": "sanitised-ids",   "serverId": "srv 1", "bookId": "b/2", "number": 7, "sniffed": "gif",  "expect": "downloads/srv_1/b_2/0007.gif" },
+    { "name": "unsniffable",     "serverId": "s1", "bookId": "b1", "number": 3,     "sniffed": "",     "expect": "downloads/s1/b1/0003.img" }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "$comment": "Stage 9 download state machine. This table is the union of what Rust (komga_core::downloads::queue) and Swift (KomgaStore.DownloadQueue) may do, and a transition absent from `transitions` is ILLEGAL — it must be refused, not silently ignored, because the whole value of an offline download is that its state is explainable. The states are the five the stage spec names (Waiting / Downloading / Paused / Completed / Failed); nothing was added to make the table easier.",
+  "version": 1,
+  "bookStates": [
+    "waiting",
+    "downloading",
+    "paused",
+    "completed",
+    "failed"
+  ],
+  "pageStates": [
+    "pending",
+    "complete",
+    "failed"
+  ],
+  "actors": {
+    "pump": "the bounded download pass. The only actor that may move a book into `downloading`, and it may never move one out of `paused`.",
+    "settle": "the recalculation the pass runs on its way out: state derived from page rows, never incremented.",
+    "user": "an explicit gesture on the Downloads screen — enqueue, pause, resume, retry, delete.",
+    "heal": "recover::sweep, and only the branch where the filesystem disproved a row."
+  },
+  "rules": {
+    "countersAreDerived": "downloads.pages_done and bytes_done are recomputed from download_pages on every settle and every sweep. Nothing anywhere does `+= 1`: a row lost to a half-applied transaction would otherwise make the book permanently uncompletable, and the number the UI shows would stop meaning anything.",
+    "pauseIsSticky": "Only `user` leaves a book paused. A pump that could resume a pause is a bug that survives code review and costs the user data they chose to stop spending — which is why `paused -> downloading` by pump is in `illegal` and why `settle` refuses to move at all while the state is `paused`.",
+    "completePagesAreNeverRefetched": "The pump may only queue pages whose row is `pending`. This is what makes `refetched == failed` provable after a retry, and it is the same rule stated as a page transition below.",
+    "fileWins": "Where the database and the filesystem disagree about a page, the file is the witness: `heal` moves the row to match it, in both directions. A usable file with no row is ADOPTED, not deleted — the row commit can be lost while the bytes landed, and deleting a page the user paid for on a metered link is the one error this stage must not make.",
+    "attemptNotBurned": "linkDown, blocked, gone and throttled change nothing on disk or in any row. An outage must not consume the retries a genuinely bad page needs; five hours on a train must cost zero attempts.",
+    "onlyTheUserDeletes": "No automatic pass may remove a download. LRU eviction, tier cleanup, the reconcile sweep, the mirror sweep and prune are all excluded by construction: downloads live beside cache/, not inside it, and are not in the LRU ledger.",
+    "unownedDirsAreReportedNotReaped": "A book directory the database has no row for is counted and left alone. It can still be deleted by an explicit user action because its path is derived from (serverId, bookId), and a sweep that guesses at user data is not worth the disk it frees.",
+    "unknownsAreConservative": "free_volume_bytes == 0 (the platform would not say) may continue a book already in flight but may never start a new one, and link == unknown behaves the same way. A rule that resolved unknown to 'go ahead' would be an instruction to spend data the user never agreed to.",
+    "healReopens": "`completed` is sticky against a pass and not against the sweep. Both write the state as `settle`, and the difference lives in `settle_state`'s mode argument, because the question is not who is asking but who has looked at the disk. Without the exception, a downloaded page that later fails the container check would leave its book labelled complete — and a completed book is not the queue's to run, so it could never be repaired."
+  },
+  "transitions": [
+    {
+      "from": null,
+      "to": "waiting",
+      "on": "user",
+      "$comment": "enqueue: rows created, position assigned, bytes_total estimated from the mirrored manifest. Callable offline — a book whose manifest was never mirrored cannot be enqueued."
+    },
+    {
+      "from": "waiting",
+      "to": "waiting",
+      "on": "user",
+      "$comment": "re-tapping 下载 on a queued book is a no-op that refreshes its sizes and keeps its place in the queue; the position is what must not move."
+    },
+    {
+      "from": "waiting",
+      "to": "downloading",
+      "on": "pump"
+    },
+    {
+      "from": "downloading",
+      "to": "waiting",
+      "on": "settle",
+      "$comment": "the pass ended for a reason that is not the book's fault: budget, elapsed, linkDown, throttled, linkBlocked, lowSpace."
+    },
+    {
+      "from": "downloading",
+      "to": "completed",
+      "on": "settle"
+    },
+    {
+      "from": "downloading",
+      "to": "failed",
+      "on": "settle",
+      "$comment": "only when every remaining page is `failed` (attempts exhausted), or ioFailed/gone ended the book."
+    },
+    {
+      "from": "waiting",
+      "to": "paused",
+      "on": "user"
+    },
+    {
+      "from": "waiting",
+      "to": "completed",
+      "on": "settle",
+      "$comment": "the sweep adopted files that finish a book the queue believed untouched."
+    },
+    {
+      "from": "waiting",
+      "to": "failed",
+      "on": "settle"
+    },
+    {
+      "from": "downloading",
+      "to": "paused",
+      "on": "user",
+      "$comment": "observed at the top of the next page's transaction, not by a signal — see pumpRechecksStatePerPage."
+    },
+    {
+      "from": "paused",
+      "to": "waiting",
+      "on": "user"
+    },
+    {
+      "from": "failed",
+      "to": "waiting",
+      "on": "user",
+      "resets": [
+        "attempts",
+        "lastError"
+      ],
+      "$comment": "retry clears `failed` pages only; see completePagesAreNeverRefetched."
+    },
+    {
+      "from": "failed",
+      "to": "waiting",
+      "on": "settle",
+      "$comment": "a heal made pages fetchable again, so the book is no longer out of options."
+    },
+    {
+      "from": "failed",
+      "to": "completed",
+      "on": "settle",
+      "$comment": "the sweep adopted files that finished it."
+    },
+    {
+      "from": "completed",
+      "to": "waiting",
+      "on": "user",
+      "$comment": "re-download after the server changed the book: the user gesture first clears the page rows, so it is a fresh job rather than a pump deciding to redo work."
+    },
+    {
+      "from": "any",
+      "to": null,
+      "on": "user",
+      "$comment": "delete: files then rows, and the only way anything under downloads/ leaves the disk on purpose."
+    },
+    {
+      "from": "complete",
+      "to": "pending",
+      "on": "heal",
+      "$comment": "page level: the file failed integrity, drifted in size, or vanished."
+    },
+    {
+      "from": "pending",
+      "to": "complete",
+      "on": "pump",
+      "$comment": "page level: written, fsynced, renamed, and re-verified from the file after the rename."
+    },
+    {
+      "from": "pending",
+      "to": "failed",
+      "on": "pump",
+      "$comment": "page level, and only at attempts == maxPageAttempts; before that the row stays pending with attempts + 1."
+    },
+    {
+      "from": "failed",
+      "to": "pending",
+      "on": "user",
+      "$comment": "page level: retry resets attempts."
+    },
+    {
+      "from": "completed",
+      "to": "waiting",
+      "on": "settle",
+      "$comment": "only the sweep may perform this settle: it has just read the disk and found a page that is no longer the page the row claimed. A pass settling the same rows must not reopen a completion — it has no disk evidence, and `settle_state` is where that difference is encoded (`SettleMode::Pass` vs `SettleMode::Sweep`)."
+    }
+  ],
+  "illegal": [
+    {
+      "from": "paused",
+      "to": "downloading",
+      "on": "pump",
+      "$comment": "the bug this file exists to prevent."
+    },
+    {
+      "from": "downloading",
+      "to": "waiting",
+      "on": "user",
+      "$comment": "re-tapping 下载 while a pass holds the book would delete and rebuild its page rows underneath it. The button is disabled in this state; refusing here is what makes that safe rather than merely tidy."
+    },
+    {
+      "from": "completed",
+      "to": "downloading",
+      "on": "pump",
+      "$comment": "a completed book is re-enqueued by a user action that first clears its rows."
+    },
+    {
+      "from": "paused",
+      "to": "waiting",
+      "on": "settle",
+      "$comment": "settle derives state from rows; it must not launder a pause."
+    },
+    {
+      "from": "complete",
+      "to": "pending",
+      "on": "pump",
+      "$comment": "page level: the pump never un-completes a page. Only `heal` may, and only on filesystem evidence."
+    },
+    {
+      "from": "complete",
+      "to": "failed",
+      "on": "pump",
+      "$comment": "page level."
+    },
+    {
+      "from": "pending",
+      "to": "downloading",
+      "on": "pump",
+      "$comment": "page level: there IS no persisted in-flight page state. The evidence that a write was interrupted is its .part file, which the sweep reaps; a second marker would be a second truth to keep in sync."
+    }
+  ]
+}

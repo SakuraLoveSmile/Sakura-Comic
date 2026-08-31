@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Rust Core talks to the Komga server (REST) directly. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Stage 9 reads the link class before spending the user's mobile data:
+         Wi-Fi advances the queue by itself, a metered link needs a per-book
+         "用蜂窝下载" consent. A normal permission: no runtime prompt, and it
+         reveals nothing about the device beyond whether the network costs money. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Phase 0: LAN Komga servers are http:// (e.g. 192.168.x.x); TLS
          enforcement lands with the rustls/native-tls decision. -->
     <application

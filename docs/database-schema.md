@@ -28,6 +28,40 @@ read_progress / series_metadata / book_metadata / **sync_state (v6 复合主键)
 **series_genres / series_tags / series_authors / book_tags / book_authors /
 collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服务器作用域）
 
+## v9 变更（Stage 9 离线下载）
+
+版本戳 `PRAGMA user_version = 9`。`downloads` / `download_pages` 两张表从 v1 就在，
+但**一直没有写入者**——v9 给它们一个，并补上"可续传"需要的列。两条路径（全新建库的
+`CREATE_STATEMENTS` 与 v8 库上的 `V9_ALTER_STATEMENTS`）必须收敛到同一个形状，
+`a_migrated_v8_download_table_has_the_fresh_shape` 用 `pragma_table_info` 逐列对比钉住：
+只加进 CREATE 而忘了 ALTER 的列，平时全绿，升级用户一打开就查一个不存在的列。
+
+| 表 | 新列 | 为什么砍不掉 |
+| --- | --- | --- |
+| `downloads` | `position` | 队列次序 = 用户点击次序。rowid 既不是它也不稳定 |
+| | `bytes_total` / `bytes_done` | 存储页与"空间不够就别开新书"的判断，一次查询而不是走目录 |
+| | `created_at` / `updated_at` | 清单的 `downloadedAt`；陈旧判断 |
+| | `last_error` / `next_retry_at` | 失败要能解释；凭据被拒时把整台服务器的队列停到一个约定时间 |
+| | `remote_last_modified` | `books.last_modified` 跑过它 → UI 说"内容已更新"而不是悄悄供旧内容 |
+| | `book_title` / `series_title` | 书被远端删掉后仍要能显示这本是什么（下载不随镜像级联消失） |
+| | `allow_cellular` | 计量网络上"花我的流量"是**每本**一次的确认，不是一个全局偏好 |
+| `download_pages` | `size_bytes` / `media_type` | 落地时实测的字节数与容器；读时要按它做完整性快查 |
+| | `attempts` / `last_error` / `updated_at` | 单页重试的计数与理由——链路故障**不**烧尝试，坏的页才烧 |
+
+`pages_total` / `pages_done` / `file_path` / `manifest_path` 仍是可空列：SQLite 不能在不
+重建表的前提下改已有列的可空性，而重建表正是一条失败模式为"丢掉用户下载记账"的迁移
+（`a_v8_download_row_survives_the_v9_migration_untouched` 用纯 v8 DDL 建库、插一行部分
+下载的暂停中书籍、跑 `migrate`，断言它原样活着而新列取默认值）。所有读路径 COALESCE。
+
+**没有新索引**：`downloads` 每本一行，是用户亲手点的；`download_pages` 的热查询是
+`WHERE server_id=? AND book_id=? AND state<>?`，本就是主键前缀的范围扫。想加
+`downloads(state, position)` 之前记住一个陷阱：`CREATE_STATEMENTS` 跑在 ALTER 循环**之前**，
+所以建在新列上的索引在 v8 升级库上会直接失败。
+
+`downloads` / `download_pages` 已从 `delete_server_mirror` 与 `prune::delete_book`
+的级联名单里移出（Stage 9 的决定，理由写在
+`specs/contracts/delete-propagation/README.md`）。
+
 ## v8 变更（Stage 7 阅读器）
 
 版本戳 `PRAGMA user_version = 8`。三处新增，都是「本地负责展示」在阅读链路上的延伸。

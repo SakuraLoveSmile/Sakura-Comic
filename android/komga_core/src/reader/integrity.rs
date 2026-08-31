@@ -55,6 +55,19 @@ impl Format {
         }
     }
 
+    /// The media type this container actually is. The download tree stores it with
+    /// the page, and a manifest that said `png` would not match the `image/png` the
+    /// server itself reported.
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            Format::Png => "image/png",
+            Format::Jpeg => "image/jpeg",
+            Format::Gif => "image/gif",
+            Format::WebP => "image/webp",
+            Format::Unknown => "application/octet-stream",
+        }
+    }
+
     pub fn extension(&self) -> Option<&'static str> {
         match self {
             Format::Png => Some("png"),

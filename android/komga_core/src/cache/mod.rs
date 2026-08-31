@@ -171,6 +171,36 @@ pub fn safe_key(key: &str) -> String {
         .collect()
 }
 
+/// Durable write-then-rename, used by the offline download tree.
+///
+/// The `sync_all` is the whole difference from `reader::cache::write_then_rename`,
+/// and it is deliberate both ways. A completed download page is often the only
+/// copy the user has — of a book the server may later drop, on a link that may
+/// never be free again — so it has to survive the process being killed and the
+/// device losing power, which a `rename` of unflushed data does not promise.
+/// Cache-tier bytes are re-fetchable by definition, and an fsync per cached page
+/// would be paid on the thread the reader keeps responsive.
+pub fn write_atomic_durable(staging: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let result = (|| -> std::io::Result<()> {
+        let mut file = fs::File::create(staging)?;
+        use std::io::Write;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(staging, path)
+    })();
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            fs::remove_file(staging).ok();
+            Err(error)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,33 @@
+{
+  "$comment": "Stage 9 manifest.json, byte-exact in shape. Field names are the whole interop: serde and JSONEncoder default to different styles, so both platforms write what THIS file says and both read it back. The example is deliberately a partial download — `pagesCount` is the book's total and `pages` lists only what is on disk, page 5 missing — because that is the state a manifest is written in most often and the one an implementation could get wrong by assuming the two are equal. It is also the state that makes 边下边读 work: a reader asks for page 3, finds it here, and never learns page 5 is not.",
+  "version": 1,
+  "document": {
+    "serverId": "s1",
+    "bookId": "0Q9FQVFC4TTJQ",
+    "pagesCount": 6,
+    "downloadedAt": "2026-08-30T04:52:00Z",
+    "remoteLastModified": "2024-05-11T18:07:33Z",
+    "pages": [
+      { "number": 1, "fileName": "0001.png", "mediaType": "image/png",  "sizeBytes": 19570, "width": 520, "height": 720 },
+      { "number": 2, "fileName": "0002.png", "mediaType": "image/png",  "sizeBytes": 19666, "width": 520, "height": 720 },
+      { "number": 3, "fileName": "0003.png", "mediaType": "image/png",  "sizeBytes": 19762, "width": 520, "height": 720 },
+      { "number": 4, "fileName": "0004.png", "mediaType": "image/png",  "sizeBytes": 19858, "width": 520, "height": 720 },
+      { "number": 6, "fileName": "0006.jpg", "mediaType": "image/jpeg", "sizeBytes": 248711, "width": 1200, "height": 1800 }
+    ]
+  },
+  "fieldRules": {
+    "serverId_bookId": "Raw ids as the server knows them, NOT the sanitised directory names. A `safe_key` collision between two servers would otherwise be invisible: the manifest is the only document that can say which book this really is.",
+    "downloadedAt": "When this book's download was created, RFC 3339 in UTC with second precision and a `Z` suffix. Rewritten only when the job is created, never when a page lands — a download of a 292-page book has one creation time, and 292 different page times would make the field unusable for the freshness comparison.",
+    "remoteLastModified": "The book's `lastModified` as the server reported it when the job was created. Compared against `books.last_modified` after a sync, it is what lets the UI say 内容已更新 instead of silently serving a stale copy. `null` when the job was created offline and never saw a server answer.",
+    "pages": "Ascending by `number`, completed pages only. `fileName` is relative to the directory holding this manifest, never absolute, so a user moving the app's storage container keeps a readable library.",
+    "sizeBytes": "The size the file actually ended up being, read back from the filesystem after the rename — not what the server declared. A declared size is a claim; this one is a measurement.",
+    "width_height": "0 when unknown. The manifest mirror already carries the server's values and a download must not invent dimensions it was never told."
+  },
+  "rewrittenOn": [
+    "enqueue (the empty-pages form, which is what makes a directory self-describing before any byte arrives)",
+    "every terminal book transition (completed / failed)",
+    "any heal the sweep performed",
+    "any user delete of a page within the book"
+  ],
+  "notWrittenPerPage": "A pass commits its row per page anyway, so a per-page manifest rewrite is O(n) extra writes for zero extra durability, and the directory listing already proves what is present. This will look like a bug to whoever reads it next; it is not one."
+}

@@ -7,6 +7,7 @@ import 'reader_controller.dart';
 import 'reader_screen.dart';
 import 'reader_system_controls.dart';
 import 'models.dart';
+import 'download_controller.dart';
 
 /// Series detail: metadata (Tags/Genres/Status/Authors/Publisher) + the
 /// book list with read status and covers. All data from the local store;
@@ -17,11 +18,16 @@ class SeriesDetailScreen extends StatefulWidget {
     required this.repository,
     required this.seriesId,
     this.onChanged,
+    this.downloads,
   });
 
   final LibraryRepository repository;
   final String seriesId;
   final VoidCallback? onChanged;
+
+  /// Stage 9. Null on a build with no queue to talk to, which is the same case as
+  /// the reader's in-memory fallback: the button is not rendered at all.
+  final DownloadController? downloads;
 
   @override
   State<SeriesDetailScreen> createState() => _SeriesDetailScreenState();
@@ -357,6 +363,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
       isScrollControlled: true,
       builder: (sheetContext) => _BookDetailSheet(
         repository: widget.repository,
+        downloads: widget.downloads,
         book: book,
         onChanged: () {
           widget.onChanged?.call();
@@ -373,11 +380,13 @@ class _BookDetailSheet extends StatefulWidget {
     required this.repository,
     required this.book,
     this.onChanged,
+    this.downloads,
   });
 
   final LibraryRepository repository;
   final Book book;
   final VoidCallback? onChanged;
+  final DownloadController? downloads;
 
   @override
   State<_BookDetailSheet> createState() => _BookDetailSheetState();
@@ -385,6 +394,51 @@ class _BookDetailSheet extends StatefulWidget {
 
 class _BookDetailSheetState extends State<_BookDetailSheet> {
   BookDetail? _detail;
+
+  /// The button's label follows the queue's state and nothing else. The five words
+  /// are the contract's five states
+  /// (`specs/contracts/fixtures/downloads/states.json`) rendered for a person;
+  /// `''` means the book is not in the queue at all.
+  String get _downloadLabel {
+    final state = widget.downloads?.stateOf(widget.book.remoteId) ?? '';
+    return const {
+      'waiting': '排队中',
+      'downloading': '下载中',
+      'paused': '已暂停',
+      'completed': '已下载',
+      'failed': '重试下载',
+    }[state] ??
+        '下载';
+  }
+
+  /// One button, five states, and the mapping is the contract's: a tap on a queued
+  /// book pauses it, a tap on a paused one resumes it, a tap on a failed one retries
+  /// it. Never delete — that gesture only exists on the Downloads screen, where it
+  /// asks first.
+  Future<void> _toggleDownload() async {
+    final controller = widget.downloads;
+    if (controller == null) return;
+    final bookId = widget.book.remoteId;
+    switch (controller.stateOf(bookId)) {
+      case 'waiting':
+      case 'downloading':
+        await controller.pause(bookId);
+        break;
+      case 'paused':
+        await controller.resumeBook(bookId);
+        break;
+      case 'failed':
+        await controller.retry(bookId);
+        break;
+      case 'completed':
+        // Already on the device. Re-downloading means deleting it first, which is a
+        // decision worth more than a stray tap.
+        break;
+      default:
+        await controller.enqueue(bookId);
+    }
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
@@ -437,6 +491,15 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
                   },
                   child: const Text('标记已读'),
                 ),
+                if (widget.downloads != null) ...[
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    key: Key('download-${book.remoteId}'),
+                    onPressed: _toggleDownload,
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: Text(_downloadLabel),
+                  ),
+                ],
                 const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () async {

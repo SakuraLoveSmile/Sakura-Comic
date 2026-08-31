@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'src/download_stress.dart';
 import 'src/library_repository.dart';
 import 'src/reader_stress.dart';
 import 'src/rust_core_frb.dart';
@@ -75,6 +76,9 @@ class ComicApp extends StatelessWidget {
   Widget get _home {
     final stress = ReaderStressParams.parse(initialRoute);
     if (stress != null) return ReaderStressScreen(params: stress);
+    // The Stage 9 entry, same shape: only this route reaches it.
+    final download = DownloadStressParams.parse(initialRoute);
+    if (download != null) return DownloadStressScreen(params: download);
     return SeriesGridScreen(
       repository: repository,
       manager: serverManager,

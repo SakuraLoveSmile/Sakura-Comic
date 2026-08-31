@@ -1,0 +1,802 @@
+{
+  "$comment": "Stage 9 pump planning. Everything the download pass decides BEFORE it touches a network socket lives here: which book, which pages, in what order, and why it stopped. That is the pump's whole observable contract, and it is pure — books, pages, bounds, link and the reader's position in, a job list out — so both platforms can run these cases against their own planner and a difference is a bug rather than a misunderstanding. Elapsed time is deliberately NOT an input: the real pass checks the wall clock before each page and no fixture can predict a round trip, so `maxElapsedMs` is proven by the acceptance harness measuring max_pump_ms against a slow server (errors.json's bounds), not by a planner case.",
+  "version": 1,
+  "oneBookPerPass": "A pass serves at most one book, the claimable one with the lowest `position`. Concurrency between books comes from the queue and from the UI pumping again, never from threads — which is what keeps 'one request per page' assertable and a kill-and-resume run deterministic.",
+  "ordering": "Candidates are a book's pages whose row is `pending` with attempts below maxPageAttempts. Without a live reader they go ascending. With a live reader on that book they go [readerPage .. pagesTotal] then [1 .. readerPage-1]: the reader continues forward, so the pump races toward where they are instead of toward the end of the job, and the pages behind them are still fetched once the front is covered.",
+  "stopReasons": {
+    "none": "Planning found nothing to say no to, and there was nothing to plan.",
+    "drained": "Every candidate fits inside the bounds; this pass covers what is left of the book.",
+    "budget": "maxPages was reached with candidates remaining.",
+    "bytes": "maxBytes was reached with candidates remaining. One page is always served even if it alone exceeds the budget, or a big-page book could never finish.",
+    "linkBlocked": "The reported link forbids this work: metered without the book's allowCellular, or unknown when no book is already in flight.",
+    "lowSpace": "The volume cannot obviously hold what this pass would write. freeBytes == 0 means the platform would not say, which blocks starting a new book and never blocks continuing one.",
+    "parked": "The only claimable book has a nextRetryAt in the future (a rejected credential or a 429 parked it) and no other book is ready.",
+    "idle": "Nothing in the queue wants bytes: no book is waiting or downloading."
+  },
+  "cases": [
+    {
+      "name": "lowest-position-book-only",
+      "$comment": "Two queued books: the pass touches one. A pump that interleaved them would make 'whose turn is it' unanswerable in the UI.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 6,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          },
+          {
+            "bookId": "b2",
+            "position": 2,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 6,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 1
+          },
+          {
+            "bookId": "b1",
+            "page": 2
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "paused-book-is-skipped-and-not-resumed",
+      "$comment": "The illegal transition from states.json as a plan case: the book at position 1 is paused, so the pass runs position 2 and never touches the pause.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "paused",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 6,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          },
+          {
+            "bookId": "b2",
+            "position": 2,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 6,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b2",
+            "page": 1
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "complete-pages-are-never-refetched",
+      "$comment": "The single-page-retry claim in one case: pages 1 and 2 are done, so a retry of this book costs the pages that are not, and the acceptance can assert refetched == failed rather than refetched == pagesTotal.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 4,
+            "pages": [
+              {
+                "number": 1,
+                "state": "complete",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "complete",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 3,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 4,
+                "state": "pending",
+                "attempts": 1,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 3
+          },
+          {
+            "bookId": "b1",
+            "page": 4
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "attempts-exhausted-stops-queuing-that-page",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 3,
+            "pages": [
+              {
+                "number": 1,
+                "state": "failed",
+                "attempts": 3,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 2,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 3,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 2
+          },
+          {
+            "bookId": "b1",
+            "page": 3
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "pending-but-out-of-attempts",
+      "$comment": "The rule the previous case only appeared to test: a page whose row still says `pending` but has already spent every attempt. The `failed` rows in the other case are excluded by their state alone, so with only that case a planner that ignored attempts entirely would still pass. This shape is reachable from a hand-edited or pre-v9 database, and the planner refuses it rather than trusting how the rows got there.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 3,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 3,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 2,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 3,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 2
+          },
+          {
+            "bookId": "b1",
+            "page": 3
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "reader-position-goes-first",
+      "$comment": "A reader sitting on page 12 of a book being downloaded: the pages in front of them come first, and page 1 is still fetched after the tail is covered.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": {
+          "bookId": "b1",
+          "page": 12
+        },
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "downloading",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 14,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 100
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 100
+              },
+              {
+                "number": 11,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 100
+              },
+              {
+                "number": 12,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 100
+              },
+              {
+                "number": 13,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 100
+              },
+              {
+                "number": 14,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 100
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 12
+          },
+          {
+            "bookId": "b1",
+            "page": 13
+          },
+          {
+            "bookId": "b1",
+            "page": 14
+          },
+          {
+            "bookId": "b1",
+            "page": 1
+          }
+        ],
+        "stopReason": "budget"
+      }
+    },
+    {
+      "name": "byte-budget-stops-mid-book",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 8,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 12582912
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 12582912
+              },
+              {
+                "number": 3,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 12582912
+              },
+              {
+                "number": 4,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 12582912
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 1
+          },
+          {
+            "bookId": "b1",
+            "page": 2
+          }
+        ],
+        "stopReason": "bytes"
+      }
+    },
+    {
+      "name": "oversized-page-still-serves-one",
+      "$comment": "One 40 MB page is larger than the whole byte budget, and serving it anyway is the only way a book of such pages ever finishes.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 41943040
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 41943040
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 1
+          }
+        ],
+        "stopReason": "bytes"
+      }
+    },
+    {
+      "name": "metered-link-blocks-without-consent",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "metered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [],
+        "stopReason": "linkBlocked"
+      }
+    },
+    {
+      "name": "metered-link-with-consent-proceeds",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "metered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": true,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 1
+          },
+          {
+            "bookId": "b1",
+            "page": 2
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "unknown-link-finishes-what-is-running",
+      "$comment": "The asymmetry stated in errors.json's linkPolicy: an in-flight book continues, a not-yet-started one does not, so a platform that will not answer about its network cannot silently start spending.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unknown",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "downloading",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 4,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          },
+          {
+            "bookId": "b2",
+            "position": 2,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [
+          {
+            "bookId": "b1",
+            "page": 1
+          },
+          {
+            "bookId": "b1",
+            "page": 2
+          }
+        ],
+        "stopReason": "drained"
+      }
+    },
+    {
+      "name": "unknown-link-will-not-start-a-new-book",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unknown",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b2",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [],
+        "stopReason": "linkBlocked"
+      }
+    },
+    {
+      "name": "no-space-stops-a-new-book-not-a-running-one",
+      "$comment": "freeBytes is what the platform said; the rule is two pages' worth of headroom for a new book and none for continuing one, because bricking an in-flight download over a number the platform guessed would be worse than the overflow.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 1000,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [],
+        "stopReason": "lowSpace",
+        "nextInMs": 60000,
+        "$comment": "lowSpace backs off for a minute: disk space does not come back between one second and the next, and a 1 Hz poll against it is noise."
+      }
+    },
+    {
+      "name": "parked-book-waits-for-its-appointment",
+      "$comment": "A rejected credential parked the whole server queue (errors.json's blocked scope). The pass returns nothing and says when to come back, rather than discovering the 401 again per page.",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "waiting",
+            "allowCellular": false,
+            "nextRetryAt": "2026-08-30T05:01:00Z",
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [],
+        "stopReason": "parked",
+        "nextInMs": 60000
+      }
+    },
+    {
+      "name": "nothing-wants-bytes",
+      "input": {
+        "now": "2026-08-30T05:00:00Z",
+        "link": "unmetered",
+        "freeBytes": 536870912,
+        "maxPages": 4,
+        "maxBytes": 33554432,
+        "reader": null,
+        "books": [
+          {
+            "bookId": "b1",
+            "position": 1,
+            "state": "completed",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 2,
+            "pages": [
+              {
+                "number": 1,
+                "state": "complete",
+                "attempts": 0,
+                "declaredBytes": 19570
+              },
+              {
+                "number": 2,
+                "state": "complete",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          },
+          {
+            "bookId": "b2",
+            "position": 2,
+            "state": "paused",
+            "allowCellular": false,
+            "nextRetryAt": null,
+            "pagesTotal": 1,
+            "pages": [
+              {
+                "number": 1,
+                "state": "pending",
+                "attempts": 0,
+                "declaredBytes": 19570
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "jobs": [],
+        "stopReason": "idle"
+      }
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import 'downloads_api.dart';
 import 'reader_api.dart';
 import 'dart:async';
 
@@ -33,6 +34,11 @@ abstract class LibraryRepository {
   /// (or a widget test) can still open the screen; the Rust-backed repository
   /// overrides it with the FFI one.
   Future<ReaderApi> readerApi({required String bookId}) async => InMemoryReaderApi();
+
+  /// The download surface for the active server. Defaults to the in-memory queue so
+  /// a build without the native library (or a widget test) still renders the screen;
+  /// `RustLibraryRepository` overrides it with the FFI one.
+  Future<DownloadsApi> downloadsApi() async => InMemoryDownloadsApi();
 
   /// Cover file paths for the active server, resolved from SQLite
   /// (remote_id → local path). Missing covers are rendered as placeholders.
@@ -305,6 +311,19 @@ class RustLibraryRepository extends LibraryRepository {
       dbPath: dbPath,
       serverId: profile.id,
       bookId: bookId,
+      baseUrl: profile.baseUrl,
+      apiKey: apiKey,
+    );
+  }
+
+  @override
+  Future<DownloadsApi> downloadsApi() async {
+    final credential = await _activeCredential();
+    if (credential == null) return InMemoryDownloadsApi();
+    final (profile, apiKey) = credential;
+    return FrbDownloadsApi(
+      dbPath: dbPath,
+      serverId: profile.id,
       baseUrl: profile.baseUrl,
       apiKey: apiKey,
     );

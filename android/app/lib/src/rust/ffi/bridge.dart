@@ -639,3 +639,99 @@ Future<ReaderSettingsDto> readerSetSettings(
         {required String dbPath, required ReaderSettingsDto settings}) =>
     RustLib.instance.api
         .crateFfiBridgeReaderSetSettings(dbPath: dbPath, settings: settings);
+
+/// Put a book in the download queue. Works offline: the mirrored manifest already
+/// says what the book contains, and a book that was never mirrored cannot be queued.
+Future<DownloadBookDto> downloadEnqueue(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadEnqueue(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Stop a download. Only the user may do this, and only the user may undo it.
+Future<DownloadBookDto> downloadPause(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadPause(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+Future<DownloadBookDto> downloadResume(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadResume(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Re-queue a book's failed pages. Pages already on disk are not fetched again.
+Future<DownloadBookDto> downloadRetry(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadRetry(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// The explicit "spend my data" consent, per book.
+Future<DownloadBookDto> downloadSetAllowCellular(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        required bool allow}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadSetAllowCellular(
+        dbPath: dbPath, serverId: serverId, bookId: bookId, allow: allow);
+
+/// Delete a download: rows and files. The only way anything under `downloads/`
+/// leaves the disk on purpose.
+Future<DownloadDeleteDto> downloadDelete(
+        {required String dbPath,
+        required String serverId,
+        required String bookId}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadDelete(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
+
+/// Clear every download for one server, including directories the database has no
+/// row for.
+Future<DownloadDeleteDto> downloadDeleteAll(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeDownloadDeleteAll(dbPath: dbPath, serverId: serverId);
+
+/// The queue, as SQLite knows it. No network and no filesystem walk.
+Future<List<DownloadBookDto>> downloadList(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeDownloadList(dbPath: dbPath, serverId: serverId);
+
+/// What the device holds and what it says it has left. `free_volume_bytes` comes
+/// from the platform; `0` means it would not say.
+Future<StorageDto> downloadStorage(
+        {required String dbPath, required PlatformInt64 freeVolumeBytes}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadStorage(
+        dbPath: dbPath, freeVolumeBytes: freeVolumeBytes);
+
+/// Reconcile the download tree with its rows on demand. Also runs once per process
+/// on the first pump or list; this is the version whose report a harness reads.
+Future<DownloadSweepDto> downloadSweep({required String dbPath}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadSweep(dbPath: dbPath);
+
+/// Drive the queue one bounded step. `Ok(None)` means another pass holds this
+/// database — the same contract as `sse_poll`, for the same reason.
+Future<DownloadPumpDto?> downloadPump(
+        {required String dbPath,
+        required String serverId,
+        required String baseUrl,
+        required String apiKey,
+        required PlatformInt64 maxPages,
+        required PlatformInt64 maxBytes,
+        required PlatformInt64 freeVolumeBytes,
+        required String link}) =>
+    RustLib.instance.api.crateFfiBridgeDownloadPump(
+        dbPath: dbPath,
+        serverId: serverId,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        maxPages: maxPages,
+        maxBytes: maxBytes,
+        freeVolumeBytes: freeVolumeBytes,
+        link: link);

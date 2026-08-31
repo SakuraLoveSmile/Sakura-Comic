@@ -83,6 +83,42 @@ class MainActivity : FlutterActivity() {
                     manager?.getMemoryInfo(info)
                     result.success(if (manager == null) 0L else info.totalMem)
                 }
+                "freeDisk" -> {
+                    // Stage 9: the download planner needs to know what the volume can
+                    // still take. `filesDir` is the same volume the database and the
+                    // download tree live on, so the answer describes the bytes this
+                    // app is actually allowed to write — and no storage permission is
+                    // needed to ask about one's own directory.
+                    val stat = android.os.StatFs(filesDir.absolutePath)
+                    result.success(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            stat.availableBytes
+                        } else {
+                            @Suppress("DEPRECATION")
+                            stat.availableBlocksLong * stat.blockSizeLong
+                        }
+                    )
+                }
+                "linkClass" -> {
+                    // `isActiveNetworkMetered`, deliberately not
+                    // `transport == WIFI`: the emulator answers ETHERNET, and a
+                    // transport test there would leave every download blocked and
+                    // look like a bug in the core. "unmetered" lets the queue advance
+                    // on its own; "metered" needs the user's per-book consent;
+                    // "unknown" (no active network, or no connectivity service) may
+                    // finish a book already running and never start a new one.
+                    val manager = this.getSystemService(Context.CONNECTIVITY_SERVICE)
+                        as? android.net.ConnectivityManager
+                    result.success(
+                        when {
+                            manager == null -> "unknown"
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                                manager.activeNetwork == null -> "unknown"
+                            else ->
+                                if (manager.isActiveNetworkMetered) "metered" else "unmetered"
+                        }
+                    )
+                }
                 else -> result.notImplemented()
             }
         }

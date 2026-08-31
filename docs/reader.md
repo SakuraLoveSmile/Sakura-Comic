@@ -34,10 +34,23 @@ progression 接口，这是 Stage 6 规则 R8 在清单层的落实。
 ```text
 Reader (UI)
   → Page Loader        页号 → 本地文件
+  → Offline Download   downloads/{serverId}/{bookId}/0001.png   ← Stage 9，最高优先
+  → Page Cache         cache_entries 记账 → cache/pages/<key>.<ext>
   → Page Manifest      规范页号（1 起，来自镜像的清单）
-  → Cache              cache_entries 记账 → cache/pages/<key>.<ext>
   → 本地文件            解码 + 渲染（平台侧；核心不解码）
 ```
+
+Stage 9 之后加载优先级是 **Offline Download → Page Cache → Network**，
+一个插入点：`App::reader_page_path`（同步、不碰网络）先问
+`downloads::recover::usable_page`——行说 `complete` **且** 文件在 **且**
+容器首尾按行里记的字节数走得通；任一不符就**顺手写下愈合**（行回 `pending`、
+坏文件删掉），然后落到 Page Cache。`reader_page` 第一步就调 `reader_page_path`，
+所以显示路径与取页路径共用同一条优先级，不必各写一遍。
+
+下载页**不**写 `cache_entries`、**不** `touch`：它不是缓存状态。预取的暖集合
+（`prefetch_warm_set`）里包含已下载的页，否则泵会把用户已经付过钱的每一页重新排一遍、
+再往缓存层写第二份。边下边读不需要任何协调：`land_page` 的原子 rename 就是协议——
+读者要的页要么已经是完整文件，要么还不存在，它不会等，也不会看到半页。
 
 两条分层规则：
 
@@ -65,8 +78,13 @@ cache_entries + 文件（完整性校验）   落 prefetch/ + 字节驻留内存
 ```
 
 三层目录 `Cache/{thumbnails,pages,prefetch}/`。分层的唯一理由是**淘汰次序**：
-读者真正看过的字节比猜来的值钱，`prefetch` 永远先被牺牲，与新旧无关；
-`download`（离线下载）永不进淘汰候选。
+读者真正看过的字节比猜来的值钱，`prefetch` 永远先被牺牲，与新旧无关。
+
+离线下载**不在这三层里**：它住在 `cache/` 的兄弟目录 `downloads/`，也不进 LRU 账本。
+所以"LRU 永不删下载"不是淘汰代码里的一条 `if`，而是 `PageCache` 根本说不出那个路径
+（它只能通过 rooted 在 `cache/` 的 `DiskCache` 拼路径）——见
+[offline-storage.md](offline-storage.md)。账本里 `kind='download'` 那道围栏还在，
+但它是围栏，不是机制。
 
 ## 页缓存
 

@@ -22,6 +22,20 @@
 一致性约束：series 的 booksCount 与 books-by-series 实际书数一致（3/2/2）；
 ondeck 的书必须同时存在于 books-by-series（进度来自同一本）。
 
+## `downloads/`
+
+| 文件 | 钉住 | Rust 实现 | 两端断言 |
+| --- | --- | --- | --- |
+| `states.json` | 书 5 态 / 页 3 态的完整迁移表 + `illegal` 反例；「表里没有的迁移即非法」 | `downloads::queue::transition_allowed`（`include_str!` 编进库） | `the_allowed_actors_per_pair_are_exactly_the_ones_the_table_lists` |
+| `errors.json` | 信号 → 结果 → scope，**哪个结果烧尝试**，三重上界与退避表 | `queue::classify` / `scope_of` / `burns_attempt` / `next_in_ms` | `every_signal_classifies_the_way_the_table_says` |
+| `pump.json` | 给定队列 + 边界 + 链路 + 读者位置 → 精确页序与停止原因（15 例） | `queue::plan_pass`（纯函数） | `the_pump_plan_matches_the_shared_contract` |
+| `layout.json` | `%04d` 补齐、扩展名取自嗅探容器、`safe_key` 目录名、`.part` 后缀、**downloads 是 cache 的兄弟** | `downloads::manifest::{page_file_name,DownloadRoot}` | `the_page_names_match_the_shared_layout_contract` |
+| `manifest.json` | 清单文档逐字（含"部分下载"的例子）与字段集合 | `downloads::manifest::DownloadManifest` | `the_manifest_is_the_document_the_contract_describes` |
+
+`errors.json` 与 `states.json` 是**运行期读取**的（`include_str!`，不是打开文件：
+`specs/` 不在 APK 里，只在开发机上存在的规则等于没有规则）。其余三份是契约测试的
+数据源。
+
 ## `reader/`
 
 | 文件 | 钉住 | 两端实现 |

@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'collections_screen.dart';
+import 'download_controller.dart';
+import 'downloads_screen.dart';
+import 'reader_device.dart';
 import 'libraries_screen.dart';
 import 'library_repository.dart';
 import 'live_sync.dart';
@@ -84,6 +87,12 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   // Stage 6: the event stream + Outbox drainer. Owns no rules of its own — the
   // core decides backoff, conflicts and cleanup; this only decides when to ask.
   LiveSyncController? _live;
+
+  // Stage 9: the download queue. Created here, above every route, because a download
+  // that stopped the moment the user opened a book would be the wrong shape of
+  // "the user is not watching".
+  DownloadController? _downloads;
+  final ReaderDevice _device = ReaderDevice();
   OutboxStatusDto? _outbox;
   String? _liveStatus;
 
@@ -109,6 +118,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       },
     );
     _live!.start();
+    _initDownloads();
     _load();
   }
 
@@ -120,13 +130,33 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       // last backoff, and drain anything the background window queued.
       _live!.start();
       _live!.resume();
+      // The queue is durable and the transfer is not: coming back pays the sweep the
+      // core runs on the first pump, and picks up mid-page-list.
+      _downloads?.resume();
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       // Backgrounded: stop listening. Events missed here cannot be replayed
       // (the server sends no resume token), which is why resume() sweeps.
       _live?.stop();
+      _downloads?.stop();
     }
+  }
+
+  /// Build the download controller once the active credential is known.
+  Future<void> _initDownloads() async {
+    final api = await widget.repository.downloadsApi();
+    if (!mounted) return;
+    setState(() {
+      _downloads = DownloadController(
+        api,
+        link: _device.linkClass,
+        freeBytes: _device.freeDiskBytes,
+        onUpdate: () {
+          if (mounted) setState(() {});
+        },
+      )..start();
+    });
   }
 
   /// Schedules the next recovery attempt after a sweep failed offline.
@@ -142,6 +172,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _live?.dispose();
+    _downloads?.stop();
     _recoveryTimer?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
@@ -377,6 +408,27 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
                     content: Text(n == null || n == 0 ? '没有可重试的上传' : '已重新排队 $n 项'),
                   ));
                 },
+              ),
+            if (_downloads case final downloads?)
+              IconButton(
+                key: const Key('open-downloads'),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => DownloadsScreen(controller: downloads),
+                    ),
+                  );
+                },
+                // No controller yet means the credential has not resolved, which is
+                // also the moment the queue has nothing to show. The icon arrives
+                // when the data behind it does, rather than being tappable to a
+                // blank screen.
+                tooltip: downloads.hasWork ? '下载（进行中）' : '下载',
+                icon: Badge(
+                  isLabelVisible: downloads.hasWork,
+                  label: Text('${downloads.books.length}'),
+                  child: const Icon(Icons.download_outlined),
+                ),
               ),
             IconButton(
               onPressed: () {
@@ -780,6 +832,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       MaterialPageRoute(
         builder: (_) => SeriesDetailScreen(
           repository: widget.repository,
+          downloads: _downloads,
           seriesId: seriesId,
           onChanged: () {
             _load();

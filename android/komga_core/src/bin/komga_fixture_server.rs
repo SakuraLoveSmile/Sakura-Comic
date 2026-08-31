@@ -150,6 +150,25 @@ struct StressSpec {
     pad_bytes: usize,
 }
 
+/// The `BookDto` a stress book reports: same id, same page count, same geometry as
+/// the pages the `--stress` spec serves.
+fn stress_book(spec: &StressSpec) -> Value {
+    json!({
+        "id": spec.book,
+        "seriesId": "stress-series",
+        "seriesTitle": "Stress",
+        "name": spec.book,
+        "oneshot": false,
+        "media": {
+            "mediaType": "image/png",
+            "pagesCount": spec.pages,
+        },
+        "created": "2024-05-11T18:07:33Z",
+        "lastModified": "2024-05-11T18:07:33Z",
+        "sizeBytes": spec.pages as i64 * 1024,
+    })
+}
+
 impl StressSpec {
     fn parse(value: &str) -> Option<StressSpec> {
         let mut parts = value.split(',');
@@ -329,7 +348,20 @@ fn route(stream: &mut TcpStream, config: &Config, request: &Request) -> std::io:
     {
         let found = all_books(&state)
             .into_iter()
-            .find(|book| book.get("id").and_then(Value::as_str) == Some(book_id));
+            .find(|book| book.get("id").and_then(Value::as_str) == Some(book_id))
+            // A stress book is synthesized for the page routes, and a server that
+            // serves a book's pages while 404ing the book itself is not a shape any
+            // real Komga has: it makes the uploader's Targeted Re-fetch report the
+            // book as gone, so a test that reads progress back cannot tell "already
+            // applied" from "the server dropped it". The DTO is built from the same
+            // spec the pages come from, so the two halves cannot disagree.
+            .or_else(|| {
+                config
+                    .stress
+                    .as_ref()
+                    .filter(|spec| spec.book == book_id)
+                    .map(stress_book)
+            });
         return match found {
             Some(book) => {
                 let merged = merge_progress(config, book_id, book);
