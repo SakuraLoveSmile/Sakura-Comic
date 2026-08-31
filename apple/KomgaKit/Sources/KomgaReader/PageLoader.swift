@@ -1,4 +1,5 @@
 import Foundation
+import KomgaDiagnostics
 import KomgaAPI
 import KomgaStore
 
@@ -242,6 +243,14 @@ public final class PageLoader: @unchecked Sendable {
                 report.loaded.append(number)
             } catch {
                 report.failed.append(number)
+                // Same words, same place as Rust's prefetch warning: one
+                // line naming the book, the page and why, because after the
+                // break there is nothing else in the record to say where the
+                // window stopped and why.
+                CoreLog.shared.warning(
+                    "KomgaReader.PageLoader",
+                    "prefetch \(bookID) page \(number): \(error)"
+                )
                 // Stop on the first failure: a page that will not load is a
                 // server-side signal, and hammering it for the rest of the window
                 // turns one outage into N requests.

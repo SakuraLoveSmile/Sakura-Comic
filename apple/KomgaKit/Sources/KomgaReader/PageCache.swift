@@ -1,4 +1,5 @@
 import Foundation
+import KomgaDiagnostics
 import KomgaStore
 
 // MARK: - Page cache (mirror of `reader/cache.rs`)
@@ -722,6 +723,19 @@ public final class PageCache: @unchecked Sendable {
         }
 
         report.evicted = try enforceBudget()
+        // Mirror of the Rust sweep line, including the condition: a sweep
+        // that found nothing says nothing, because a reader that has to
+        // filter noise out of the log stops reading it. This is the only
+        // moment a cache that is quietly failing every day becomes visible
+        // from outside — the person reading sees a page reload.
+        if report.ghostRows + report.orphanFiles + report.staleParts + report.corrupt > 0 {
+            CoreLog.shared.info(
+                "KomgaReader.PageCache",
+                "cache sweep: \(report.ghostRows) ghost rows, \(report.orphanFiles) orphan files, "
+                    + "\(report.staleParts) stale parts, \(report.corrupt) corrupt, "
+                    + "\(report.evicted) evicted, \(report.freedBytes) bytes freed"
+            )
+        }
         return report
     }
 

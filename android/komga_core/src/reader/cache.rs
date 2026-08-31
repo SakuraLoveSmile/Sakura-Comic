@@ -630,6 +630,23 @@ impl PageCache {
         }
 
         report.evicted = self.enforce_budget(conn)?;
+        // The sweep is one function and the report belongs in it. It used to
+        // live in the reader-open path only, which meant the explicit
+        // `reader_reconcile_cache` entry point could remove files and leave no
+        // trace — a cache that quietly fails every day is invisible unless the
+        // one path that notices it is the one that says so. A clean sweep still
+        // says nothing, because a line on every call is a line nobody reads.
+        if report.ghost_rows + report.orphan_files + report.stale_parts + report.corrupt > 0 {
+            log::info!(
+                "cache sweep: {} ghost rows, {} orphan files, {} stale parts, {} corrupt, {} evicted, {} bytes freed",
+                report.ghost_rows,
+                report.orphan_files,
+                report.stale_parts,
+                report.corrupt,
+                report.evicted,
+                report.freed_bytes
+            );
+        }
         Ok(report)
     }
 

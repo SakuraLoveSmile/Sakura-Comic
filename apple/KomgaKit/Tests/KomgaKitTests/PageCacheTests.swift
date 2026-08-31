@@ -1,4 +1,5 @@
 import XCTest
+@testable import KomgaDiagnostics
 import GRDB
 @testable import KomgaReader
 @testable import KomgaStore
@@ -499,6 +500,48 @@ final class PageCacheTests: XCTestCase {
         XCTAssertEqual(try cache.bytesUsed(), 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
         _ = location
+    }
+
+
+    /// A sweep is the one moment a cache that fails every day becomes visible
+    /// from outside the reader, so the line has to reach the log ring a
+    /// diagnostics snapshot reads — not only the report a caller is free to
+    /// drop. Mirror of Rust's sweep warning in `application.rs`.
+    func test_reconcile_writes_into_the_log_ring_when_it_found_something() throws {
+        let harness = try harness()
+        defer { harness.cleanup() }
+        let cache = harness.cache
+        CoreLog.shared.forwardsToSystemLog = false
+        CoreLog.shared.reset()
+
+        // A clean sweep says nothing. Without that half of the rule, "there is
+        // a sweep line" would stop meaning anything.
+        _ = try cache.reconcile(now: "t1")
+        XCTAssertTrue(
+            CoreLog.shared.recent(limit: 10).isEmpty,
+            "an empty sweep logged"
+        )
+
+        // A sweep that healed a lying ledger row says what it healed.
+        let manifest = harness.manifest(pages: 1)
+        try cache.store(
+            key: manifest.cacheKey(1),
+            bytes: harness.page(1),
+            contentType: "image/png",
+            now: "t2"
+        )
+        let path = try XCTUnwrap(harness.store.cacheEntry(key: manifest.cacheKey(1))?.path)
+        try FileManager.default.removeItem(atPath: path)
+
+        let report = try cache.reconcile(now: "t3")
+        XCTAssertEqual(report.ghostRows, 1)
+        let lines = CoreLog.shared.recent(limit: 10).map(\.message)
+        XCTAssertTrue(
+            lines.contains { $0.contains("cache sweep:") && $0.contains("1 ghost rows") },
+            "the sweep found a ghost row and the ring has no line about it: \(lines)"
+        )
+        XCTAssertEqual(CoreLog.shared.stats().info, 1)
+        CoreLog.shared.reset()
     }
 
     func testClearBookRemovesFilesRowsRamAndNothingElse() throws {

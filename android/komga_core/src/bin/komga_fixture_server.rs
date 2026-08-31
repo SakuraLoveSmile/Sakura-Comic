@@ -76,6 +76,7 @@ fn main() {
             "--journal" => take(&mut |v| config.journal = PathBuf::from(v)),
             "--progress-file" => take(&mut |v| config.progress_file = PathBuf::from(v)),
             "--fault-file" => take(&mut |v| config.fault_file = PathBuf::from(v)),
+            "--fault-api-file" => take(&mut |v| config.fault_api_file = PathBuf::from(v)),
             "--sse-file" => take(&mut |v| config.sse_file = PathBuf::from(v)),
             "--page-journal" => take(&mut |v| config.page_journal = PathBuf::from(v)),
             // Stage 8 stress knobs. `--stress BOOK,PAGES,WIDTH,HEIGHT,PAD` makes
@@ -129,7 +130,13 @@ struct Config {
     scenario: PathBuf,
     snapshot_file: PathBuf,
     progress_file: PathBuf,
+    /// Forces the status of a `PATCH .../read-progress`, which is what Stage 6
+    /// and Stage 9 needed: their question was "does a rejected upload retry".
     fault_file: PathBuf,
+    /// Forces the status of *any* authenticated route. A separate switch on
+    /// purpose — widening `--fault-file` would have changed what the existing
+    /// gates' injected 400/401 means the moment a refetch GET passes through.
+    fault_api_file: PathBuf,
     journal: PathBuf,
     sse_file: PathBuf,
     page_journal: PathBuf,
@@ -287,6 +294,19 @@ fn serve(stream: TcpStream, config: &Config) -> std::io::Result<()> {
 
 fn route(stream: &mut TcpStream, config: &Config, request: &Request) -> std::io::Result<()> {
     let path = request.path.as_str();
+
+    // ---- an optionally sick server ------------------------------------------
+    // The client's error taxonomy is only testable if the stand-in can answer
+    // 500/503/429 on the route under test, so this is checked first — but after
+    // the key check above, because "the server refused this credential" has to
+    // stay a 401 no matter what else is configured.
+    if let Some(fault) = read_trimmed(&config.fault_api_file).and_then(|v| v.parse::<u16>().ok()) {
+        return respond(
+            stream,
+            fault,
+            &json!({"message": format!("injected api fault {fault}")}).to_string(),
+        );
+    }
 
     // ---- Stage 6: the event stream -------------------------------------------
     if path == "/sse/v1/events" {

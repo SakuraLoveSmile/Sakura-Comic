@@ -67,7 +67,9 @@ final class MediaLibraryStoreTests: XCTestCase {
         _ = try store.querySeries(serverID: "srv-1", limit: 10, offset: 0)
         // Reading the schema version through a pragma.
         XCTAssertEqual(try store.schemaVersion(), Schema.currentVersion)
-        XCTAssertEqual(try store.schemaVersion(), 8)
+        // Pinned to Rust `SCHEMA_VERSION` on purpose; the line above only
+        // proves the store reported whatever this file says it is.
+        XCTAssertEqual(try store.schemaVersion(), 9)
         // v5 landed on the pre-existing libraries table.
         let libraryColumns = try store.columnNames(table: "libraries")
         XCTAssertTrue(libraryColumns.contains("root"), "\(libraryColumns)")
