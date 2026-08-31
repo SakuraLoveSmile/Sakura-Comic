@@ -10,7 +10,14 @@ public enum Schema {
     /// the mode and direction the reader was left in, and `cache_entries` gains
     /// an LRU index — the table existed since v3 with no writer, and the page
     /// cache is its first.
-    public static let currentVersion: Int64 = 8
+    ///
+    /// v9 (Stage 9): the two download tables stop being a v1 stub. Sixteen
+    /// columns make a download resumable and self-describing — per-page size and
+    /// attempt count so one bad page is retried alone, byte accounting so the
+    /// storage screen is a query rather than a walk, `position` so the queue
+    /// follows the user's taps, `next_retry_at` so a rejected credential parks a
+    /// book without burning its retries. Mirror of `V9_ALTER_STATEMENTS`.
+    public static let currentVersion: Int64 = 9
 
     public static let createStatements: [String] = [
         """
@@ -394,6 +401,29 @@ public enum Schema {
         "ALTER TABLE pending_mutations ADD COLUMN next_retry_at TEXT",
     ]
 
+    /// A download is resumable only if the row says how far it got. Mirror of
+    /// Rust `V9_ALTER_STATEMENTS`, and the reason `CREATE_STATEMENTS` must not
+    /// grow these columns: an existing v8 database has the tables already, so
+    /// only a guarded ALTER can bring it forward.
+    public static let v9AlterStatements: [String] = [
+        "ALTER TABLE downloads ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE downloads ADD COLUMN updated_at TEXT",
+        "ALTER TABLE downloads ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE downloads ADD COLUMN bytes_total INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE downloads ADD COLUMN bytes_done INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE downloads ADD COLUMN last_error TEXT",
+        "ALTER TABLE downloads ADD COLUMN next_retry_at TEXT",
+        "ALTER TABLE downloads ADD COLUMN remote_last_modified TEXT",
+        "ALTER TABLE downloads ADD COLUMN book_title TEXT",
+        "ALTER TABLE downloads ADD COLUMN series_title TEXT",
+        "ALTER TABLE downloads ADD COLUMN allow_cellular INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE download_pages ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE download_pages ADD COLUMN media_type TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE download_pages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE download_pages ADD COLUMN last_error TEXT",
+        "ALTER TABLE download_pages ADD COLUMN updated_at TEXT",
+    ]
+
     /// Derived objects over the migrated columns. Rust keeps the due index
     /// directly after the table in `CREATE_STATEMENTS`; here it has to come last,
     /// because `CREATE INDEX` parses its column list and an on-disk pre-v7 table
@@ -405,7 +435,7 @@ public enum Schema {
     /// Applies the full migration set on a connection (mirror of the Rust
     /// `schema::migrate`): FTS shape repair → sync_state rebuild → CREATE
     /// statements (including the v8 `book_pages` / `reader_position` tables and
-    /// the `cache_entries_lru` index) → guarded v4/v5/v7 ALTER column additions →
+    /// the `cache_entries_lru` index) → guarded v4/v5/v7/v9 ALTER column additions →
     /// derived indexes → `PRAGMA user_version`.
     public static func migrate(_ db: GRDB.Database) throws {
         try repairFTSShape(db)
@@ -413,7 +443,7 @@ public enum Schema {
         for statement in createStatements {
             try db.execute(sql: statement)
         }
-        for statement in v4AlterStatements + v5AlterStatements + v7AlterStatements {
+        for statement in v4AlterStatements + v5AlterStatements + v7AlterStatements + v9AlterStatements {
             // "ALTER TABLE t ADD COLUMN column ..." → skip when present.
             guard let rest = statement.split(separator: " ADD COLUMN ").first,
                   let column = statement.split(separator: " ADD COLUMN ").dropFirst().first?

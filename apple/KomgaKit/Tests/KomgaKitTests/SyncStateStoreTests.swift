@@ -180,7 +180,9 @@ final class SyncStateStoreTests: XCTestCase {
 
         let store = try KomgaStore(path: temp.path)
         XCTAssertEqual(try store.schemaVersion(), Schema.currentVersion)
-        XCTAssertEqual(try store.schemaVersion(), 8)
+        // The literal is the point: it pins this platform to Rust
+        // `SCHEMA_VERSION`, which the constant-based line above cannot do.
+        XCTAssertEqual(try store.schemaVersion(), 9)
         XCTAssertTrue(try store.columnNames(table: "sync_state").contains("entity_type"))
         XCTAssertTrue(try store.columnNames(table: "deleted_entities").contains("cause"))
 

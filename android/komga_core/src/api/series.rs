@@ -82,6 +82,13 @@ impl KomgaClient {
     /// disabled for Android); https endpoints need a TLS feature decision
     /// during Phase 0 step 02 (native-tls vs rustls). http:// works as-is.
     pub fn new(base_url: String, auth: AuthMethod) -> Result<Self> {
+        // The base URL is validated here, once, rather than at each request. It
+        // used to be normalized only by the add-server form and by
+        // `url.rs`'s own unit tests, so a mistyped address reached the HTTP
+        // layer and came back as a transport failure: the UI was told the
+        // server was down when the user had typed `not a url`. Failing fast
+        // also makes the pool key below canonical.
+        let base_url = super::url::normalize_server_url(&base_url)?;
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -103,6 +110,9 @@ impl KomgaClient {
     /// connections, keyed by base URL; a changed credential replaces the entry,
     /// so switching servers or signing in again never reuses the wrong auth.
     pub fn shared(base_url: String, auth: AuthMethod) -> Result<Self> {
+        // Canonical first, so `http://host:25600` and `http://host:25600/` are
+        // one server to the pool rather than two clients with two connections.
+        let base_url = super::url::normalize_server_url(&base_url)?;
         let mut guard = pool()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -169,9 +179,41 @@ impl KomgaClient {
 
 #[cfg(test)]
 mod tests {
+    fn no_auth() -> AuthMethod {
+        AuthMethod::ApiKey {
+            key: "irrelevant-to-parsing".to_string(),
+        }
+    }
+
     /// The pool exists so a page turn does not pay a fresh handshake the previous
     /// page could have reused — and it must never hand a URL the wrong
     /// credential, which would be an auth leak dressed up as an optimisation.
+    /// A malformed address is a *url* problem, not an outage. The distinction is
+    /// what lets the UI say "check the address you typed" instead of retrying a
+    /// server that will never answer.
+    #[test]
+    fn a_base_url_that_is_not_a_url_is_a_url_error_not_a_network_error() {
+        for raw in ["not a url", "ftp://example.com", "https://x/?a=1", ""] {
+            let error = KomgaClient::new(raw.to_string(), no_auth())
+                .err()
+                .unwrap_or_else(|| panic!("{raw:?} was accepted as a server address"));
+            assert!(
+                matches!(error, ApiError::UrlInvalid { .. }),
+                "{raw:?} arrived as {error}, which the UI would report as the server being down"
+            );
+        }
+    }
+
+    /// The two spellings of one server share one client, because the pool key is
+    /// now canonical rather than whatever the caller happened to type.
+    #[test]
+    fn one_server_written_two_ways_is_one_pooled_client() {
+        let plain = KomgaClient::shared("http://komga.test:25600".into(), no_auth()).unwrap();
+        let slashed = KomgaClient::shared("http://komga.test:25600/".into(), no_auth()).unwrap();
+        assert_eq!(plain.base_url, slashed.base_url);
+        assert_eq!(plain.base_url, "http://komga.test:25600");
+    }
+
     #[test]
     fn shared_reuses_one_client_per_url_and_never_the_wrong_credential() {
         let url = "http://pool.test.invalid:1";

@@ -2889,17 +2889,6 @@ impl App {
         let sweep = cache
             .reconcile(&conn, &thumbnails_now())
             .map_err(storage_err)?;
-        if sweep.ghost_rows + sweep.orphan_files + sweep.stale_parts + sweep.corrupt > 0 {
-            log::info!(
-                "cache sweep: {} ghost rows, {} orphan files, {} stale parts, {} corrupt, {} evicted, {} bytes freed",
-                sweep.ghost_rows,
-                sweep.orphan_files,
-                sweep.stale_parts,
-                sweep.corrupt,
-                sweep.evicted,
-                sweep.freed_bytes
-            );
-        }
         Ok(ReaderWindowDto {
             forward: plan.forward as i64,
             back: plan.back as i64,
@@ -3851,6 +3840,7 @@ mod tests {
     use super::*;
     use crate::model::series::{Series, SeriesMetadata};
     use crate::model::server_profile::AuthType;
+    use std::collections::BTreeSet;
     use uuid::Uuid;
 
     fn temp_db() -> String {
@@ -4167,6 +4157,99 @@ mod tests {
         assert_eq!(snap.log.errors, 0);
         assert!(snap.sync.iter().any(|row| row.entity_type == "full"));
         drop(conn);
+        cleanup_temp(&db);
+    }
+
+    /// Walk an encoded value into `parent.child` / `parent[].child` paths — the
+    /// spelling `specs/contracts/fixtures/diagnostics/snapshot.json` uses. The
+    /// Swift suite flattens its own snapshot the same way, so the two compare
+    /// field *names* rather than two hand-maintained lists.
+    fn flatten_paths(value: &serde_json::Value, prefix: &str, out: &mut BTreeSet<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, child) in map {
+                    let path = if prefix.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    flatten_paths(child, &path, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    flatten_paths(item, &format!("{prefix}[]"), out);
+                }
+            }
+            _ => {
+                if !prefix.is_empty() {
+                    out.insert(prefix.to_string());
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_diagnostics_snapshot_exposes_every_field_the_contract_names() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../specs/contracts/fixtures/diagnostics/snapshot.json"
+        ))
+        .expect("snapshot fixture must decode");
+        let required: Vec<&str> = fixture["fields"]
+            .as_array()
+            .expect("`fields` must be an array")
+            .iter()
+            .map(|entry| entry.as_str().expect("each field is a string"))
+            .collect();
+        assert!(!required.is_empty(), "an empty contract proves nothing");
+
+        let db = temp_db();
+        let app = App::new(&db);
+        app.bootstrap_demo("gate".to_string()).await.unwrap();
+        app.set_read_progress("gate", "berserk-01", 3, false)
+            .unwrap();
+
+        // A JSON array of nothing contributes no element paths, so a contract
+        // that names `queue[].state` can only be checked against a queue that
+        // has a row in it. Reading the shape with an empty queue would let the
+        // gate pass by omitting the check, which is how a contract file turns
+        // decorative.
+        let empty = serde_json::to_value(app.diagnostics_snapshot("gate").unwrap()).unwrap();
+        let mut empty_paths = BTreeSet::new();
+        flatten_paths(&empty, "", &mut empty_paths);
+        assert!(
+            !empty_paths.iter().any(|path| path.starts_with("queue[].")),
+            "an empty queue reported element paths, so the next assertion is vacuous"
+        );
+
+        let conn = store::open(&db).unwrap();
+        conn.execute(
+            "INSERT INTO downloads (server_id, book_id, state, pages_total, pages_done,
+                                    bytes_total, bytes_done)
+             VALUES ('gate','berserk-01','queued',10,1,100,10)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let encoded = serde_json::to_value(app.diagnostics_snapshot("gate").unwrap()).unwrap();
+        let mut present = BTreeSet::new();
+        flatten_paths(&encoded, "", &mut present);
+        for path in &required {
+            assert!(
+                present.iter().any(|owned| owned == path),
+                "the contract names `{path}` but this build's snapshot has no such field"
+            );
+        }
+
+        // The contract is written in camelCase, and the shape it pins is the
+        // *wire* shape: a `#[serde(rename_all)]` dropped somewhere would move
+        // every field out from under the Swift side without failing a Rust test.
+        assert!(present.iter().any(|path| path == "db.busyTimeoutMs"));
+        assert!(
+            !present.iter().any(|path| path.contains('_')),
+            "a snake_case field leaked into the contract shape"
+        );
         cleanup_temp(&db);
     }
 
