@@ -13,6 +13,7 @@
 //! precision match the Swift store.
 
 use rusqlite::{params, Connection, Row};
+use serde::{Deserialize, Serialize};
 
 pub const STATUS_IDLE: &str = "idle";
 pub const STATUS_SYNCING: &str = "syncing";
@@ -40,7 +41,8 @@ pub const BOOTSTRAP_ORDER: &[&str] = &[
 ];
 
 /// One `sync_state` row.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntitySyncState {
     pub server_id: String,
     pub entity_type: String,

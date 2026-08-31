@@ -10,6 +10,7 @@
 
 pub mod application;
 pub mod bridge;
+pub mod error;
 
 #[cfg(feature = "frb")]
 #[path = "generated/frb_generated.rs"]

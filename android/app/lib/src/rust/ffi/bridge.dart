@@ -3,6 +3,8 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import '../diagnostics/log.dart';
+import '../diagnostics/snapshot.dart';
 import '../frb_generated.dart';
 import '../model/server.dart';
 import '../model/server_profile.dart';
@@ -20,6 +22,7 @@ import '../sync/bootstrap.dart';
 import '../sync/full.dart';
 import '../sync/reconcile.dart';
 import 'application.dart';
+import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// BootstrapSync (API Key auth) — mirrors the first page of series.
@@ -735,3 +738,33 @@ Future<DownloadPumpDto?> downloadPump(
         maxBytes: maxBytes,
         freeVolumeBytes: freeVolumeBytes,
         link: link);
+
+/// What the last credentialed contact proved about one server's key:
+/// `valid`, `expired` or `unknown`, and when it was proved. The shelf shows a
+/// re-authenticate entry off this and nothing else.
+Future<AuthStateDto> authState(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeAuthState(dbPath: dbPath, serverId: serverId);
+
+/// Everything the client can say about itself in one read — schema and integrity,
+/// sync rows, the outbox, the three cache tiers, the queue, the API policy and
+/// the log ring. Reports only; no sweep or reconcile runs because somebody
+/// asked what the state was.
+Future<DiagnosticsDto> diagnosticsSnapshot(
+        {required String dbPath, required String serverId}) =>
+    RustLib.instance.api
+        .crateFfiBridgeDiagnosticsSnapshot(dbPath: dbPath, serverId: serverId);
+
+/// Recent core log lines, newest first. `min_level` is one of `error`, `warn`,
+/// `info`, `debug`, `trace`; anything else means no filter, so a typo in a
+/// filter box shows everything rather than pretending nothing happened.
+Future<List<LogRecord>> diagnosticsLogs(
+        {required PlatformInt64 limit, required String minLevel}) =>
+    RustLib.instance.api
+        .crateFfiBridgeDiagnosticsLogs(limit: limit, minLevel: minLevel);
+
+/// The ring's own counters: whether it owns the log backend, what it holds, how
+/// much it has evicted, and the newest error line.
+Future<LogStats> diagnosticsLogStats() =>
+    RustLib.instance.api.crateFfiBridgeDiagnosticsLogStats();

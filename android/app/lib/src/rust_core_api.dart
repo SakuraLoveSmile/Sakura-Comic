@@ -1,3 +1,4 @@
+import 'rust/diagnostics/log.dart';
 import 'rust/ffi/application.dart';
 import 'rust/model/server.dart';
 import 'rust/model/server_profile.dart';
@@ -14,8 +15,15 @@ import 'rust/store/sync_state.dart';
 // them keeps callers (repository, controllers) from pulling in the whole
 // generated model library, where names like `FilterOptions` collide with the
 // app's own view models.
+export 'rust/diagnostics/log.dart' show LogRecord;
 export 'rust/ffi/application.dart'
-    show OutboxEntryDto, OutboxStatusDto, SsePollResult, UploadOutcomeDto;
+    show
+        AuthStateDto,
+        DiagnosticsDto,
+        OutboxEntryDto,
+        OutboxStatusDto,
+        SsePollResult,
+        UploadOutcomeDto;
 
 /// In-memory stub so tests and the fallback UI path can run without FFI.
 class StubRustCoreApi extends RustCoreApi {
@@ -309,6 +317,31 @@ abstract class RustCoreApi {
   Future<List<EntitySyncState>> syncStates({
     required String dbPath,
     required String serverId,
+  }) async =>
+      const [];
+
+  /// Stage 10: what the last credentialed contact proved about this server's
+  /// key. `unknown` until the client has actually spoken to the server.
+  Future<AuthStateDto> authState({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      AuthStateDto(serverId: serverId, state: 'unknown', at: '');
+
+  /// Stage 10: the whole self-report in one read — schema and integrity, sync
+  /// rows, the outbox, the three cache tiers, the queue and the log ring.
+  Future<DiagnosticsDto?> diagnosticsSnapshot({
+    required String dbPath,
+    required String serverId,
+  }) async =>
+      null;
+
+  /// Recent core log lines, newest first. No `dbPath`: the ring is process
+  /// state, and a line written before a database was opened is still worth
+  /// reading.
+  Future<List<LogRecord>> diagnosticsLogs({
+    int limit = 100,
+    String minLevel = '',
   }) async =>
       const [];
 

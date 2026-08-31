@@ -1,0 +1,101 @@
+{
+  "$comment": "The error taxonomy at the FFI boundary. This file is the source of truth: Rust `komga_core::ffi::error::ErrorCode`, Swift `KomgaKit.CoreErrorCode` and Dart `ErrorCode` each enumerate exactly these names in this order, and each side has a test that loads this file and compares. `retryable` means a later automatic attempt can plausibly succeed with nothing in between; `needsUser` means the failure is unresolvable until the user does something. Those two bits are the entire reason the codes exist: a Dart side holding a string can print a failure but cannot decide between a spinner, a backoff and a password prompt.",
+  "version": "1.0.0",
+  "owners": {
+    "rust": "android/komga_core/src/ffi/error.rs",
+    "swift": "apple/KomgaKit/Sources/KomgaAPI/CoreError.swift",
+    "dart": "android/app/lib/src/core_error.dart"
+  },
+  "rules": [
+    "A code may be added by adding it here first, then to all three enumerations.",
+    "A code is never renamed in place: retire the old name as a separate change so an old client and a new server-side build cannot silently swap meanings.",
+    "A receiver that cannot name an incoming code falls back to `unknown` and keeps the message. It must not throw while decoding, because that turns a diagnostic into a crash.",
+    "No code may describe a condition the core reports as data rather than as a failure. `linkBlocked`, `lowSpace` and a paused queue are states inside report DTOs; inventing codes for them would give the UI two disagreeing sources for one fact."
+  ],
+  "codes": [
+    {
+      "code": "authExpired",
+      "meaning": "401 or 403 from a request that carried the credential.",
+      "retryable": false,
+      "needsUser": true
+    },
+    {
+      "code": "networkUnavailable",
+      "meaning": "No route, connection refused, DNS failure, timeout, or a body that stopped mid-stream.",
+      "retryable": true,
+      "needsUser": false
+    },
+    {
+      "code": "notFound",
+      "meaning": "404 or 410: the server no longer has that entity.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "conflict",
+      "meaning": "409: the server already holds a different answer for this write.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "rateLimited",
+      "meaning": "429: back off and return on the existing schedule.",
+      "retryable": true,
+      "needsUser": false
+    },
+    {
+      "code": "serverError",
+      "meaning": "Any other 4xx/5xx the taxonomy has no finer name for.",
+      "retryable": true,
+      "needsUser": false
+    },
+    {
+      "code": "contractUnsupported",
+      "meaning": "This build's transport contract does not cover that server version.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "invalidInput",
+      "meaning": "The caller asked for something malformed, or the configured URL is not a URL. A programming error inside the client, not something the user can resolve.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "decodeFailed",
+      "meaning": "A response arrived and is not the shape specs/openapi documents.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "databaseFailure",
+      "meaning": "SQLite refused in a way that is not a lock.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "databaseBusy",
+      "meaning": "Another connection held the write lock past busy_timeout.",
+      "retryable": true,
+      "needsUser": false
+    },
+    {
+      "code": "storageFailure",
+      "meaning": "The filesystem refused a write the core had already been told to make.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "idle",
+      "meaning": "A bounded event-stream read saw no frame. Normal, and never a reason to reschedule a reconnect.",
+      "retryable": false,
+      "needsUser": false
+    },
+    {
+      "code": "unknown",
+      "meaning": "Anything this build cannot name, including a code from a newer client. The message is kept because it is all that is left.",
+      "retryable": false,
+      "needsUser": false
+    }
+  ]
+}

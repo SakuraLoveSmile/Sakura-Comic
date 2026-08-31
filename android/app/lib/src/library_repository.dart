@@ -61,6 +61,14 @@ abstract class LibraryRepository {
   /// Sync bookkeeping (`sync_state`) for the shelf header.
   Future<SyncStatus> fetchSyncStatus() async => const SyncStatus();
 
+  /// Stage 10: what the last credentialed contact proved about the active
+  /// server's key. `null` when there is no active server to have a key for.
+  ///
+  /// The shelf shows its re-authenticate entry off this and nothing else, so
+  /// `unknown` has to stay distinguishable from `expired`: a client that never
+  /// spoke to the server should not be asking for a new password.
+  Future<AuthStateDto?> fetchCredentialState() async => null;
+
   /// Offline demo: seeds fixture series + generated covers (no server).
   Future<BootstrapSummary> loadDemo();
 
@@ -432,6 +440,13 @@ class RustLibraryRepository extends LibraryRepository {
       error: row?.lastError,
       resumableEntities: resumable,
     );
+  }
+
+  @override
+  Future<AuthStateDto?> fetchCredentialState() async {
+    final serverId = await _activeServerId();
+    if (serverId == null) return null;
+    return _api.authState(dbPath: dbPath, serverId: serverId);
   }
 
   @override

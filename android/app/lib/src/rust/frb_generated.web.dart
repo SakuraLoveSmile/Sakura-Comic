@@ -8,8 +8,11 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'diagnostics/log.dart';
+import 'diagnostics/snapshot.dart';
 import 'ffi/application.dart';
 import 'ffi/bridge.dart';
+import 'ffi/error.dart';
 import 'frb_generated.dart';
 import 'model/server.dart';
 import 'model/server_profile.dart';
@@ -38,6 +41,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String dco_decode_String(dynamic raw);
+
+  @protected
+  ApiPolicyDto dco_decode_api_policy_dto(dynamic raw);
+
+  @protected
+  AuthStateDto dco_decode_auth_state_dto(dynamic raw);
 
   @protected
   AuthType dco_decode_auth_type(dynamic raw);
@@ -136,7 +145,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ContinueReadingRow dco_decode_continue_reading_row(dynamic raw);
 
   @protected
+  CoreError dco_decode_core_error(dynamic raw);
+
+  @protected
+  DbHealth dco_decode_db_health(dynamic raw);
+
+  @protected
   DeviceProfileDto dco_decode_device_profile_dto(dynamic raw);
+
+  @protected
+  DiagnosticsDto dco_decode_diagnostics_dto(dynamic raw);
 
   @protected
   DownloadBookDto dco_decode_download_book_dto(dynamic raw);
@@ -152,6 +170,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   EntitySyncState dco_decode_entity_sync_state(dynamic raw);
+
+  @protected
+  ErrorCode dco_decode_error_code(dynamic raw);
 
   @protected
   double dco_decode_f_64(dynamic raw);
@@ -214,6 +235,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Uint32List> dco_decode_list_list_prim_u_32_strict(dynamic raw);
 
   @protected
+  List<LogRecord> dco_decode_list_log_record(dynamic raw);
+
+  @protected
   List<OutboxEntryDto> dco_decode_list_outbox_entry_dto(dynamic raw);
 
   @protected
@@ -221,6 +245,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<QueueStateCountDto> dco_decode_list_queue_state_count_dto(dynamic raw);
 
   @protected
   List<ReadlistRow> dco_decode_list_readlist_row(dynamic raw);
@@ -235,10 +262,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<StorageBookDto> dco_decode_list_storage_book_dto(dynamic raw);
 
   @protected
+  List<TableRows> dco_decode_list_table_rows(dynamic raw);
+
+  @protected
   List<ThumbnailRow> dco_decode_list_thumbnail_row(dynamic raw);
 
   @protected
   List<Tombstone> dco_decode_list_tombstone(dynamic raw);
+
+  @protected
+  LogRecord dco_decode_log_record(dynamic raw);
+
+  @protected
+  LogStats dco_decode_log_stats(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -294,6 +330,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   OutboxStatusDto dco_decode_outbox_status_dto(dynamic raw);
 
   @protected
+  QueueStateCountDto dco_decode_queue_state_count_dto(dynamic raw);
+
+  @protected
   ReaderBookDto dco_decode_reader_book_dto(dynamic raw);
 
   @protected
@@ -345,6 +384,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   StorageDto dco_decode_storage_dto(dynamic raw);
 
   @protected
+  TableRows dco_decode_table_rows(dynamic raw);
+
+  @protected
   ThumbnailRow dco_decode_thumbnail_row(dynamic raw);
 
   @protected
@@ -367,6 +409,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
+
+  @protected
+  ApiPolicyDto sse_decode_api_policy_dto(SseDeserializer deserializer);
+
+  @protected
+  AuthStateDto sse_decode_auth_state_dto(SseDeserializer deserializer);
 
   @protected
   AuthType sse_decode_auth_type(SseDeserializer deserializer);
@@ -478,7 +526,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  CoreError sse_decode_core_error(SseDeserializer deserializer);
+
+  @protected
+  DbHealth sse_decode_db_health(SseDeserializer deserializer);
+
+  @protected
   DeviceProfileDto sse_decode_device_profile_dto(SseDeserializer deserializer);
+
+  @protected
+  DiagnosticsDto sse_decode_diagnostics_dto(SseDeserializer deserializer);
 
   @protected
   DownloadBookDto sse_decode_download_book_dto(SseDeserializer deserializer);
@@ -495,6 +552,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   EntitySyncState sse_decode_entity_sync_state(SseDeserializer deserializer);
+
+  @protected
+  ErrorCode sse_decode_error_code(SseDeserializer deserializer);
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
@@ -564,6 +624,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<LogRecord> sse_decode_list_log_record(SseDeserializer deserializer);
+
+  @protected
   List<OutboxEntryDto> sse_decode_list_outbox_entry_dto(
       SseDeserializer deserializer);
 
@@ -572,6 +635,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<QueueStateCountDto> sse_decode_list_queue_state_count_dto(
+      SseDeserializer deserializer);
 
   @protected
   List<ReadlistRow> sse_decode_list_readlist_row(SseDeserializer deserializer);
@@ -588,11 +655,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<TableRows> sse_decode_list_table_rows(SseDeserializer deserializer);
+
+  @protected
   List<ThumbnailRow> sse_decode_list_thumbnail_row(
       SseDeserializer deserializer);
 
   @protected
   List<Tombstone> sse_decode_list_tombstone(SseDeserializer deserializer);
+
+  @protected
+  LogRecord sse_decode_log_record(SseDeserializer deserializer);
+
+  @protected
+  LogStats sse_decode_log_stats(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -656,6 +732,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   OutboxStatusDto sse_decode_outbox_status_dto(SseDeserializer deserializer);
 
   @protected
+  QueueStateCountDto sse_decode_queue_state_count_dto(
+      SseDeserializer deserializer);
+
+  @protected
   ReaderBookDto sse_decode_reader_book_dto(SseDeserializer deserializer);
 
   @protected
@@ -710,6 +790,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   StorageDto sse_decode_storage_dto(SseDeserializer deserializer);
 
   @protected
+  TableRows sse_decode_table_rows(SseDeserializer deserializer);
+
+  @protected
   ThumbnailRow sse_decode_thumbnail_row(SseDeserializer deserializer);
 
   @protected
@@ -732,6 +815,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_api_policy_dto(ApiPolicyDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_auth_state_dto(AuthStateDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_auth_type(AuthType self, SseSerializer serializer);
@@ -850,8 +939,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       ContinueReadingRow self, SseSerializer serializer);
 
   @protected
+  void sse_encode_core_error(CoreError self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_db_health(DbHealth self, SseSerializer serializer);
+
+  @protected
   void sse_encode_device_profile_dto(
       DeviceProfileDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_diagnostics_dto(
+      DiagnosticsDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_download_book_dto(
@@ -872,6 +971,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_entity_sync_state(
       EntitySyncState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_error_code(ErrorCode self, SseSerializer serializer);
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
@@ -944,6 +1046,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<Uint32List> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_log_record(
+      List<LogRecord> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_outbox_entry_dto(
       List<OutboxEntryDto> self, SseSerializer serializer);
 
@@ -954,6 +1060,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_prim_u_8_strict(
       Uint8List self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_queue_state_count_dto(
+      List<QueueStateCountDto> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_readlist_row(
@@ -972,12 +1082,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<StorageBookDto> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_table_rows(
+      List<TableRows> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_thumbnail_row(
       List<ThumbnailRow> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_tombstone(
       List<Tombstone> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_log_record(LogRecord self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_log_stats(LogStats self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -1045,6 +1165,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       OutboxStatusDto self, SseSerializer serializer);
 
   @protected
+  void sse_encode_queue_state_count_dto(
+      QueueStateCountDto self, SseSerializer serializer);
+
+  @protected
   void sse_encode_reader_book_dto(ReaderBookDto self, SseSerializer serializer);
 
   @protected
@@ -1103,6 +1227,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_storage_dto(StorageDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_table_rows(TableRows self, SseSerializer serializer);
 
   @protected
   void sse_encode_thumbnail_row(ThumbnailRow self, SseSerializer serializer);
