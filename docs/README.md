@@ -8,4 +8,5 @@
 - [stage6-checklist.md](stage6-checklist.md) — Stage 6 验收：SSE 事件流 + Mutation Outbox（断网/强杀/重启后自动上传）
 - [database-schema.md](database-schema.md) — SQLite Schema 与 FTS5 搜索
 - [reader.md](reader.md) — 阅读器模式、缓存策略、进度节流
-- [offline-storage.md](offline-storage.md) — 缓存与离线下载分离
+- [offline-storage.md](offline-storage.md) — 缓存与离线下载分离（Stage 9 全量落地）
+- [stage9-checklist.md](stage9-checklist.md) — Stage 9 验收：离线下载（Download Manager / 断网整本可读 / 复网自动上传）= Full Mobile v1

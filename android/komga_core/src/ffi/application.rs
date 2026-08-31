@@ -13,6 +13,7 @@ use crate::api::server::ConnectionFetching;
 use crate::api::sse::{SseClient, SseEvent, SseStream};
 use crate::cache::cover::{BytesFetcher, CoverStore};
 use crate::cache::DiskCache;
+use crate::downloads::{self, manifest::DownloadRoot};
 use crate::model::server::{Library, ServerInfo};
 use crate::model::server_profile::ServerProfile;
 use crate::reader;
@@ -79,6 +80,10 @@ impl App {
     /// the active-server state is cleared with it; its mirrored rows
     /// (series/books/metadata/collections/readlists/…), cover records and
     /// cached cover files are removed too (multi-server safe).
+    ///
+    /// Offline downloads survive it, rows and files both. Unlinking a server is a
+    /// gesture about the connection; the bookshelf the user filled is a separate
+    /// thing, and `download_delete_all` is the gesture that says what to do with it.
     pub fn delete_server(&self, server_id: &str) -> Result<bool, ApiError> {
         let conn = store::open(&self.db_path).map_err(db_err)?;
         // Collect cover files before the rows go away.
@@ -227,6 +232,13 @@ impl App {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("cache")
+    }
+
+    /// The offline-download tree beside the cache. `docs/offline-storage.md` fixes
+    /// the layout, and the two trees being siblings is what keeps every cache sweep
+    /// structurally unable to reach a user's download.
+    fn download_root(&self) -> Result<DownloadRoot, ApiError> {
+        DownloadRoot::for_db(Path::new(&self.db_path)).map_err(root_err)
     }
 
     fn open_cover_store(&self, base_url: &str) -> Result<CoverStore, ApiError> {
@@ -1629,6 +1641,21 @@ fn storage_err(e: std::io::Error) -> ApiError {
     }
 }
 
+/// A download-queue failure crosses the boundary with its own wording intact: the
+/// message is what the Downloads screen shows, and rewriting "服务器拒绝了凭据" as a
+/// category would throw away the only part the user can act on.
+fn download_err(e: downloads::store::QueueError) -> ApiError {
+    ApiError::Storage {
+        message: e.to_string(),
+    }
+}
+
+fn root_err(e: downloads::manifest::RootError) -> ApiError {
+    ApiError::Storage {
+        message: e.to_string(),
+    }
+}
+
 /// Outcome of the connection probe: server identity/version, remote
 /// entities (libraries) and policy-derived capabilities.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2103,6 +2130,13 @@ impl App {
 
     /// Where this page already is on disk, if anywhere. No network: this is what
     /// the UI paints first, and what tells it whether a fetch is needed.
+    ///
+    /// The order is the stage's contract — Offline Download, then Page Cache, then
+    /// whatever the caller does about the network — and it is one function because
+    /// `reader_page` starts by calling this one. A downloaded page is never copied
+    /// into the cache and never enters the LRU ledger: the row in `download_pages`
+    /// is already the truth about it, and a ledger row would make the eviction
+    /// budget permanently unsatisfiable.
     pub fn reader_page_path(
         &self,
         server_id: String,
@@ -2110,6 +2144,19 @@ impl App {
         page: i64,
     ) -> Result<Option<String>, ApiError> {
         let conn = store::open(&self.db_path).map_err(db_err)?;
+        if page >= 1 {
+            let downloaded = downloads::recover::usable_page(
+                &conn,
+                &server_id,
+                &book_id,
+                page as u32,
+                &thumbnails_now(),
+            )
+            .map_err(download_err)?;
+            if downloaded.is_some() {
+                return Ok(downloaded.map(|path| path.to_string_lossy().into_owned()));
+            }
+        }
         let manifest = self.mirrored_manifest(&conn, &server_id, &book_id)?;
         let cache = self.reader_cache_for(&server_id, &book_id)?;
         let hit = cache
@@ -2147,6 +2194,27 @@ impl App {
         Ok(location.path.to_string_lossy().into_owned())
     }
 
+    /// Which pages a prefetch pass must not queue, because they are already on the
+    /// device.
+    ///
+    /// Downloaded pages count as warm. Without this the prefetcher re-queues every
+    /// page of a book the user already owns locally, and writes a second copy of each
+    /// into the cache tier — bytes the user paid for twice and the LRU then gets to
+    /// evict.
+    fn prefetch_warm_set(
+        &self,
+        conn: &Connection,
+        server_id: &str,
+        book_id: &str,
+        manifest: &reader::manifest::PageManifest,
+    ) -> Result<HashSet<u32>, ApiError> {
+        let mut cached = self.open_reader_cache()?.cached_pages(conn, manifest);
+        cached.extend(
+            downloads::store::complete_pages(conn, server_id, book_id).map_err(download_err)?,
+        );
+        Ok(cached)
+    }
+
     /// Pull the pages around one spread into the cache. The window is computed
     /// locally, so a warm neighbourhood costs nothing.
     pub async fn reader_prefetch(
@@ -2165,7 +2233,7 @@ impl App {
                 Some(spreads) => spreads,
                 None => return Ok(0),
             };
-            let cached = self.open_reader_cache()?.cached_pages(&conn, &manifest);
+            let cached = self.prefetch_warm_set(&conn, &server_id, &book_id, &manifest)?;
             (
                 reader::prefetch::plan(&spreads, spread.max(0) as usize, window, &cached).queue,
                 manifest,
@@ -2647,8 +2715,10 @@ impl App {
             prefetch_bytes: cache
                 .bytes_of_tier(&conn, reader::cache::Tier::Prefetch)
                 .map_err(storage_err)?,
-            download_bytes: store::cache::bytes_of_kind(&conn, store::cache::KIND_DOWNLOAD)
-                .map_err(db_err)?,
+            // From `download_pages`, not the ledger: a download has no ledger row by
+            // design, and reading the `kind = 'download'` sum here reported zero for
+            // every download the app had ever made.
+            download_bytes: downloads::store::bytes_done_all(&conn).map_err(download_err)?,
             pool_budget_bytes: cache.budget(),
             memory_bytes: memory.bytes,
             memory_peak_bytes: memory.peak_bytes,
@@ -2715,6 +2785,608 @@ impl App {
             .get(&reader_key(server_id, book_id))
             .map(|live| live.session.layout().spreads.clone()))
     }
+
+    // MARK: - Stage 9 offline downloads
+
+    /// Put a book in the download queue. Works with the network dead — the mirrored
+    /// manifest already says what the book contains, and a book that was never
+    /// mirrored cannot be queued, because nothing local can say how many pages it has.
+    pub fn download_enqueue(
+        &self,
+        server_id: String,
+        book_id: String,
+    ) -> Result<DownloadBookDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let manifest = self.mirrored_manifest(&conn, &server_id, &book_id)?;
+        let numbers: Vec<u32> = (1..=manifest.page_count()).collect();
+        let bytes_total: i64 = numbers
+            .iter()
+            .map(|number| {
+                manifest
+                    .pages
+                    .iter()
+                    .find(|page| page.number == *number)
+                    .map(|page| page.size_bytes.max(0))
+                    .unwrap_or(0)
+            })
+            .sum();
+        let detail = store::books::get_book(&conn, &server_id, &book_id).map_err(db_err)?;
+        let root = self.download_root()?;
+        let row = downloads::store::enqueue(
+            &conn,
+            &downloads::store::NewDownload {
+                server_id: server_id.clone(),
+                book_id: book_id.clone(),
+                pages_total: manifest.page_count(),
+                bytes_total,
+                manifest_path: root
+                    .manifest_path(&server_id, &book_id)
+                    .to_string_lossy()
+                    .into_owned(),
+                remote_last_modified: detail.as_ref().and_then(|book| book.last_modified.clone()),
+                book_title: detail.as_ref().map(|book| book.title.clone()),
+                series_title: detail.as_ref().and_then(|book| book.series_title.clone()),
+            },
+            &numbers,
+            &thumbnails_now(),
+        )
+        .map_err(download_err)?;
+        // The directory and its self-describing manifest exist before a single page
+        // byte arrives: a half-finished download has to be legible to a sweep, to a
+        // user reading the folder, and to a restore after a crash.
+        downloads::recover::rebuild_manifest(&conn, &root, &server_id, &book_id, &thumbnails_now())
+            .map_err(download_err)?;
+        download_dto(&conn, &Some(row), &server_id, &book_id)
+    }
+
+    /// The only gesture that may stop a download in flight, and the only one that
+    /// may start one back up again.
+    pub fn download_pause(
+        &self,
+        server_id: String,
+        book_id: String,
+    ) -> Result<DownloadBookDto, ApiError> {
+        self.download_user_set(&server_id, &book_id, downloads::queue::book_state::PAUSED)
+    }
+
+    pub fn download_resume(
+        &self,
+        server_id: String,
+        book_id: String,
+    ) -> Result<DownloadBookDto, ApiError> {
+        self.download_user_set(&server_id, &book_id, downloads::queue::book_state::WAITING)
+    }
+
+    /// Re-queue a book's failed pages. Pages already on disk are left alone, which
+    /// is the whole value of single-page retry: three bad pages in a four-hundred
+    /// page book costs three requests, and the acceptance harness asserts that.
+    pub fn download_retry(
+        &self,
+        server_id: String,
+        book_id: String,
+    ) -> Result<DownloadBookDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        downloads::store::retry_failed_pages(&conn, &server_id, &book_id, &thumbnails_now())
+            .map_err(download_err)?;
+        // Only a failed book has a state to move. Re-queueing a book a pass is
+        // holding is the `downloading -> waiting by user` pair the contract refuses,
+        // and for a waiting or paused book the gesture was about its pages, not its
+        // state — so the pages are cleared and the state is left exactly where it is.
+        if downloads::store::state_of(&conn, &server_id, &book_id)
+            .map_err(download_err)?
+            .as_deref()
+            == Some(downloads::queue::book_state::FAILED)
+        {
+            downloads::store::user_set(
+                &conn,
+                &server_id,
+                &book_id,
+                downloads::queue::book_state::WAITING,
+                &thumbnails_now(),
+                None,
+            )
+            .map_err(download_err)?;
+        }
+        downloads::store::clear_park(&conn, &server_id, &thumbnails_now()).map_err(download_err)?;
+        download_dto(&conn, &None, &server_id, &book_id)
+    }
+
+    /// The user's explicit "spend my data" consent for one book.
+    pub fn download_set_allow_cellular(
+        &self,
+        server_id: String,
+        book_id: String,
+        allow: bool,
+    ) -> Result<DownloadBookDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        downloads::store::set_allow_cellular(&conn, &server_id, &book_id, allow, &thumbnails_now())
+            .map_err(download_err)?;
+        download_dto(&conn, &None, &server_id, &book_id)
+    }
+
+    fn download_user_set(
+        &self,
+        server_id: &str,
+        book_id: &str,
+        to: &str,
+    ) -> Result<DownloadBookDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let row =
+            downloads::store::user_set(&conn, server_id, book_id, to, &thumbnails_now(), None)
+                .map_err(download_err)?;
+        download_dto(&conn, &Some(row), server_id, book_id)
+    }
+
+    /// Delete a download. Nothing else in the program may do this — see the
+    /// OWNERSHIP note in `downloads::mod`.
+    ///
+    /// The rows go first, then the files: if the process dies between the two, the
+    /// tree is one the database no longer claims, which the sweep reports as unowned
+    /// and preserves. The other order would leave files the user asked to delete and
+    /// no row to name them by.
+    pub fn download_delete(
+        &self,
+        server_id: String,
+        book_id: String,
+    ) -> Result<DownloadDeleteDto, ApiError> {
+        let root = self.download_root()?;
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        downloads::store::delete_rows(&conn, &server_id, &book_id).map_err(download_err)?;
+        let (files, freed) = root
+            .remove_book_tree(&server_id, &book_id)
+            .map_err(storage_err)?;
+        Ok(DownloadDeleteDto {
+            books: 1,
+            files: files as i64,
+            freed_bytes: freed as i64,
+        })
+    }
+
+    /// Clear every download for one server, including a directory the database has
+    /// no row for. Deleting a server is itself an explicit user action, which is what
+    /// makes the unowned trees reachable here: they are otherwise counted and left
+    /// alone by the sweep, forever.
+    pub fn download_delete_all(&self, server_id: String) -> Result<DownloadDeleteDto, ApiError> {
+        let root = self.download_root()?;
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let books = downloads::store::list(&conn, Some(&server_id)).map_err(download_err)?;
+        let mut files = 0usize;
+        let mut freed = 0u64;
+        for book in &books {
+            downloads::store::delete_rows(&conn, &server_id, &book.book_id)
+                .map_err(download_err)?;
+        }
+        let (tree_files, tree_bytes) = root.remove_server_tree(&server_id).map_err(storage_err)?;
+        files += tree_files;
+        freed += tree_bytes;
+        Ok(DownloadDeleteDto {
+            books: books.len() as i64,
+            files: files as i64,
+            freed_bytes: freed as i64,
+        })
+    }
+
+    /// The queue, as SQLite knows it. No network, no filesystem walk: this is what
+    /// the Downloads screen reads on every tick.
+    pub fn download_list(&self, server_id: String) -> Result<Vec<DownloadBookDto>, ApiError> {
+        // The screen reads this on every tick, so it is also where a session that
+        // opened the Downloads page finds its tree reconciled. `sweep_once` runs at
+        // most once per database per process, whichever caller gets there first.
+        let root = self.download_root()?;
+        let _ = downloads::recover::sweep_once(Path::new(&self.db_path), &root, &thumbnails_now());
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let rows = downloads::store::list(&conn, Some(&server_id)).map_err(download_err)?;
+        rows.iter()
+            .map(|row| download_dto(&conn, &Some(row.clone()), &row.server_id, &row.book_id))
+            .collect()
+    }
+
+    /// What the device is holding, and what it says it has left.
+    ///
+    /// `free_volume_bytes` comes from the platform and is never probed here: the core
+    /// has no business guessing at a volume it cannot see, and `0` means "the platform
+    /// would not say", which every consumer resolves conservatively. Both a derived
+    /// (SQL) and a measured (walk) figure are reported for the downloads, because the
+    /// gap between them is exactly the debris a sweep has not yet collected.
+    pub fn download_storage(&self, free_volume_bytes: i64) -> Result<StorageDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let cache = self.open_reader_cache()?;
+        let root = self.download_root()?;
+        let books = downloads::store::storage_rows(&conn).map_err(download_err)?;
+        let mut per_book = Vec::with_capacity(books.len());
+        let mut disk_files = 0usize;
+        let mut disk_bytes = 0i64;
+        for row in &books {
+            let files = root.files_in(&row.server_id, &row.book_id);
+            // The manifest is a file in the directory but not a downloaded page, and
+            // the screen's "N files" line means pages.
+            disk_files += files
+                .iter()
+                .filter(|name| name.as_str() != downloads::manifest::MANIFEST_FILE)
+                .count();
+            disk_bytes += row.bytes_done;
+            per_book.push(StorageBookDto {
+                server_id: row.server_id.clone(),
+                book_id: row.book_id.clone(),
+                title: row
+                    .book_title
+                    .clone()
+                    .unwrap_or_else(|| row.book_id.clone()),
+                series_title: row.series_title.clone().unwrap_or_default(),
+                state: row.state.clone(),
+                pages_total: row.pages_total,
+                pages_done: row.pages_done,
+                bytes_done: row.bytes_done,
+                bytes_total: row.bytes_total,
+                on_disk: root.book_bytes(&row.server_id, &row.book_id) as i64,
+            });
+        }
+        let (unowned_books, unowned_bytes) = {
+            let mut count = 0i64;
+            let mut bytes = 0i64;
+            let owned: Vec<PathBuf> = books
+                .iter()
+                .map(|row| root.book_dir(&row.server_id, &row.book_id))
+                .collect();
+            for (_server, _book, path) in root.book_dirs() {
+                if owned.contains(&path) {
+                    continue;
+                }
+                count += 1;
+                bytes += root.book_bytes_of(&path) as i64;
+            }
+            (count, bytes)
+        };
+        Ok(StorageDto {
+            download_bytes: downloads::store::bytes_done_all(&conn).map_err(download_err)?,
+            download_page_count: downloads::store::page_count_all(&conn).map_err(download_err)?,
+            book_count: books.len() as i64,
+            per_book,
+            download_disk_bytes: disk_bytes,
+            download_disk_files: disk_files as i64,
+            unowned_books,
+            unowned_bytes,
+            cache_page_bytes: cache
+                .bytes_of_tier(&conn, reader::cache::Tier::Page)
+                .map_err(storage_err)?,
+            cache_prefetch_bytes: cache
+                .bytes_of_tier(&conn, reader::cache::Tier::Prefetch)
+                .map_err(storage_err)?,
+            // Covers keep their own table and are not in the LRU ledger, so their
+            // bytes come off the directory the same way the ledger's do.
+            cache_thumbnail_bytes: thumbnail_bytes(&self.cache_root())?,
+            cache_total_bytes: cache.bytes_used(&conn).map_err(storage_err)?,
+            cache_budget_bytes: cache.budget(),
+            free_volume_bytes,
+        })
+    }
+
+    /// Run the reconciliation sweep on demand. It also runs once per process on the
+    /// first pump or list; this is the version the harness and a diagnostics screen
+    /// call so the repairs are visible rather than inferred.
+    pub fn download_sweep(&self) -> Result<DownloadSweepDto, ApiError> {
+        let root = self.download_root()?;
+        downloads::recover::forget_swept();
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let report =
+            downloads::recover::sweep(&conn, &root, &thumbnails_now()).map_err(download_err)?;
+        Ok(DownloadSweepDto {
+            books: report.books as i64,
+            stale_parts: report.stale_parts as i64,
+            ghost_rows: report.ghost_rows as i64,
+            corrupt: report.corrupt as i64,
+            size_mismatch: report.size_mismatch as i64,
+            adopted_files: report.adopted_files as i64,
+            counters_repaired: report.counters_repaired as i64,
+            manifests_rewritten: report.manifests_rewritten as i64,
+            pages_removed: report.pages_removed as i64,
+            unowned_books: report.unowned_books as i64,
+            unowned_bytes: report.unowned_bytes,
+            freed_bytes: report.freed_bytes,
+        })
+    }
+
+    /// Drive the queue. One bounded pass per call, and the only function in the
+    /// download surface that may make a request.
+    ///
+    /// `Ok(None)` means another pass holds this database right now — identical
+    /// contract and identical reasoning to `sse_poll`: the tick that got the slot
+    /// reports the progress, so this one has nothing to do and must not queue a
+    /// second writer against the same rows.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn download_pump(
+        &self,
+        server_id: String,
+        base_url: String,
+        api_key: String,
+        max_pages: i64,
+        max_bytes: i64,
+        free_volume_bytes: i64,
+        link: String,
+    ) -> Result<Option<DownloadPumpDto>, ApiError> {
+        let Some(_slot) = PumpSlot::claim(&self.db_path) else {
+            return Ok(None);
+        };
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
+        let root = self.download_root()?;
+        // Where the reader sits, so a pass races toward the page the user is looking
+        // at instead of toward the end of the book. Read from the registry and
+        // dropped: no Connection may be held across the await below.
+        // Where a live reader sits on this server, so a pass races toward the page
+        // the user is looking at rather than toward the end of the book. Borrowed and
+        // released before the await below, like every other rule in this file about
+        // what may not be held across one.
+        let reader = readers().iter().find_map(|(key, live)| {
+            let (server, book) = key.split_once('|')?;
+            (server == server_id).then(|| downloads::queue::ReaderPosition {
+                book_id: book.to_string(),
+                page: live.session.page(),
+            })
+        });
+        let report = downloads::engine::run_pass(
+            Path::new(&self.db_path),
+            &root,
+            &client,
+            &downloads::engine::PassRequest {
+                server_id: &server_id,
+                free_bytes: free_volume_bytes,
+                link: downloads::queue::Link::parse(&link),
+                max_pages: max_pages.max(0) as usize,
+                max_bytes: max_bytes.max(0),
+                reader,
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .map_err(|error| ApiError::Storage {
+            message: error.to_string(),
+        })?;
+        Ok(Some(DownloadPumpDto {
+            book: report.book.map(|(_server, book)| book).unwrap_or_default(),
+            state: report.state.unwrap_or_default(),
+            served: report.served as i64,
+            failed_pages: report.failed_pages as i64,
+            bytes_written: report.bytes_written,
+            pages_done: report.pages_done,
+            pages_total: report.pages_total,
+            stop_reason: report.stop.as_str().to_string(),
+            next_in_ms: report.next_in_ms,
+            pump_ms: report.pump_ms as i64,
+            last_error: report.last_error.unwrap_or_default(),
+            repairs: report.repairs,
+            parts_swept: report.parts_swept,
+            adopted: report.adopted,
+            ghost_rows: report.ghost_rows,
+            queue_active: report.queue_active,
+        }))
+    }
+}
+
+// --------------------------------------------------------------------------
+// Stage 9 offline-download plumbing: the pump slot, the DTOs that cross the
+// FFI, and the two small queries the screens need and the store cannot answer.
+// --------------------------------------------------------------------------
+
+/// One pass per database, at a time.
+///
+/// Same shape as the parked SSE socket and for the same reason: two passes
+/// interleaving on one queue would double-fetch the page the other is mid-way
+/// through, and the counters the second one writes would be derived from rows the
+/// first has not committed yet. The slot is released by `Drop`, so a panic in a pass
+/// cannot strand the queue with nobody able to run it.
+struct PumpSlot {
+    key: String,
+}
+
+static PUMP_SLOTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+impl PumpSlot {
+    fn claim(db_path: &str) -> Option<Self> {
+        let Ok(mut guard) = PUMP_SLOTS.get_or_init(|| Mutex::new(HashSet::new())).lock() else {
+            return None;
+        };
+        if guard.contains(db_path) {
+            return None;
+        }
+        guard.insert(db_path.to_string());
+        Some(Self {
+            key: db_path.to_string(),
+        })
+    }
+}
+
+impl Drop for PumpSlot {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = PUMP_SLOTS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+            guard.remove(&self.key);
+        }
+    }
+}
+
+/// Bytes held by the cover cache. Covers keep their own table rather than ledger
+/// rows, so this is a directory walk and belongs on a user-initiated call only.
+fn thumbnail_bytes(cache_root: &Path) -> Result<i64, ApiError> {
+    let Ok(entries) = std::fs::read_dir(cache_root.join(crate::cache::THUMBNAILS_DIR)) else {
+        return Ok(0);
+    };
+    let mut total = 0i64;
+    for entry in entries.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_file() {
+                total += meta.len() as i64;
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// One queue row, as the Downloads screen reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadBookDto {
+    pub server_id: String,
+    pub book_id: String,
+    pub title: String,
+    pub series_title: String,
+    pub state: String,
+    pub pages_total: i64,
+    pub pages_done: i64,
+    pub bytes_total: i64,
+    pub bytes_done: i64,
+    pub position: i64,
+    pub last_error: String,
+    pub next_retry_at: String,
+    pub remote_last_modified: String,
+    pub allow_cellular: bool,
+    /// The book is gone from the server, or its `lastModified` moved past what this
+    /// download recorded. Either way the copy on the device still reads; the screen
+    /// says why it will never update again.
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadDeleteDto {
+    pub books: i64,
+    pub files: i64,
+    pub freed_bytes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadSweepDto {
+    pub books: i64,
+    pub stale_parts: i64,
+    pub ghost_rows: i64,
+    pub corrupt: i64,
+    pub size_mismatch: i64,
+    pub adopted_files: i64,
+    pub counters_repaired: i64,
+    pub manifests_rewritten: i64,
+    pub pages_removed: i64,
+    pub unowned_books: i64,
+    pub unowned_bytes: i64,
+    pub freed_bytes: i64,
+}
+
+impl DownloadSweepDto {
+    /// How much the sweep had to repair. Zero is the healthy answer, and the one an
+    /// acceptance run asserts on: a sweep that reports nothing after a crash means
+    /// the crash was never noticed.
+    pub fn repairs(&self) -> i64 {
+        self.stale_parts
+            + self.ghost_rows
+            + self.corrupt
+            + self.size_mismatch
+            + self.adopted_files
+            + self.counters_repaired
+            + self.manifests_rewritten
+            + self.pages_removed
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadPumpDto {
+    pub book: String,
+    pub state: String,
+    pub served: i64,
+    pub failed_pages: i64,
+    pub bytes_written: i64,
+    pub pages_done: i64,
+    pub pages_total: i64,
+    pub stop_reason: String,
+    pub next_in_ms: i64,
+    pub pump_ms: i64,
+    pub last_error: String,
+    /// What the first pass of this process had to repair in the download tree. A
+    /// recovery that reports nothing cannot be told apart from one that never ran,
+    /// which is the mistake these four fields exist to prevent.
+    pub repairs: i64,
+    pub parts_swept: i64,
+    pub adopted: i64,
+    pub ghost_rows: i64,
+    pub queue_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageBookDto {
+    pub server_id: String,
+    pub book_id: String,
+    pub title: String,
+    pub series_title: String,
+    pub state: String,
+    pub pages_total: i64,
+    pub pages_done: i64,
+    pub bytes_total: i64,
+    pub bytes_done: i64,
+    /// Measured from the directory, so the screen can show the gap between what the
+    /// rows claim and what the disk holds.
+    pub on_disk: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageDto {
+    pub download_bytes: i64,
+    pub download_page_count: i64,
+    pub book_count: i64,
+    pub per_book: Vec<StorageBookDto>,
+    pub download_disk_bytes: i64,
+    pub download_disk_files: i64,
+    pub unowned_books: i64,
+    pub unowned_bytes: i64,
+    pub cache_page_bytes: i64,
+    pub cache_prefetch_bytes: i64,
+    pub cache_thumbnail_bytes: i64,
+    pub cache_total_bytes: i64,
+    pub cache_budget_bytes: i64,
+    /// 0 means the platform would not say.
+    pub free_volume_bytes: i64,
+}
+
+fn download_dto(
+    conn: &Connection,
+    row: &Option<downloads::store::DownloadRow>,
+    server_id: &str,
+    book_id: &str,
+) -> Result<DownloadBookDto, ApiError> {
+    let row = match row {
+        Some(row) => row.clone(),
+        None => downloads::store::get(conn, server_id, book_id)
+            .map_err(download_err)?
+            .ok_or_else(|| ApiError::InvalidInput {
+                message: format!("no download for {server_id}/{book_id}"),
+            })?,
+    };
+    // `stale` is two different facts with one user-visible meaning: this copy will
+    // never be refreshed from where it came. The book row is gone (the server dropped
+    // it, and Stage 9 keeps the download), or it moved since the job was created.
+    let mirror: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT title, last_modified FROM books WHERE server_id = ?1 AND remote_id = ?2",
+            rusqlite::params![server_id, book_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(db_err)?;
+    let stale = match (&mirror, &row.remote_last_modified) {
+        (None, _) => true,
+        (Some((_, Some(remote))), Some(recorded)) => remote.as_str() > recorded.as_str(),
+        _ => false,
+    };
+    Ok(DownloadBookDto {
+        server_id: row.server_id,
+        book_id: row.book_id,
+        title: row.book_title.clone().unwrap_or_default(),
+        series_title: row.series_title.clone().unwrap_or_default(),
+        state: row.state,
+        pages_total: row.pages_total,
+        pages_done: row.pages_done,
+        bytes_total: row.bytes_total,
+        bytes_done: row.bytes_done,
+        position: row.position,
+        last_error: row.last_error.clone().unwrap_or_default(),
+        next_retry_at: row.next_retry_at.clone().unwrap_or_default(),
+        remote_last_modified: row.remote_last_modified.clone().unwrap_or_default(),
+        allow_cellular: row.allow_cellular,
+        stale,
+    })
 }
 
 // --------------------------------------------------------------------------
@@ -2965,6 +3637,60 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("komga_app_test_{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("comic.sqlite").to_string_lossy().into_owned()
+    }
+
+    /// A book mirrored and partially on disk the way the engine leaves it: real PNG
+    /// bytes at their contract names, rows that point at them, counters derived.
+    fn plant_download(app: &App, server: &str, book: &str, numbers: &[u32]) {
+        let db = Path::new(&app.db_path);
+        let conn = store::open(db).unwrap();
+        let root = DownloadRoot::for_db(db).unwrap();
+        for number in numbers {
+            let (width, height) = crate::cache::demo_png::page_dimensions(*number);
+            conn.execute(
+                "INSERT OR REPLACE INTO book_pages
+                 (server_id, book_id, number, file_name, media_type, width, height, size_bytes, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    server, book, *number as i64,
+                    format!("{number:04}.png"), "image/png",
+                    width as i64, height as i64,
+                    crate::cache::demo_png::demo_page_bytes(*number).len() as i64,
+                    thumbnails_now()
+                ],
+            ).unwrap();
+        }
+        let numbers: Vec<u32> = (1..=*numbers.last().unwrap()).collect();
+        conn.execute(
+            "INSERT OR REPLACE INTO downloads (server_id, book_id, manifest_path, pages_total, pages_done, state, created_at, position)
+             VALUES (?1, ?2, ?3, ?4, 0, 'waiting', ?5, 1)",
+            rusqlite::params![server, book, root.manifest_path(server, book).to_string_lossy().into_owned(),
+                              numbers.len() as i64, thumbnails_now()],
+        ).unwrap();
+        for number in &numbers {
+            conn.execute(
+                "INSERT OR REPLACE INTO download_pages (server_id, book_id, page_number, state, updated_at)
+                 VALUES (?1, ?2, ?3, 'pending', ?4)",
+                rusqlite::params![server, book, *number as i64, thumbnails_now()],
+            ).unwrap();
+        }
+        std::fs::create_dir_all(root.book_dir(server, book)).unwrap();
+        for number in numbers {
+            let path = root.page_path(server, book, number, "png");
+            std::fs::write(&path, crate::cache::demo_png::demo_page_bytes(number)).unwrap();
+            downloads::store::mark_page_complete(
+                &conn,
+                server,
+                book,
+                number,
+                &path.to_string_lossy(),
+                std::fs::metadata(&path).unwrap().len() as i64,
+                "image/png",
+                &thumbnails_now(),
+            )
+            .unwrap();
+        }
+        downloads::store::recompute_counters(&conn, server, book, &thumbnails_now()).unwrap();
     }
 
     /// Remove the temp working dir (db file + its cache sibling).
@@ -3802,6 +4528,405 @@ mod tests {
         assert_eq!(settled.action, "reconcile-only");
         assert!(!settled.reconcile, "one sweep is enough");
         drop(conn);
+        cleanup_temp(&db);
+    }
+
+    // ---------------------------------------------------- Stage 9 reader tiers
+
+    /// The order is the stage's contract, and this is the case that proves it is
+    /// real: both tiers hold page 1, and they hold *different bytes*. If the reader
+    /// asked the cache first, the assertion would still pass on file name alone — so
+    /// the comparison is the length of what was served.
+    #[test]
+    fn a_downloaded_page_is_read_before_the_cached_copy() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_download(&app, "s1", "b1", &[1, 2, 3]);
+        let conn = store::open(&db).unwrap();
+        let manifest = app.mirrored_manifest(&conn, "s1", "b1").unwrap();
+        // A deliberately different page in the cache tier under the same key.
+        let cache = app.open_reader_cache().unwrap();
+        let cached = cache
+            .store(
+                &conn,
+                &manifest.cache_key(1),
+                &crate::cache::demo_png::demo_page_bytes(9),
+                "image/png",
+                &thumbnails_now(),
+            )
+            .unwrap();
+        let downloaded = Path::new(&db)
+            .parent()
+            .unwrap()
+            .join("downloads")
+            .join("s1")
+            .join("b1")
+            .join("0001.png");
+        let served = app
+            .reader_page_path("s1".into(), "b1".into(), 1)
+            .unwrap()
+            .expect("the download tier must answer for a downloaded page");
+        assert_eq!(
+            Path::new(&served),
+            downloaded.as_path(),
+            "the reader served the cached copy instead of the one the user downloaded"
+        );
+        assert_ne!(
+            std::fs::metadata(&served).unwrap().len(),
+            std::fs::metadata(&cached.path).unwrap().len(),
+            "both copies were the same size, so the order above proves nothing"
+        );
+        drop(conn);
+        cleanup_temp(&db);
+    }
+
+    #[test]
+    fn a_downloaded_page_never_enters_the_cache_ledger() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_download(&app, "s1", "b1", &[1, 2]);
+        for number in 1..=2 {
+            assert!(app
+                .reader_page_path("s1".into(), "b1".into(), number)
+                .unwrap()
+                .is_some());
+        }
+        let conn = store::open(&db).unwrap();
+        let ledger: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cache_entries", [], |row| row.get(0))
+            .unwrap();
+        let disk = DiskCache::new(app.cache_root())
+            .unwrap()
+            .bytes_used()
+            .unwrap();
+        assert_eq!(ledger, 0, "a download was written into the LRU ledger");
+        assert_eq!(disk, 0, "a download was copied into a cache tier");
+        drop(conn);
+        cleanup_temp(&db);
+    }
+
+    /// A download whose file has gone bad is a cache miss, not a dead page: the
+    /// reader falls through, and the row is healed on the way past.
+    #[test]
+    fn a_broken_download_falls_through_to_the_cache_and_heals_itself() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_download(&app, "s1", "b1", &[1]);
+        let conn = store::open(&db).unwrap();
+        let manifest = app.mirrored_manifest(&conn, "s1", "b1").unwrap();
+        let cache = app.open_reader_cache().unwrap();
+        let cached = cache
+            .store(
+                &conn,
+                &manifest.cache_key(1),
+                &crate::cache::demo_png::demo_page_bytes(4),
+                "image/png",
+                &thumbnails_now(),
+            )
+            .unwrap();
+        let path = app
+            .reader_page_path("s1".into(), "b1".into(), 1)
+            .unwrap()
+            .unwrap();
+        std::fs::write(&path, b"this is not the page the row promised").unwrap();
+        let served = app
+            .reader_page_path("s1".into(), "b1".into(), 1)
+            .unwrap()
+            .expect("the cache still has a usable copy");
+        assert_eq!(served, cached.path.to_string_lossy());
+        let row = downloads::store::page(&conn, "s1", "b1", 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, downloads::queue::page_state::PENDING);
+        assert_eq!(row.file_path, None, "the healed row keeps a dead pointer");
+        drop(conn);
+        cleanup_temp(&db);
+    }
+
+    #[test]
+    fn the_prefetch_planner_treats_a_downloaded_page_as_warm() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_download(&app, "s1", "b1", &[1, 2, 3]);
+        let conn = store::open(&db).unwrap();
+        let manifest = app.mirrored_manifest(&conn, "s1", "b1").unwrap();
+        let warm = app.prefetch_warm_set(&conn, "s1", "b1", &manifest).unwrap();
+        assert!(warm.contains(&1) && warm.contains(&2) && warm.contains(&3));
+        assert!(!warm.contains(&4), "a page nobody downloaded is not warm");
+        drop(conn);
+        cleanup_temp(&db);
+    }
+
+    /// The acceptance run in one function: a book the user downloaded reads cover to
+    /// cover with the server unreachable, through the same calls the UI makes.
+    #[tokio::test]
+    async fn a_downloaded_book_reads_cover_to_cover_with_the_server_dead() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_download(&app, "s1", "b1", &[1, 2, 3]);
+        for number in 1..=3 {
+            let path = app
+                .reader_page(
+                    "s1".to_string(),
+                    "b1".to_string(),
+                    number,
+                    "http://127.0.0.1:1".to_string(),
+                    "dead".to_string(),
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("page {number} needed the network: {error}");
+                });
+            assert!(Path::new(&path).is_file(), "{path} is not on disk");
+            assert!(
+                Path::new(&path).starts_with(Path::new(&db).parent().unwrap().join("downloads"))
+            );
+        }
+        // Page 4 was never downloaded, and asking for it against a dead server is
+        // the honest failure — not a silent blank page.
+        let missing = app
+            .reader_page(
+                "s1".to_string(),
+                "b1".to_string(),
+                4,
+                "http://127.0.0.1:1".to_string(),
+                "dead".to_string(),
+            )
+            .await;
+        assert!(matches!(missing, Err(ApiError::Network)), "{missing:?}");
+        cleanup_temp(&db);
+    }
+
+    /// The book row the mirror would hold, so `stale` has something to be about.
+    fn plant_book_row(db: &str, server: &str, book: &str, last_modified: &str) {
+        let conn = store::open(db).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO books (server_id, remote_id, series_id, series_title, title, last_modified)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                server, book, "se1", "Series One", format!("Book {book}"), last_modified
+            ],
+        )
+        .unwrap();
+    }
+
+    /// The stage's central promise, tested the way it can actually be broken: four
+    /// automatic cleanups, then the one gesture that is allowed. Each attack is
+    /// counted separately so a regression names the attacker.
+    #[test]
+    fn a_download_survives_every_automatic_cleanup_and_dies_only_by_a_user_gesture() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "s1", "b1", "2024-05-11T18:07:33Z");
+        plant_download(&app, "s1", "b1", &[1, 2, 3]);
+        let root = app.download_root().unwrap();
+        let count = || root.files_in("s1", "b1").len();
+        let bytes = || root.book_bytes("s1", "b1");
+        let before = (count(), bytes());
+        assert!(before.0 >= 3, "the plant wrote no pages");
+
+        // 1. an absurd cache budget, which is what eviction actually obeys.
+        let conn = store::open(&db).unwrap();
+        let cache = app.open_reader_cache_with(1).unwrap();
+        for number in 1..=3 {
+            cache
+                .store(
+                    &conn,
+                    &format!("s1-b1-p{number}"),
+                    &crate::cache::demo_png::demo_page_bytes(number * 7),
+                    "image/png",
+                    &thumbnails_now(),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            count(),
+            before.0,
+            "the eviction budget reached into the download tree"
+        );
+        assert_eq!(bytes(), before.1);
+        drop(cache);
+
+        // 2. the user-facing tier cleanups.
+        app.reader_clear_prefetch().unwrap();
+        let cache = app.open_reader_cache().unwrap();
+        cache.clear_tier(&conn, reader::cache::Tier::Page).unwrap();
+        assert_eq!(
+            count(),
+            before.0,
+            "clear_tier(page) reached into the download tree"
+        );
+
+        // 3. the bookkeeping sweep, which is the one that deletes orphans.
+        app.reader_reconcile_cache().unwrap();
+        assert_eq!(
+            count(),
+            before.0,
+            "the reconcile sweep took a download for an orphan"
+        );
+
+        // 4. the mirror sweep deciding the book is gone from the server.
+        store::prune::delete_book(&conn, "s1", "b1").unwrap();
+        drop(conn);
+        assert_eq!(count(), before.0, "the mirror sweep deleted a user's files");
+        let listed = app.download_list("s1".to_string()).unwrap();
+        assert_eq!(listed.len(), 1, "the queue forgot the book the server did");
+        assert!(
+            listed[0].stale,
+            "a vanished book must be labelled, not silently served"
+        );
+
+        // 5. and the only thing allowed to remove it.
+        let deleted = app
+            .download_delete("s1".to_string(), "b1".to_string())
+            .unwrap();
+        assert!(deleted.files >= 3, "{deleted:?}");
+        assert_eq!(count(), 0, "a user delete must take the whole tree");
+        assert!(app.download_list("s1".to_string()).unwrap().is_empty());
+        cleanup_temp(&db);
+    }
+
+    #[test]
+    fn unlinking_a_server_leaves_the_queue_and_its_files_in_place() {
+        let db = temp_db();
+        let app = App::new(&db);
+        let mut profile = ServerProfile::new("Home", "http://127.0.0.1:1", AuthType::ApiKey);
+        profile.id = "s1".into();
+        app.save_server(&profile).unwrap();
+        plant_download(&app, "s1", "b1", &[1, 2]);
+        let root = app.download_root().unwrap();
+        assert_eq!(root.files_in("s1", "b1").len(), 2);
+
+        app.delete_server("s1").unwrap();
+        assert_eq!(
+            root.files_in("s1", "b1").len(),
+            2,
+            "deleting the connection threw away the bookshelf"
+        );
+        // The rows are the only thing that can name these files for deletion, since
+        // the directory is spelled with a sanitised id.
+        assert_eq!(app.download_list("s1".to_string()).unwrap().len(), 1);
+        let storage = app.download_storage(0).unwrap();
+        assert!(
+            storage.download_bytes > 0,
+            "the storage screen forgot downloads"
+        );
+        app.download_delete_all("s1".to_string()).unwrap();
+        assert_eq!(
+            root.files_in("s1", "b1").len(),
+            0,
+            "the gesture does reclaim them"
+        );
+        cleanup_temp(&db);
+    }
+
+    #[test]
+    fn a_download_reports_its_bytes_without_entering_the_lru_ledger() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_download(&app, "s1", "b1", &[1, 2, 3]);
+        let stats = app.reader_cache_stats().unwrap();
+        assert!(
+            stats.download_bytes > 0,
+            "download bytes were reported as zero"
+        );
+        assert_eq!(
+            stats.disk_bytes, 0,
+            "a download wrote into the cache tiers: {:?}",
+            stats
+        );
+        let conn = store::open(&db).unwrap();
+        let ledger: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cache_entries", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(ledger, 0, "a download put a row in the LRU ledger");
+        drop(conn);
+        cleanup_temp(&db);
+    }
+
+    #[test]
+    fn the_queue_control_surface_is_all_local_and_moves_state() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "s1", "b9", "2024-05-11T18:07:33Z");
+        let conn = store::open(&db).unwrap();
+        for number in 1..=4 {
+            let (width, height) = crate::cache::demo_png::page_dimensions(number);
+            conn.execute(
+                "INSERT OR REPLACE INTO book_pages
+                 (server_id, book_id, number, file_name, media_type, width, height, size_bytes, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params!["s1", "b9", number as i64, format!("{number:04}.png"),
+                    "image/png", width as i64, height as i64,
+                    crate::cache::demo_png::demo_page_bytes(number).len() as i64, thumbnails_now()],
+            ).unwrap();
+        }
+        drop(conn);
+        let queued = app
+            .download_enqueue("s1".to_string(), "b9".to_string())
+            .unwrap();
+        assert_eq!(queued.state, "waiting");
+        assert_eq!(queued.pages_total, 4);
+        assert!(
+            queued.bytes_total > 0,
+            "the queue must know what it is aiming at"
+        );
+        // The tree and its manifest exist before a single page has been fetched.
+        let root = app.download_root().unwrap();
+        assert!(root.book_dir("s1", "b9").is_dir());
+        let document = downloads::manifest::read_manifest(&root.manifest_path("s1", "b9"))
+            .unwrap()
+            .expect("a queued book describes itself");
+        assert_eq!(document.pages_count, 4);
+        assert!(document.pages.is_empty(), "nothing has arrived yet");
+
+        assert_eq!(
+            app.download_pause("s1".into(), "b9".into()).unwrap().state,
+            "paused"
+        );
+        assert_eq!(
+            app.download_resume("s1".into(), "b9".into()).unwrap().state,
+            "waiting"
+        );
+        assert!(app.download_retry("s1".into(), "b9".into()).unwrap().state == "waiting");
+        assert!(
+            app.download_set_allow_cellular("s1".into(), "b9".into(), true)
+                .unwrap()
+                .allow_cellular
+        );
+        let swept = app.download_sweep().unwrap();
+        assert_eq!(swept.books, 1);
+        assert_eq!(swept.repairs(), 0, "a healthy queue has nothing to repair");
+        // A book that was never mirrored cannot be queued: nothing local can say how
+        // many pages it has.
+        assert!(app
+            .download_enqueue("s1".to_string(), "unseen".to_string())
+            .is_err());
+        cleanup_temp(&db);
+    }
+
+    /// Two pumps on one database must not interleave on the same rows.
+    ///
+    /// This asserts the slot, not a concurrent `download_pump`: connecting to a dead
+    /// loopback port fails inside a single poll, so a test built on that would watch
+    /// one pass finish before the second ever started and call it serialisation. The
+    /// overlapping case is proven against a server that is genuinely slow — see the
+    /// `facade` phase of `scripts/e2e_stage9.sh` and its `pump_none_count`.
+    #[test]
+    fn one_pump_slot_per_database_until_it_is_held_back() {
+        let db = temp_db();
+        let first = PumpSlot::claim(&db).expect("the slot is free");
+        assert!(
+            PumpSlot::claim(&db).is_none(),
+            "a second pass got the same slot"
+        );
+        // A different database is a different queue, and is not held up by this one.
+        let other = format!("{db}-second");
+        assert!(PumpSlot::claim(&other).is_some());
+        drop(first);
+        assert!(PumpSlot::claim(&db).is_some(), "the slot never came back");
+        drop(PumpSlot::claim(&other));
+        // The second key never existed on disk: a slot is a name, not a database.
         cleanup_temp(&db);
     }
 }

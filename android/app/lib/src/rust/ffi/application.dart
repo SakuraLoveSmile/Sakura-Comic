@@ -408,6 +408,256 @@ class DeviceProfileDto {
           stable == other.stable;
 }
 
+/// One queue row, as the Downloads screen reads it.
+class DownloadBookDto {
+  final String serverId;
+  final String bookId;
+  final String title;
+  final String seriesTitle;
+  final String state;
+  final PlatformInt64 pagesTotal;
+  final PlatformInt64 pagesDone;
+  final PlatformInt64 bytesTotal;
+  final PlatformInt64 bytesDone;
+  final PlatformInt64 position;
+  final String lastError;
+  final String nextRetryAt;
+  final String remoteLastModified;
+  final bool allowCellular;
+
+  /// The book is gone from the server, or its `lastModified` moved past what this
+  /// download recorded. Either way the copy on the device still reads; the screen
+  /// says why it will never update again.
+  final bool stale;
+
+  const DownloadBookDto({
+    required this.serverId,
+    required this.bookId,
+    required this.title,
+    required this.seriesTitle,
+    required this.state,
+    required this.pagesTotal,
+    required this.pagesDone,
+    required this.bytesTotal,
+    required this.bytesDone,
+    required this.position,
+    required this.lastError,
+    required this.nextRetryAt,
+    required this.remoteLastModified,
+    required this.allowCellular,
+    required this.stale,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      bookId.hashCode ^
+      title.hashCode ^
+      seriesTitle.hashCode ^
+      state.hashCode ^
+      pagesTotal.hashCode ^
+      pagesDone.hashCode ^
+      bytesTotal.hashCode ^
+      bytesDone.hashCode ^
+      position.hashCode ^
+      lastError.hashCode ^
+      nextRetryAt.hashCode ^
+      remoteLastModified.hashCode ^
+      allowCellular.hashCode ^
+      stale.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DownloadBookDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          bookId == other.bookId &&
+          title == other.title &&
+          seriesTitle == other.seriesTitle &&
+          state == other.state &&
+          pagesTotal == other.pagesTotal &&
+          pagesDone == other.pagesDone &&
+          bytesTotal == other.bytesTotal &&
+          bytesDone == other.bytesDone &&
+          position == other.position &&
+          lastError == other.lastError &&
+          nextRetryAt == other.nextRetryAt &&
+          remoteLastModified == other.remoteLastModified &&
+          allowCellular == other.allowCellular &&
+          stale == other.stale;
+}
+
+class DownloadDeleteDto {
+  final PlatformInt64 books;
+  final PlatformInt64 files;
+  final PlatformInt64 freedBytes;
+
+  const DownloadDeleteDto({
+    required this.books,
+    required this.files,
+    required this.freedBytes,
+  });
+
+  @override
+  int get hashCode => books.hashCode ^ files.hashCode ^ freedBytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DownloadDeleteDto &&
+          runtimeType == other.runtimeType &&
+          books == other.books &&
+          files == other.files &&
+          freedBytes == other.freedBytes;
+}
+
+class DownloadPumpDto {
+  final String book;
+  final String state;
+  final PlatformInt64 served;
+  final PlatformInt64 failedPages;
+  final PlatformInt64 bytesWritten;
+  final PlatformInt64 pagesDone;
+  final PlatformInt64 pagesTotal;
+  final String stopReason;
+  final PlatformInt64 nextInMs;
+  final PlatformInt64 pumpMs;
+  final String lastError;
+
+  /// What the first pass of this process had to repair in the download tree. A
+  /// recovery that reports nothing cannot be told apart from one that never ran,
+  /// which is the mistake these four fields exist to prevent.
+  final PlatformInt64 repairs;
+  final PlatformInt64 partsSwept;
+  final PlatformInt64 adopted;
+  final PlatformInt64 ghostRows;
+  final bool queueActive;
+
+  const DownloadPumpDto({
+    required this.book,
+    required this.state,
+    required this.served,
+    required this.failedPages,
+    required this.bytesWritten,
+    required this.pagesDone,
+    required this.pagesTotal,
+    required this.stopReason,
+    required this.nextInMs,
+    required this.pumpMs,
+    required this.lastError,
+    required this.repairs,
+    required this.partsSwept,
+    required this.adopted,
+    required this.ghostRows,
+    required this.queueActive,
+  });
+
+  @override
+  int get hashCode =>
+      book.hashCode ^
+      state.hashCode ^
+      served.hashCode ^
+      failedPages.hashCode ^
+      bytesWritten.hashCode ^
+      pagesDone.hashCode ^
+      pagesTotal.hashCode ^
+      stopReason.hashCode ^
+      nextInMs.hashCode ^
+      pumpMs.hashCode ^
+      lastError.hashCode ^
+      repairs.hashCode ^
+      partsSwept.hashCode ^
+      adopted.hashCode ^
+      ghostRows.hashCode ^
+      queueActive.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DownloadPumpDto &&
+          runtimeType == other.runtimeType &&
+          book == other.book &&
+          state == other.state &&
+          served == other.served &&
+          failedPages == other.failedPages &&
+          bytesWritten == other.bytesWritten &&
+          pagesDone == other.pagesDone &&
+          pagesTotal == other.pagesTotal &&
+          stopReason == other.stopReason &&
+          nextInMs == other.nextInMs &&
+          pumpMs == other.pumpMs &&
+          lastError == other.lastError &&
+          repairs == other.repairs &&
+          partsSwept == other.partsSwept &&
+          adopted == other.adopted &&
+          ghostRows == other.ghostRows &&
+          queueActive == other.queueActive;
+}
+
+class DownloadSweepDto {
+  final PlatformInt64 books;
+  final PlatformInt64 staleParts;
+  final PlatformInt64 ghostRows;
+  final PlatformInt64 corrupt;
+  final PlatformInt64 sizeMismatch;
+  final PlatformInt64 adoptedFiles;
+  final PlatformInt64 countersRepaired;
+  final PlatformInt64 manifestsRewritten;
+  final PlatformInt64 pagesRemoved;
+  final PlatformInt64 unownedBooks;
+  final PlatformInt64 unownedBytes;
+  final PlatformInt64 freedBytes;
+
+  const DownloadSweepDto({
+    required this.books,
+    required this.staleParts,
+    required this.ghostRows,
+    required this.corrupt,
+    required this.sizeMismatch,
+    required this.adoptedFiles,
+    required this.countersRepaired,
+    required this.manifestsRewritten,
+    required this.pagesRemoved,
+    required this.unownedBooks,
+    required this.unownedBytes,
+    required this.freedBytes,
+  });
+
+  @override
+  int get hashCode =>
+      books.hashCode ^
+      staleParts.hashCode ^
+      ghostRows.hashCode ^
+      corrupt.hashCode ^
+      sizeMismatch.hashCode ^
+      adoptedFiles.hashCode ^
+      countersRepaired.hashCode ^
+      manifestsRewritten.hashCode ^
+      pagesRemoved.hashCode ^
+      unownedBooks.hashCode ^
+      unownedBytes.hashCode ^
+      freedBytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DownloadSweepDto &&
+          runtimeType == other.runtimeType &&
+          books == other.books &&
+          staleParts == other.staleParts &&
+          ghostRows == other.ghostRows &&
+          corrupt == other.corrupt &&
+          sizeMismatch == other.sizeMismatch &&
+          adoptedFiles == other.adoptedFiles &&
+          countersRepaired == other.countersRepaired &&
+          manifestsRewritten == other.manifestsRewritten &&
+          pagesRemoved == other.pagesRemoved &&
+          unownedBooks == other.unownedBooks &&
+          unownedBytes == other.unownedBytes &&
+          freedBytes == other.freedBytes;
+}
+
 /// Distinct filter-chip options derived from the local mirror.
 class FilterOptions {
   final List<String> tags;
@@ -1029,6 +1279,137 @@ class SsePollResult {
           booksWritten == other.booksWritten &&
           booksDeleted == other.booksDeleted &&
           keepSocket == other.keepSocket;
+}
+
+class StorageBookDto {
+  final String serverId;
+  final String bookId;
+  final String title;
+  final String seriesTitle;
+  final String state;
+  final PlatformInt64 pagesTotal;
+  final PlatformInt64 pagesDone;
+  final PlatformInt64 bytesTotal;
+  final PlatformInt64 bytesDone;
+
+  /// Measured from the directory, so the screen can show the gap between what the
+  /// rows claim and what the disk holds.
+  final PlatformInt64 onDisk;
+
+  const StorageBookDto({
+    required this.serverId,
+    required this.bookId,
+    required this.title,
+    required this.seriesTitle,
+    required this.state,
+    required this.pagesTotal,
+    required this.pagesDone,
+    required this.bytesTotal,
+    required this.bytesDone,
+    required this.onDisk,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      bookId.hashCode ^
+      title.hashCode ^
+      seriesTitle.hashCode ^
+      state.hashCode ^
+      pagesTotal.hashCode ^
+      pagesDone.hashCode ^
+      bytesTotal.hashCode ^
+      bytesDone.hashCode ^
+      onDisk.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StorageBookDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          bookId == other.bookId &&
+          title == other.title &&
+          seriesTitle == other.seriesTitle &&
+          state == other.state &&
+          pagesTotal == other.pagesTotal &&
+          pagesDone == other.pagesDone &&
+          bytesTotal == other.bytesTotal &&
+          bytesDone == other.bytesDone &&
+          onDisk == other.onDisk;
+}
+
+class StorageDto {
+  final PlatformInt64 downloadBytes;
+  final PlatformInt64 downloadPageCount;
+  final PlatformInt64 bookCount;
+  final List<StorageBookDto> perBook;
+  final PlatformInt64 downloadDiskBytes;
+  final PlatformInt64 downloadDiskFiles;
+  final PlatformInt64 unownedBooks;
+  final PlatformInt64 unownedBytes;
+  final PlatformInt64 cachePageBytes;
+  final PlatformInt64 cachePrefetchBytes;
+  final PlatformInt64 cacheThumbnailBytes;
+  final PlatformInt64 cacheTotalBytes;
+  final PlatformInt64 cacheBudgetBytes;
+
+  /// 0 means the platform would not say.
+  final PlatformInt64 freeVolumeBytes;
+
+  const StorageDto({
+    required this.downloadBytes,
+    required this.downloadPageCount,
+    required this.bookCount,
+    required this.perBook,
+    required this.downloadDiskBytes,
+    required this.downloadDiskFiles,
+    required this.unownedBooks,
+    required this.unownedBytes,
+    required this.cachePageBytes,
+    required this.cachePrefetchBytes,
+    required this.cacheThumbnailBytes,
+    required this.cacheTotalBytes,
+    required this.cacheBudgetBytes,
+    required this.freeVolumeBytes,
+  });
+
+  @override
+  int get hashCode =>
+      downloadBytes.hashCode ^
+      downloadPageCount.hashCode ^
+      bookCount.hashCode ^
+      perBook.hashCode ^
+      downloadDiskBytes.hashCode ^
+      downloadDiskFiles.hashCode ^
+      unownedBooks.hashCode ^
+      unownedBytes.hashCode ^
+      cachePageBytes.hashCode ^
+      cachePrefetchBytes.hashCode ^
+      cacheThumbnailBytes.hashCode ^
+      cacheTotalBytes.hashCode ^
+      cacheBudgetBytes.hashCode ^
+      freeVolumeBytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StorageDto &&
+          runtimeType == other.runtimeType &&
+          downloadBytes == other.downloadBytes &&
+          downloadPageCount == other.downloadPageCount &&
+          bookCount == other.bookCount &&
+          perBook == other.perBook &&
+          downloadDiskBytes == other.downloadDiskBytes &&
+          downloadDiskFiles == other.downloadDiskFiles &&
+          unownedBooks == other.unownedBooks &&
+          unownedBytes == other.unownedBytes &&
+          cachePageBytes == other.cachePageBytes &&
+          cachePrefetchBytes == other.cachePrefetchBytes &&
+          cacheThumbnailBytes == other.cacheThumbnailBytes &&
+          cacheTotalBytes == other.cacheTotalBytes &&
+          cacheBudgetBytes == other.cacheBudgetBytes &&
+          freeVolumeBytes == other.freeVolumeBytes;
 }
 
 /// What one upload pass did, and the queue it left behind: the caller needs

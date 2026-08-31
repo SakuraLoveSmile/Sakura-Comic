@@ -30,6 +30,9 @@ class ReaderDevice {
   final MethodChannel _channel;
   final Future<int> Function()? _memoryProbe;
 
+  /// How long a platform probe may take before it counts as unanswered.
+  static const Duration _probeDeadline = Duration(seconds: 5);
+
   /// Physical RAM, in bytes, or 0 when the platform will not say.
   ///
   /// Android answers this from `ActivityManager.MemoryInfo.totalMem` over the
@@ -41,7 +44,7 @@ class ReaderDevice {
     try {
       // The channel answers with a Kotlin Long; asking for `int` directly would
       // throw on some codecs, and a thrown answer silently becomes "unknown".
-      final reported = await _channel.invokeMethod<Object?>('totalMemory');
+      final reported = await _invoke('totalMemory');
       return (reported as num?)?.toInt() ?? 0;
     } catch (_) {
       return 0;
@@ -63,6 +66,72 @@ class ReaderDevice {
   /// Device pixel ratio, exposed because the view multiplies by it when it picks
   /// a `cacheWidth` and the two numbers have to agree.
   double get devicePixelRatio => _dispatcher.views.first.devicePixelRatio;
+
+  /// Free bytes on the volume holding the app's files, or 0 when the platform
+  /// will not say.
+  ///
+  /// The core never probes this itself: it has no dep on `statvfs`, and on Android
+  /// the answer has to come from the volume the app is actually allowed to write to.
+  /// 0 is not "no space" and not "infinite space" — it is "unknown", and the download
+  /// planner resolves unknown to "may continue what is running, may not start more".
+  Future<int> freeDiskBytes() => _invokeInt('freeDisk');
+
+  /// The link class as the platform reports it: `unmetered`, `metered`, or
+  /// `unknown` when the channel is missing or the answer is not readable.
+  ///
+  /// `ConnectivityManager.isActiveNetworkMetered()` on the Kotlin side, deliberately
+  /// not `transport == WIFI`: an emulator answers ETHERNET, and a transport test
+  /// there would leave every download permanently blocked and look like a core bug.
+  Future<String> linkClass() async {
+    try {
+      final answer = await _invoke('linkClass');
+      final text = (answer as String?) ?? '';
+      return const ['unmetered', 'metered'].contains(text) ? text : 'unknown';
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  Future<int> _invokeInt(String method) async {
+    try {
+      final answer = await _invoke(method);
+      return (answer as num?)?.toInt() ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// One channel call, with a deadline.
+  ///
+  /// A handler that computes a value but forgets `result.success(...)` never replies,
+  /// and the Dart future simply never completes: on a device that is a download that
+  /// stalls forever rather than an answered question. "The platform did not answer" is
+  /// already a case this class handles — it is reported as 0 / unknown — so it must
+  /// also be *reached*, and a hang is the one outcome no caller can degrade. This was
+  /// found by exactly that bug in the `freeDisk` handler.
+  Future<Object?> _invoke(String method) {
+    final completer = Completer<Object?>();
+    late Timer watchdog;
+    watchdog = Timer(_probeDeadline, () {
+      if (!completer.isCompleted) completer.complete(null);
+    });
+    // Raced rather than chained with `.timeout()`: that leaves its own timer pending
+    // until the deadline whenever the platform never answers, and the test binding
+    // rightly fails a run for a timer that outlives the widget tree. Cancelling on
+    // both settlements is what makes the guard free; the abandoned call is the point,
+    // because an unanswered probe must become `unknown` instead of a stall.
+    _channel.invokeMethod<Object?>(method).then(
+      (answer) {
+        watchdog.cancel();
+        if (!completer.isCompleted) completer.complete(answer);
+      },
+      onError: (Object error) {
+        watchdog.cancel();
+        if (!completer.isCompleted) completer.complete(null);
+      },
+    );
+    return completer.future;
+  }
 
   /// The facts to hand the core. `network` and `stable` are the controller's
   /// knowledge, not the platform's, so they are passed in.

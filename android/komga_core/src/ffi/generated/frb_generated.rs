@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1178445856;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1757928308;
 
 // Section: executor
 
@@ -398,6 +398,432 @@ fn wire__crate__ffi__bridge__delete_server_impl(
             move |context| {
                 transform_result_sse::<_, String>((move || {
                     let output_ok = crate::ffi::bridge::delete_server(api_db_path, api_server_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_delete_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_delete",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_delete(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_delete_all_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_delete_all",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::ffi::bridge::download_delete_all(api_db_path, api_server_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_enqueue_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_enqueue",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_enqueue(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_list_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_list",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_list(api_db_path, api_server_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_pause_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_pause",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_pause(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_pump_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_pump",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_base_url = <String>::sse_decode(&mut deserializer);
+            let api_api_key = <String>::sse_decode(&mut deserializer);
+            let api_max_pages = <i64>::sse_decode(&mut deserializer);
+            let api_max_bytes = <i64>::sse_decode(&mut deserializer);
+            let api_free_volume_bytes = <i64>::sse_decode(&mut deserializer);
+            let api_link = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, String>(
+                    (move || async move {
+                        let output_ok = crate::ffi::bridge::download_pump(
+                            api_db_path,
+                            api_server_id,
+                            api_base_url,
+                            api_api_key,
+                            api_max_pages,
+                            api_max_bytes,
+                            api_free_volume_bytes,
+                            api_link,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_resume_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_resume",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_resume(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_retry_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_retry",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_retry(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_set_allow_cellular_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_set_allow_cellular",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_allow = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_set_allow_cellular(
+                        api_db_path,
+                        api_server_id,
+                        api_book_id,
+                        api_allow,
+                    )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_storage_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_storage",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_free_volume_bytes = <i64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::ffi::bridge::download_storage(api_db_path, api_free_volume_bytes)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_sweep_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_sweep",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::ffi::bridge::download_sweep(api_db_path)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -2991,6 +3417,130 @@ impl SseDecode for crate::ffi::application::DeviceProfileDto {
     }
 }
 
+impl SseDecode for crate::ffi::application::DownloadBookDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_serverId = <String>::sse_decode(deserializer);
+        let mut var_bookId = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_seriesTitle = <String>::sse_decode(deserializer);
+        let mut var_state = <String>::sse_decode(deserializer);
+        let mut var_pagesTotal = <i64>::sse_decode(deserializer);
+        let mut var_pagesDone = <i64>::sse_decode(deserializer);
+        let mut var_bytesTotal = <i64>::sse_decode(deserializer);
+        let mut var_bytesDone = <i64>::sse_decode(deserializer);
+        let mut var_position = <i64>::sse_decode(deserializer);
+        let mut var_lastError = <String>::sse_decode(deserializer);
+        let mut var_nextRetryAt = <String>::sse_decode(deserializer);
+        let mut var_remoteLastModified = <String>::sse_decode(deserializer);
+        let mut var_allowCellular = <bool>::sse_decode(deserializer);
+        let mut var_stale = <bool>::sse_decode(deserializer);
+        return crate::ffi::application::DownloadBookDto {
+            server_id: var_serverId,
+            book_id: var_bookId,
+            title: var_title,
+            series_title: var_seriesTitle,
+            state: var_state,
+            pages_total: var_pagesTotal,
+            pages_done: var_pagesDone,
+            bytes_total: var_bytesTotal,
+            bytes_done: var_bytesDone,
+            position: var_position,
+            last_error: var_lastError,
+            next_retry_at: var_nextRetryAt,
+            remote_last_modified: var_remoteLastModified,
+            allow_cellular: var_allowCellular,
+            stale: var_stale,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::DownloadDeleteDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_books = <i64>::sse_decode(deserializer);
+        let mut var_files = <i64>::sse_decode(deserializer);
+        let mut var_freedBytes = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::DownloadDeleteDto {
+            books: var_books,
+            files: var_files,
+            freed_bytes: var_freedBytes,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::DownloadPumpDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_book = <String>::sse_decode(deserializer);
+        let mut var_state = <String>::sse_decode(deserializer);
+        let mut var_served = <i64>::sse_decode(deserializer);
+        let mut var_failedPages = <i64>::sse_decode(deserializer);
+        let mut var_bytesWritten = <i64>::sse_decode(deserializer);
+        let mut var_pagesDone = <i64>::sse_decode(deserializer);
+        let mut var_pagesTotal = <i64>::sse_decode(deserializer);
+        let mut var_stopReason = <String>::sse_decode(deserializer);
+        let mut var_nextInMs = <i64>::sse_decode(deserializer);
+        let mut var_pumpMs = <i64>::sse_decode(deserializer);
+        let mut var_lastError = <String>::sse_decode(deserializer);
+        let mut var_repairs = <i64>::sse_decode(deserializer);
+        let mut var_partsSwept = <i64>::sse_decode(deserializer);
+        let mut var_adopted = <i64>::sse_decode(deserializer);
+        let mut var_ghostRows = <i64>::sse_decode(deserializer);
+        let mut var_queueActive = <bool>::sse_decode(deserializer);
+        return crate::ffi::application::DownloadPumpDto {
+            book: var_book,
+            state: var_state,
+            served: var_served,
+            failed_pages: var_failedPages,
+            bytes_written: var_bytesWritten,
+            pages_done: var_pagesDone,
+            pages_total: var_pagesTotal,
+            stop_reason: var_stopReason,
+            next_in_ms: var_nextInMs,
+            pump_ms: var_pumpMs,
+            last_error: var_lastError,
+            repairs: var_repairs,
+            parts_swept: var_partsSwept,
+            adopted: var_adopted,
+            ghost_rows: var_ghostRows,
+            queue_active: var_queueActive,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::DownloadSweepDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_books = <i64>::sse_decode(deserializer);
+        let mut var_staleParts = <i64>::sse_decode(deserializer);
+        let mut var_ghostRows = <i64>::sse_decode(deserializer);
+        let mut var_corrupt = <i64>::sse_decode(deserializer);
+        let mut var_sizeMismatch = <i64>::sse_decode(deserializer);
+        let mut var_adoptedFiles = <i64>::sse_decode(deserializer);
+        let mut var_countersRepaired = <i64>::sse_decode(deserializer);
+        let mut var_manifestsRewritten = <i64>::sse_decode(deserializer);
+        let mut var_pagesRemoved = <i64>::sse_decode(deserializer);
+        let mut var_unownedBooks = <i64>::sse_decode(deserializer);
+        let mut var_unownedBytes = <i64>::sse_decode(deserializer);
+        let mut var_freedBytes = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::DownloadSweepDto {
+            books: var_books,
+            stale_parts: var_staleParts,
+            ghost_rows: var_ghostRows,
+            corrupt: var_corrupt,
+            size_mismatch: var_sizeMismatch,
+            adopted_files: var_adoptedFiles,
+            counters_repaired: var_countersRepaired,
+            manifests_rewritten: var_manifestsRewritten,
+            pages_removed: var_pagesRemoved,
+            unowned_books: var_unownedBooks,
+            unowned_bytes: var_unownedBytes,
+            freed_bytes: var_freedBytes,
+        };
+    }
+}
+
 impl SseDecode for crate::store::sync_state::EntitySyncState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3218,6 +3768,20 @@ impl SseDecode for Vec<crate::store::read_progress::ContinueReadingRow> {
     }
 }
 
+impl SseDecode for Vec<crate::ffi::application::DownloadBookDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::ffi::application::DownloadBookDto>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::store::sync_state::EntitySyncState> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3348,6 +3912,20 @@ impl SseDecode for Vec<crate::model::server_profile::ServerProfile> {
     }
 }
 
+impl SseDecode for Vec<crate::ffi::application::StorageBookDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::ffi::application::StorageBookDto>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::store::thumbnails::ThumbnailRow> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3425,6 +4003,19 @@ impl SseDecode for Option<crate::ffi::application::CollectionDetailRow> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::ffi::application::CollectionDetailRow>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::ffi::application::DownloadPumpDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::ffi::application::DownloadPumpDto>::sse_decode(
                 deserializer,
             ));
         } else {
@@ -3996,6 +4587,71 @@ impl SseDecode for crate::ffi::application::SsePollResult {
     }
 }
 
+impl SseDecode for crate::ffi::application::StorageBookDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_serverId = <String>::sse_decode(deserializer);
+        let mut var_bookId = <String>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_seriesTitle = <String>::sse_decode(deserializer);
+        let mut var_state = <String>::sse_decode(deserializer);
+        let mut var_pagesTotal = <i64>::sse_decode(deserializer);
+        let mut var_pagesDone = <i64>::sse_decode(deserializer);
+        let mut var_bytesTotal = <i64>::sse_decode(deserializer);
+        let mut var_bytesDone = <i64>::sse_decode(deserializer);
+        let mut var_onDisk = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::StorageBookDto {
+            server_id: var_serverId,
+            book_id: var_bookId,
+            title: var_title,
+            series_title: var_seriesTitle,
+            state: var_state,
+            pages_total: var_pagesTotal,
+            pages_done: var_pagesDone,
+            bytes_total: var_bytesTotal,
+            bytes_done: var_bytesDone,
+            on_disk: var_onDisk,
+        };
+    }
+}
+
+impl SseDecode for crate::ffi::application::StorageDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_downloadBytes = <i64>::sse_decode(deserializer);
+        let mut var_downloadPageCount = <i64>::sse_decode(deserializer);
+        let mut var_bookCount = <i64>::sse_decode(deserializer);
+        let mut var_perBook =
+            <Vec<crate::ffi::application::StorageBookDto>>::sse_decode(deserializer);
+        let mut var_downloadDiskBytes = <i64>::sse_decode(deserializer);
+        let mut var_downloadDiskFiles = <i64>::sse_decode(deserializer);
+        let mut var_unownedBooks = <i64>::sse_decode(deserializer);
+        let mut var_unownedBytes = <i64>::sse_decode(deserializer);
+        let mut var_cachePageBytes = <i64>::sse_decode(deserializer);
+        let mut var_cachePrefetchBytes = <i64>::sse_decode(deserializer);
+        let mut var_cacheThumbnailBytes = <i64>::sse_decode(deserializer);
+        let mut var_cacheTotalBytes = <i64>::sse_decode(deserializer);
+        let mut var_cacheBudgetBytes = <i64>::sse_decode(deserializer);
+        let mut var_freeVolumeBytes = <i64>::sse_decode(deserializer);
+        return crate::ffi::application::StorageDto {
+            download_bytes: var_downloadBytes,
+            download_page_count: var_downloadPageCount,
+            book_count: var_bookCount,
+            per_book: var_perBook,
+            download_disk_bytes: var_downloadDiskBytes,
+            download_disk_files: var_downloadDiskFiles,
+            unowned_books: var_unownedBooks,
+            unowned_bytes: var_unownedBytes,
+            cache_page_bytes: var_cachePageBytes,
+            cache_prefetch_bytes: var_cachePrefetchBytes,
+            cache_thumbnail_bytes: var_cacheThumbnailBytes,
+            cache_total_bytes: var_cacheTotalBytes,
+            cache_budget_bytes: var_cacheBudgetBytes,
+            free_volume_bytes: var_freeVolumeBytes,
+        };
+    }
+}
+
 impl SseDecode for crate::store::thumbnails::ThumbnailRow {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4108,78 +4764,94 @@ fn pde_ffi_dispatcher_primary_impl(
         7 => wire__crate__ffi__bridge__continue_reading_impl(port, ptr, rust_vec_len, data_len),
         8 => wire__crate__ffi__bridge__cover_path_impl(port, ptr, rust_vec_len, data_len),
         9 => wire__crate__ffi__bridge__delete_server_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__ffi__bridge__ensure_book_cover_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__ffi__bridge__ensure_book_covers_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__ffi__bridge__ensure_cover_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__ffi__bridge__ensure_covers_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__ffi__bridge__fetch_series_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__ffi__bridge__filter_options_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__ffi__bridge__full_sync_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__ffi__bridge__get_active_server_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__ffi__bridge__get_server_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__ffi__bridge__library_counts_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__ffi__bridge__library_detail_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__ffi__bridge__list_collections_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__ffi__bridge__list_readlists_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__ffi__bridge__list_servers_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__ffi__bridge__list_thumbnails_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__ffi__bridge__mark_read_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__ffi__bridge__mark_unread_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__ffi__bridge__outbox_status_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__ffi__bridge__query_books_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__ffi__bridge__query_series_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__ffi__bridge__reader_background_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__ffi__bridge__reader_cache_stats_impl(port, ptr, rust_vec_len, data_len),
-        32 => {
+        10 => wire__crate__ffi__bridge__download_delete_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__ffi__bridge__download_delete_all_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__ffi__bridge__download_enqueue_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__ffi__bridge__download_list_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__ffi__bridge__download_pause_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__ffi__bridge__download_pump_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__ffi__bridge__download_resume_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__ffi__bridge__download_retry_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__ffi__bridge__download_set_allow_cellular_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        19 => wire__crate__ffi__bridge__download_storage_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__ffi__bridge__download_sweep_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__ffi__bridge__ensure_book_cover_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__ffi__bridge__ensure_book_covers_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__ffi__bridge__ensure_cover_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__ffi__bridge__ensure_covers_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__ffi__bridge__fetch_series_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__ffi__bridge__filter_options_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__ffi__bridge__full_sync_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__ffi__bridge__get_active_server_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__ffi__bridge__get_server_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__ffi__bridge__library_counts_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__ffi__bridge__library_detail_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__ffi__bridge__list_collections_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__ffi__bridge__list_readlists_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__ffi__bridge__list_servers_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__ffi__bridge__list_thumbnails_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__ffi__bridge__mark_read_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__ffi__bridge__mark_unread_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__ffi__bridge__outbox_status_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__ffi__bridge__query_books_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__ffi__bridge__query_series_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__ffi__bridge__reader_background_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__ffi__bridge__reader_cache_stats_impl(port, ptr, rust_vec_len, data_len),
+        43 => {
             wire__crate__ffi__bridge__reader_clear_prefetch_impl(port, ptr, rust_vec_len, data_len)
         }
-        33 => wire__crate__ffi__bridge__reader_close_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__ffi__bridge__reader_configure_device_impl(
+        44 => wire__crate__ffi__bridge__reader_close_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__ffi__bridge__reader_configure_device_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__ffi__bridge__reader_mark_read_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__ffi__bridge__reader_mark_unread_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__ffi__bridge__reader_open_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__ffi__bridge__reader_page_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__ffi__bridge__reader_page_path_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__ffi__bridge__reader_prefetch_impl(port, ptr, rust_vec_len, data_len),
-        41 => {
+        46 => wire__crate__ffi__bridge__reader_mark_read_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__ffi__bridge__reader_mark_unread_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__ffi__bridge__reader_open_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__ffi__bridge__reader_page_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__ffi__bridge__reader_page_path_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__ffi__bridge__reader_prefetch_impl(port, ptr, rust_vec_len, data_len),
+        52 => {
             wire__crate__ffi__bridge__reader_reconcile_cache_impl(port, ptr, rust_vec_len, data_len)
         }
-        42 => wire__crate__ffi__bridge__reader_release_prefetch_impl(
+        53 => wire__crate__ffi__bridge__reader_release_prefetch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        43 => wire__crate__ffi__bridge__reader_set_layout_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__ffi__bridge__reader_set_settings_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__ffi__bridge__reader_settings_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__ffi__bridge__reader_step_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__ffi__bridge__reader_tick_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__ffi__bridge__reader_turn_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__ffi__bridge__readlist_detail_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__ffi__bridge__reconcile_impl(port, ptr, rust_vec_len, data_len),
-        51 => {
+        54 => wire__crate__ffi__bridge__reader_set_layout_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__ffi__bridge__reader_set_settings_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__ffi__bridge__reader_settings_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__ffi__bridge__reader_step_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__ffi__bridge__reader_tick_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__ffi__bridge__reader_turn_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__ffi__bridge__readlist_detail_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__ffi__bridge__reconcile_impl(port, ptr, rust_vec_len, data_len),
+        62 => {
             wire__crate__ffi__bridge__retry_failed_mutations_impl(port, ptr, rust_vec_len, data_len)
         }
-        52 => wire__crate__ffi__bridge__save_libraries_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__ffi__bridge__save_server_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__ffi__bridge__series_detail_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__ffi__bridge__set_active_server_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__ffi__bridge__set_read_progress_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__ffi__bridge__should_reconcile_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__ffi__bridge__sse_poll_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__ffi__bridge__sse_reconciled_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__ffi__bridge__sse_resume_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__ffi__bridge__sse_stop_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__ffi__bridge__sync_states_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__ffi__bridge__test_connection_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__ffi__bridge__tombstones_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__ffi__bridge__upload_outbox_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__ffi__bridge__save_libraries_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__ffi__bridge__save_server_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__ffi__bridge__series_detail_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__ffi__bridge__set_active_server_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__ffi__bridge__set_read_progress_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__ffi__bridge__should_reconcile_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__ffi__bridge__sse_poll_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__ffi__bridge__sse_reconciled_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__ffi__bridge__sse_resume_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__ffi__bridge__sse_stop_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__ffi__bridge__sync_states_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__ffi__bridge__test_connection_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__ffi__bridge__tombstones_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__ffi__bridge__upload_outbox_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -4599,6 +5271,128 @@ impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::DeviceProfileDto
     for crate::ffi::application::DeviceProfileDto
 {
     fn into_into_dart(self) -> crate::ffi::application::DeviceProfileDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::DownloadBookDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.server_id.into_into_dart().into_dart(),
+            self.book_id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.series_title.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
+            self.pages_total.into_into_dart().into_dart(),
+            self.pages_done.into_into_dart().into_dart(),
+            self.bytes_total.into_into_dart().into_dart(),
+            self.bytes_done.into_into_dart().into_dart(),
+            self.position.into_into_dart().into_dart(),
+            self.last_error.into_into_dart().into_dart(),
+            self.next_retry_at.into_into_dart().into_dart(),
+            self.remote_last_modified.into_into_dart().into_dart(),
+            self.allow_cellular.into_into_dart().into_dart(),
+            self.stale.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::DownloadBookDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::DownloadBookDto>
+    for crate::ffi::application::DownloadBookDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::DownloadBookDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::DownloadDeleteDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.books.into_into_dart().into_dart(),
+            self.files.into_into_dart().into_dart(),
+            self.freed_bytes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::DownloadDeleteDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::DownloadDeleteDto>
+    for crate::ffi::application::DownloadDeleteDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::DownloadDeleteDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::DownloadPumpDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.book.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
+            self.served.into_into_dart().into_dart(),
+            self.failed_pages.into_into_dart().into_dart(),
+            self.bytes_written.into_into_dart().into_dart(),
+            self.pages_done.into_into_dart().into_dart(),
+            self.pages_total.into_into_dart().into_dart(),
+            self.stop_reason.into_into_dart().into_dart(),
+            self.next_in_ms.into_into_dart().into_dart(),
+            self.pump_ms.into_into_dart().into_dart(),
+            self.last_error.into_into_dart().into_dart(),
+            self.repairs.into_into_dart().into_dart(),
+            self.parts_swept.into_into_dart().into_dart(),
+            self.adopted.into_into_dart().into_dart(),
+            self.ghost_rows.into_into_dart().into_dart(),
+            self.queue_active.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::DownloadPumpDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::DownloadPumpDto>
+    for crate::ffi::application::DownloadPumpDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::DownloadPumpDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::DownloadSweepDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.books.into_into_dart().into_dart(),
+            self.stale_parts.into_into_dart().into_dart(),
+            self.ghost_rows.into_into_dart().into_dart(),
+            self.corrupt.into_into_dart().into_dart(),
+            self.size_mismatch.into_into_dart().into_dart(),
+            self.adopted_files.into_into_dart().into_dart(),
+            self.counters_repaired.into_into_dart().into_dart(),
+            self.manifests_rewritten.into_into_dart().into_dart(),
+            self.pages_removed.into_into_dart().into_dart(),
+            self.unowned_books.into_into_dart().into_dart(),
+            self.unowned_bytes.into_into_dart().into_dart(),
+            self.freed_bytes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::DownloadSweepDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::DownloadSweepDto>
+    for crate::ffi::application::DownloadSweepDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::DownloadSweepDto {
         self
     }
 }
@@ -5248,6 +6042,68 @@ impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::SsePollResult>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::StorageBookDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.server_id.into_into_dart().into_dart(),
+            self.book_id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.series_title.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
+            self.pages_total.into_into_dart().into_dart(),
+            self.pages_done.into_into_dart().into_dart(),
+            self.bytes_total.into_into_dart().into_dart(),
+            self.bytes_done.into_into_dart().into_dart(),
+            self.on_disk.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::StorageBookDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::StorageBookDto>
+    for crate::ffi::application::StorageBookDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::StorageBookDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::ffi::application::StorageDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.download_bytes.into_into_dart().into_dart(),
+            self.download_page_count.into_into_dart().into_dart(),
+            self.book_count.into_into_dart().into_dart(),
+            self.per_book.into_into_dart().into_dart(),
+            self.download_disk_bytes.into_into_dart().into_dart(),
+            self.download_disk_files.into_into_dart().into_dart(),
+            self.unowned_books.into_into_dart().into_dart(),
+            self.unowned_bytes.into_into_dart().into_dart(),
+            self.cache_page_bytes.into_into_dart().into_dart(),
+            self.cache_prefetch_bytes.into_into_dart().into_dart(),
+            self.cache_thumbnail_bytes.into_into_dart().into_dart(),
+            self.cache_total_bytes.into_into_dart().into_dart(),
+            self.cache_budget_bytes.into_into_dart().into_dart(),
+            self.free_volume_bytes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::ffi::application::StorageDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::ffi::application::StorageDto>
+    for crate::ffi::application::StorageDto
+{
+    fn into_into_dart(self) -> crate::ffi::application::StorageDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::store::thumbnails::ThumbnailRow {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -5553,6 +6409,76 @@ impl SseEncode for crate::ffi::application::DeviceProfileDto {
     }
 }
 
+impl SseEncode for crate::ffi::application::DownloadBookDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.server_id, serializer);
+        <String>::sse_encode(self.book_id, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <String>::sse_encode(self.series_title, serializer);
+        <String>::sse_encode(self.state, serializer);
+        <i64>::sse_encode(self.pages_total, serializer);
+        <i64>::sse_encode(self.pages_done, serializer);
+        <i64>::sse_encode(self.bytes_total, serializer);
+        <i64>::sse_encode(self.bytes_done, serializer);
+        <i64>::sse_encode(self.position, serializer);
+        <String>::sse_encode(self.last_error, serializer);
+        <String>::sse_encode(self.next_retry_at, serializer);
+        <String>::sse_encode(self.remote_last_modified, serializer);
+        <bool>::sse_encode(self.allow_cellular, serializer);
+        <bool>::sse_encode(self.stale, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::DownloadDeleteDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.books, serializer);
+        <i64>::sse_encode(self.files, serializer);
+        <i64>::sse_encode(self.freed_bytes, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::DownloadPumpDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.book, serializer);
+        <String>::sse_encode(self.state, serializer);
+        <i64>::sse_encode(self.served, serializer);
+        <i64>::sse_encode(self.failed_pages, serializer);
+        <i64>::sse_encode(self.bytes_written, serializer);
+        <i64>::sse_encode(self.pages_done, serializer);
+        <i64>::sse_encode(self.pages_total, serializer);
+        <String>::sse_encode(self.stop_reason, serializer);
+        <i64>::sse_encode(self.next_in_ms, serializer);
+        <i64>::sse_encode(self.pump_ms, serializer);
+        <String>::sse_encode(self.last_error, serializer);
+        <i64>::sse_encode(self.repairs, serializer);
+        <i64>::sse_encode(self.parts_swept, serializer);
+        <i64>::sse_encode(self.adopted, serializer);
+        <i64>::sse_encode(self.ghost_rows, serializer);
+        <bool>::sse_encode(self.queue_active, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::DownloadSweepDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.books, serializer);
+        <i64>::sse_encode(self.stale_parts, serializer);
+        <i64>::sse_encode(self.ghost_rows, serializer);
+        <i64>::sse_encode(self.corrupt, serializer);
+        <i64>::sse_encode(self.size_mismatch, serializer);
+        <i64>::sse_encode(self.adopted_files, serializer);
+        <i64>::sse_encode(self.counters_repaired, serializer);
+        <i64>::sse_encode(self.manifests_rewritten, serializer);
+        <i64>::sse_encode(self.pages_removed, serializer);
+        <i64>::sse_encode(self.unowned_books, serializer);
+        <i64>::sse_encode(self.unowned_bytes, serializer);
+        <i64>::sse_encode(self.freed_bytes, serializer);
+    }
+}
+
 impl SseEncode for crate::store::sync_state::EntitySyncState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5713,6 +6639,16 @@ impl SseEncode for Vec<crate::store::read_progress::ContinueReadingRow> {
     }
 }
 
+impl SseEncode for Vec<crate::ffi::application::DownloadBookDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::ffi::application::DownloadBookDto>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::store::sync_state::EntitySyncState> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5813,6 +6749,16 @@ impl SseEncode for Vec<crate::model::server_profile::ServerProfile> {
     }
 }
 
+impl SseEncode for Vec<crate::ffi::application::StorageBookDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::ffi::application::StorageBookDto>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::store::thumbnails::ThumbnailRow> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5879,6 +6825,16 @@ impl SseEncode for Option<crate::ffi::application::CollectionDetailRow> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::ffi::application::CollectionDetailRow>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::ffi::application::DownloadPumpDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::ffi::application::DownloadPumpDto>::sse_encode(value, serializer);
         }
     }
 }
@@ -6230,6 +7186,42 @@ impl SseEncode for crate::ffi::application::SsePollResult {
         <i64>::sse_encode(self.books_written, serializer);
         <i64>::sse_encode(self.books_deleted, serializer);
         <bool>::sse_encode(self.keep_socket, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::StorageBookDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.server_id, serializer);
+        <String>::sse_encode(self.book_id, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <String>::sse_encode(self.series_title, serializer);
+        <String>::sse_encode(self.state, serializer);
+        <i64>::sse_encode(self.pages_total, serializer);
+        <i64>::sse_encode(self.pages_done, serializer);
+        <i64>::sse_encode(self.bytes_total, serializer);
+        <i64>::sse_encode(self.bytes_done, serializer);
+        <i64>::sse_encode(self.on_disk, serializer);
+    }
+}
+
+impl SseEncode for crate::ffi::application::StorageDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.download_bytes, serializer);
+        <i64>::sse_encode(self.download_page_count, serializer);
+        <i64>::sse_encode(self.book_count, serializer);
+        <Vec<crate::ffi::application::StorageBookDto>>::sse_encode(self.per_book, serializer);
+        <i64>::sse_encode(self.download_disk_bytes, serializer);
+        <i64>::sse_encode(self.download_disk_files, serializer);
+        <i64>::sse_encode(self.unowned_books, serializer);
+        <i64>::sse_encode(self.unowned_bytes, serializer);
+        <i64>::sse_encode(self.cache_page_bytes, serializer);
+        <i64>::sse_encode(self.cache_prefetch_bytes, serializer);
+        <i64>::sse_encode(self.cache_thumbnail_bytes, serializer);
+        <i64>::sse_encode(self.cache_total_bytes, serializer);
+        <i64>::sse_encode(self.cache_budget_bytes, serializer);
+        <i64>::sse_encode(self.free_volume_bytes, serializer);
     }
 }
 

@@ -14,9 +14,10 @@
 use crate::api::server::Library;
 use crate::ffi::application::{
     BookDetailRow, CacheCleanupDto, CacheStatsDto, CollectionDetailRow, CollectionPageResult,
-    ConnectionResult, DeviceProfileDto, FilterOptions, OutboxStatusDto, ReaderBookDto,
-    ReaderLayoutDto, ReaderSettingsDto, ReaderTurnDto, ReaderWindowDto, ReadlistDetailRow,
-    ReadlistPageResult, SeriesDetailRow, SsePollResult, UploadOutcomeDto,
+    ConnectionResult, DeviceProfileDto, DownloadBookDto, DownloadDeleteDto, DownloadPumpDto,
+    DownloadSweepDto, FilterOptions, OutboxStatusDto, ReaderBookDto, ReaderLayoutDto,
+    ReaderSettingsDto, ReaderTurnDto, ReaderWindowDto, ReadlistDetailRow, ReadlistPageResult,
+    SeriesDetailRow, SsePollResult, StorageDto, UploadOutcomeDto,
 };
 use crate::model::server_profile::ServerProfile;
 use crate::store::prune::Tombstone;
@@ -760,4 +761,137 @@ pub fn reader_set_settings(
 ) -> Result<ReaderSettingsDto, String> {
     let app = crate::ffi::application::App::new(db_path);
     app.reader_set_settings(settings).map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Stage 9 — offline downloads. One entry is async (the pump); the rest are
+// stateless reads and writes of SQLite plus the download tree, and not one of them
+// can make a request.
+// ---------------------------------------------------------------------------
+
+/// Put a book in the download queue. Works offline: the mirrored manifest already
+/// says what the book contains, and a book that was never mirrored cannot be queued.
+pub fn download_enqueue(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<DownloadBookDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_enqueue(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Stop a download. Only the user may do this, and only the user may undo it.
+pub fn download_pause(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<DownloadBookDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_pause(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+pub fn download_resume(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<DownloadBookDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_resume(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Re-queue a book's failed pages. Pages already on disk are not fetched again.
+pub fn download_retry(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<DownloadBookDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_retry(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// The explicit "spend my data" consent, per book.
+pub fn download_set_allow_cellular(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    allow: bool,
+) -> Result<DownloadBookDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_set_allow_cellular(server_id, book_id, allow)
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a download: rows and files. The only way anything under `downloads/`
+/// leaves the disk on purpose.
+pub fn download_delete(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+) -> Result<DownloadDeleteDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_delete(server_id, book_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Clear every download for one server, including directories the database has no
+/// row for.
+pub fn download_delete_all(
+    db_path: String,
+    server_id: String,
+) -> Result<DownloadDeleteDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_delete_all(server_id)
+        .map_err(|e| e.to_string())
+}
+
+/// The queue, as SQLite knows it. No network and no filesystem walk.
+pub fn download_list(db_path: String, server_id: String) -> Result<Vec<DownloadBookDto>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_list(server_id).map_err(|e| e.to_string())
+}
+
+/// What the device holds and what it says it has left. `free_volume_bytes` comes
+/// from the platform; `0` means it would not say.
+pub fn download_storage(db_path: String, free_volume_bytes: i64) -> Result<StorageDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_storage(free_volume_bytes)
+        .map_err(|e| e.to_string())
+}
+
+/// Reconcile the download tree with its rows on demand. Also runs once per process
+/// on the first pump or list; this is the version whose report a harness reads.
+pub fn download_sweep(db_path: String) -> Result<DownloadSweepDto, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_sweep().map_err(|e| e.to_string())
+}
+
+/// Drive the queue one bounded step. `Ok(None)` means another pass holds this
+/// database — the same contract as `sse_poll`, for the same reason.
+#[allow(clippy::too_many_arguments)]
+pub async fn download_pump(
+    db_path: String,
+    server_id: String,
+    base_url: String,
+    api_key: String,
+    max_pages: i64,
+    max_bytes: i64,
+    free_volume_bytes: i64,
+    link: String,
+) -> Result<Option<DownloadPumpDto>, String> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_pump(
+        server_id,
+        base_url,
+        api_key,
+        max_pages,
+        max_bytes,
+        free_volume_bytes,
+        link,
+    )
+    .await
+    .map_err(|e| e.to_string())
 }

@@ -181,6 +181,14 @@ pub fn count_tombstones(conn: &Connection, server_id: &str) -> rusqlite::Result<
 
 /// Delete a book's mirror rows (children + search index + cover records +
 /// Outbox entries). Returns the cover file paths that became orphaned.
+///
+/// It does NOT touch `downloads` / `download_pages`. The mirror infers a remote
+/// deletion from absence in one sweep, and Stage 5's own rule is that absence is
+/// weak evidence — offset pagination can produce it for a book that is fine. A
+/// queued mutation is the least recoverable thing in the database for that reason;
+/// so is a file the user chose to keep, and unlike a mutation it cannot be re-derived
+/// from the server, because in this case the server is the thing that lost it.
+/// `delete_server_mirror` still clears them: dropping a server is a user action.
 pub fn delete_book(
     conn: &Connection,
     server_id: &str,
@@ -194,8 +202,6 @@ pub fn delete_book(
         "DELETE FROM book_authors WHERE server_id = ?1 AND book_id = ?2",
         "DELETE FROM readlist_books WHERE server_id = ?1 AND book_id = ?2",
         "DELETE FROM read_progress WHERE server_id = ?1 AND book_id = ?2",
-        "DELETE FROM downloads WHERE server_id = ?1 AND book_id = ?2",
-        "DELETE FROM download_pages WHERE server_id = ?1 AND book_id = ?2",
     ] {
         conn.execute(sql, params![server_id, book_id])?;
     }

@@ -63,9 +63,13 @@ pub fn delete_server_mirror(conn: &Connection, server_id: &str) -> rusqlite::Res
         "deleted_entities",
         "pending_mutations",
         "thumbnails",
-        "downloads",
-        "download_pages",
     ] {
+        // `downloads` and `download_pages` are deliberately NOT in this list. They
+        // are the index to files the user asked to keep, and dropping a server is a
+        // gesture about the connection, not about the bookshelf: with the rows gone
+        // the files on disk have no name anybody can delete them by, because the
+        // directory is spelled with a sanitised id and only the row remembers the
+        // raw one. Manage them from the Downloads and Storage screens instead.
         conn.execute(
             &format!("DELETE FROM {table} WHERE server_id = ?1"),
             [server_id],
@@ -158,5 +162,143 @@ mod tests {
             .query_row("PRAGMA user_version", rusqlite::params![], |row| row.get(0))
             .unwrap();
         assert_eq!(version, schema::SCHEMA_VERSION);
+    }
+
+    /// The two download tables exactly as v8 created them. Written out here
+    /// rather than derived from `CREATE_STATEMENTS`, because the point of the
+    /// test is what a database written *before* Stage 9 looks like.
+    const V8_DOWNLOADS: &str = "CREATE TABLE downloads (
+        server_id TEXT NOT NULL,
+        book_id TEXT NOT NULL,
+        manifest_path TEXT,
+        pages_total INTEGER,
+        pages_done INTEGER,
+        state TEXT NOT NULL,
+        PRIMARY KEY (server_id, book_id)
+    )";
+    const V8_DOWNLOAD_PAGES: &str = "CREATE TABLE download_pages (
+        server_id TEXT NOT NULL,
+        book_id TEXT NOT NULL,
+        page_number INTEGER NOT NULL,
+        file_path TEXT,
+        state TEXT NOT NULL,
+        PRIMARY KEY (server_id, book_id, page_number)
+    )";
+
+    /// A v8 database is one the user already put downloads in. The migration must
+    /// add its columns without disturbing what was there: this is the only
+    /// migration in the project whose failure mode is losing a user's bookkeeping
+    /// rather than missing a column, and a download row is the only evidence of
+    /// what the user asked for.
+    #[test]
+    fn a_v8_download_row_survives_the_v9_migration_untouched() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::migrate(&conn).unwrap();
+        // Become a v8 database again, then rebuild the two tables in that shape.
+        conn.pragma_update(None, "user_version", 8_i64).unwrap();
+        conn.execute("DROP TABLE downloads", []).unwrap();
+        conn.execute("DROP TABLE download_pages", []).unwrap();
+        conn.execute(V8_DOWNLOADS, []).unwrap();
+        conn.execute(V8_DOWNLOAD_PAGES, []).unwrap();
+        conn.execute(
+            "INSERT INTO downloads (server_id, book_id, manifest_path, pages_total, pages_done, state)
+             VALUES ('s1', 'b1', '/dwn/s1/b1/manifest.json', 120, 40, 'paused')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO download_pages (server_id, book_id, page_number, file_path, state)
+             VALUES ('s1', 'b1', 7, '/dwn/s1/b1/0007.png', 'complete')",
+            [],
+        )
+        .unwrap();
+
+        schema::migrate(&conn).unwrap();
+
+        let row: (String, i64, i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT state, COALESCE(pages_total, -1), COALESCE(pages_done, -1),
+                        position, bytes_total, allow_cellular
+                 FROM downloads WHERE server_id = 's1' AND book_id = 'b1'",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            ("paused".to_string(), 120, 40, 0, 0, 0),
+            "a paused download's own columns must survive v9 with its new ones defaulted"
+        );
+        let pages: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM download_pages
+                 WHERE server_id = 's1' AND book_id = 'b1' AND page_number = 7
+                   AND state = 'complete'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            pages, 1,
+            "the completed page row is the proof it is on disk"
+        );
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, schema::SCHEMA_VERSION);
+    }
+
+    fn table_shape(conn: &Connection, table: &str) -> Vec<(String, String, i64, String)> {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT name, type, \"notnull\", COALESCE(dflt_value, '<none>')
+                 FROM pragma_table_info('{table}') ORDER BY cid"
+            ))
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+    }
+
+    /// The guarded-ALTER route and the `CREATE_STATEMENTS` route must land on one
+    /// shape. A column added to the fresh DDL but not to `V9_ALTER_STATEMENTS`
+    /// otherwise compiles and passes every other test, then makes an upgrading
+    /// user's downloads query a column that is not there.
+    #[test]
+    fn a_migrated_v8_download_table_has_the_fresh_shape() {
+        let upgraded = Connection::open_in_memory().unwrap();
+        schema::migrate(&upgraded).unwrap();
+        upgraded.pragma_update(None, "user_version", 8_i64).unwrap();
+        upgraded.execute("DROP TABLE downloads", []).unwrap();
+        upgraded.execute("DROP TABLE download_pages", []).unwrap();
+        upgraded.execute(V8_DOWNLOADS, []).unwrap();
+        upgraded.execute(V8_DOWNLOAD_PAGES, []).unwrap();
+        schema::migrate(&upgraded).unwrap();
+
+        let fresh = open_in_memory().unwrap();
+        for table in ["downloads", "download_pages"] {
+            assert_eq!(
+                table_shape(&upgraded, table),
+                table_shape(&fresh, table),
+                "{table}: a v8 database converged on a different shape than a fresh one"
+            );
+        }
     }
 }

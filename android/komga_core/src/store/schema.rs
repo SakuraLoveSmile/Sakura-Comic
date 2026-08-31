@@ -11,7 +11,14 @@ use rusqlite::{Connection, OptionalExtension};
 /// with no network, `reader_position` stores the display page plus the mode and
 /// direction the reader was left in, and `cache_entries` gains an LRU index —
 /// the table existed since v3 with no writer, and the page cache is its first.
-pub const SCHEMA_VERSION: i64 = 8;
+///
+/// v9 (Stage 9): `downloads` and `download_pages` gained their first writer, and
+/// with it the columns an offline download needs to be resumable (per-page size,
+/// media type and attempt count), ordered by the user's tap order (`position`),
+/// budgetable (`bytes_total` / `bytes_done`) and explainable when it fails
+/// (`last_error` / `next_retry_at`). This is the only migration in the project
+/// whose failure mode is losing a user's bookkeeping rather than missing a column.
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Individual DDL statements, applied in order. `CREATE TABLE IF NOT EXISTS`
 /// keeps existing databases untouched, so older installs get their missing
@@ -178,6 +185,13 @@ pub const CREATE_STATEMENTS: &[&str] = &[
     )",
     "CREATE INDEX IF NOT EXISTS pending_mutations_due
        ON pending_mutations (server_id, state, next_retry_at)",
+    // Stage 9: the offline-download queue. `position` is the user's tap order
+    // (rowid is neither that nor stable), and `state` is the whole point of the
+    // table: pausing, resuming and retrying are UPDATEs, so a download survives
+    // the process being killed without any in-memory state to restore.
+    // `manifest_path`/`pages_total`/`pages_done` stay nullable because SQLite
+    // cannot change a live column's nullability without rebuilding the table, so
+    // a v8 database and a fresh one would diverge otherwise. Readers COALESCE.
     "CREATE TABLE IF NOT EXISTS downloads (
       server_id TEXT NOT NULL,
       book_id TEXT NOT NULL,
@@ -185,14 +199,35 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       pages_total INTEGER,
       pages_done INTEGER,
       state TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      bytes_total INTEGER NOT NULL DEFAULT 0,
+      bytes_done INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      next_retry_at TEXT,
+      remote_last_modified TEXT,
+      book_title TEXT,
+      series_title TEXT,
+      allow_cellular INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (server_id, book_id)
     )",
+    // One row per page the user's download owns. This table, not the LRU ledger,
+    // is the single source of truth for downloaded bytes: a row in `cache_entries`
+    // would make the eviction budget permanently unsatisfiable (see
+    // `store::cache::evict_to_budget_except`, which counts every kind but only
+    // evicts non-download ones).
     "CREATE TABLE IF NOT EXISTS download_pages (
       server_id TEXT NOT NULL,
       book_id TEXT NOT NULL,
       page_number INTEGER NOT NULL,
       file_path TEXT,
       state TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      media_type TEXT NOT NULL DEFAULT '',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      updated_at TEXT,
       PRIMARY KEY (server_id, book_id, page_number)
     )",
     // v3: cover-cache bookkeeping — the UI resolves a cover's local file
@@ -346,6 +381,35 @@ pub const V7_ALTER_STATEMENTS: &[&str] = &[
     "ALTER TABLE pending_mutations ADD COLUMN next_retry_at TEXT",
 ];
 
+/// v8 → v9 (Stage 9): the offline-download tables existed since v1 as a stub with
+/// no writer. v9 makes a download resumable and self-describing — per-page size
+/// and attempt count so one bad page is retried alone, byte accounting so the
+/// storage screen is a query rather than a walk, `position` so the queue follows
+/// the user's taps instead of the rowid, and `next_retry_at` so a rejected
+/// credential parks a book without burning its retries.
+///
+/// Any index over one of these columns must be created AFTER this loop runs:
+/// `CREATE_STATEMENTS` executes before it, so on a v8 database such an index
+/// would be built against a column that does not exist yet.
+pub const V9_ALTER_STATEMENTS: &[&str] = &[
+    "ALTER TABLE downloads ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE downloads ADD COLUMN updated_at TEXT",
+    "ALTER TABLE downloads ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE downloads ADD COLUMN bytes_total INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE downloads ADD COLUMN bytes_done INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE downloads ADD COLUMN last_error TEXT",
+    "ALTER TABLE downloads ADD COLUMN next_retry_at TEXT",
+    "ALTER TABLE downloads ADD COLUMN remote_last_modified TEXT",
+    "ALTER TABLE downloads ADD COLUMN book_title TEXT",
+    "ALTER TABLE downloads ADD COLUMN series_title TEXT",
+    "ALTER TABLE downloads ADD COLUMN allow_cellular INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE download_pages ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE download_pages ADD COLUMN media_type TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE download_pages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE download_pages ADD COLUMN last_error TEXT",
+    "ALTER TABLE download_pages ADD COLUMN updated_at TEXT",
+];
+
 /// True when a table exists and has the given column.
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
     let mut stmt = conn.prepare(&format!(
@@ -440,6 +504,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         .iter()
         .chain(V5_ALTER_STATEMENTS)
         .chain(V7_ALTER_STATEMENTS)
+        .chain(V9_ALTER_STATEMENTS)
         .copied()
         .collect();
     for statement in &alters {

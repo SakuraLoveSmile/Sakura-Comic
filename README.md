@@ -43,7 +43,7 @@ Comic/
 | Phase 1 | Media Library（封面墙 / 搜索 / Home / Series Detail） |
 | Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理）— Stage 5 Bootstrap + Reconcile，Stage 6 SSE + Mutation Outbox |
 | Phase 3 | Reader（单页 / 双页 / Webtoon）— Stage 7 阅读器基础版（Product MVP），**Stage 8 性能与缓存** |
-| Phase 4 | Offline（缓存 / 下载 / 离线浏览） |
+| Phase 4 | Offline（缓存 / 下载 / 离线浏览）— **Stage 9 离线下载：Full Mobile v1** |
 | Phase 5 | Platform Polish（macOS / tvOS / visionOS） |
 
 ## 本期明确不做

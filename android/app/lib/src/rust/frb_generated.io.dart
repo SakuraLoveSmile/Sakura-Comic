@@ -74,6 +74,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DeviceProfileDto dco_decode_box_autoadd_device_profile_dto(dynamic raw);
 
   @protected
+  DownloadPumpDto dco_decode_box_autoadd_download_pump_dto(dynamic raw);
+
+  @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
@@ -134,6 +137,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DeviceProfileDto dco_decode_device_profile_dto(dynamic raw);
 
   @protected
+  DownloadBookDto dco_decode_download_book_dto(dynamic raw);
+
+  @protected
+  DownloadDeleteDto dco_decode_download_delete_dto(dynamic raw);
+
+  @protected
+  DownloadPumpDto dco_decode_download_pump_dto(dynamic raw);
+
+  @protected
+  DownloadSweepDto dco_decode_download_sweep_dto(dynamic raw);
+
+  @protected
   EntitySyncState dco_decode_entity_sync_state(dynamic raw);
 
   @protected
@@ -182,6 +197,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ContinueReadingRow> dco_decode_list_continue_reading_row(dynamic raw);
 
   @protected
+  List<DownloadBookDto> dco_decode_list_download_book_dto(dynamic raw);
+
+  @protected
   List<EntitySyncState> dco_decode_list_entity_sync_state(dynamic raw);
 
   @protected
@@ -212,6 +230,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ServerProfile> dco_decode_list_server_profile(dynamic raw);
 
   @protected
+  List<StorageBookDto> dco_decode_list_storage_book_dto(dynamic raw);
+
+  @protected
   List<ThumbnailRow> dco_decode_list_thumbnail_row(dynamic raw);
 
   @protected
@@ -232,6 +253,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   CollectionDetailRow? dco_decode_opt_box_autoadd_collection_detail_row(
       dynamic raw);
+
+  @protected
+  DownloadPumpDto? dco_decode_opt_box_autoadd_download_pump_dto(dynamic raw);
 
   @protected
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
@@ -313,6 +337,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SsePollResult dco_decode_sse_poll_result(dynamic raw);
 
   @protected
+  StorageBookDto dco_decode_storage_book_dto(dynamic raw);
+
+  @protected
+  StorageDto dco_decode_storage_dto(dynamic raw);
+
+  @protected
   ThumbnailRow dco_decode_thumbnail_row(dynamic raw);
 
   @protected
@@ -373,6 +403,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeviceProfileDto sse_decode_box_autoadd_device_profile_dto(
+      SseDeserializer deserializer);
+
+  @protected
+  DownloadPumpDto sse_decode_box_autoadd_download_pump_dto(
       SseDeserializer deserializer);
 
   @protected
@@ -445,6 +479,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DeviceProfileDto sse_decode_device_profile_dto(SseDeserializer deserializer);
 
   @protected
+  DownloadBookDto sse_decode_download_book_dto(SseDeserializer deserializer);
+
+  @protected
+  DownloadDeleteDto sse_decode_download_delete_dto(
+      SseDeserializer deserializer);
+
+  @protected
+  DownloadPumpDto sse_decode_download_pump_dto(SseDeserializer deserializer);
+
+  @protected
+  DownloadSweepDto sse_decode_download_sweep_dto(SseDeserializer deserializer);
+
+  @protected
   EntitySyncState sse_decode_entity_sync_state(SseDeserializer deserializer);
 
   @protected
@@ -496,6 +543,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<DownloadBookDto> sse_decode_list_download_book_dto(
+      SseDeserializer deserializer);
+
+  @protected
   List<EntitySyncState> sse_decode_list_entity_sync_state(
       SseDeserializer deserializer);
 
@@ -531,6 +582,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  List<StorageBookDto> sse_decode_list_storage_book_dto(
+      SseDeserializer deserializer);
+
+  @protected
   List<ThumbnailRow> sse_decode_list_thumbnail_row(
       SseDeserializer deserializer);
 
@@ -553,6 +608,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CollectionDetailRow? sse_decode_opt_box_autoadd_collection_detail_row(
+      SseDeserializer deserializer);
+
+  @protected
+  DownloadPumpDto? sse_decode_opt_box_autoadd_download_pump_dto(
       SseDeserializer deserializer);
 
   @protected
@@ -643,6 +702,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SsePollResult sse_decode_sse_poll_result(SseDeserializer deserializer);
 
   @protected
+  StorageBookDto sse_decode_storage_book_dto(SseDeserializer deserializer);
+
+  @protected
+  StorageDto sse_decode_storage_dto(SseDeserializer deserializer);
+
+  @protected
   ThumbnailRow sse_decode_thumbnail_row(SseDeserializer deserializer);
 
   @protected
@@ -707,6 +772,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_device_profile_dto(
       DeviceProfileDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_download_pump_dto(
+      DownloadPumpDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
@@ -783,6 +852,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       DeviceProfileDto self, SseSerializer serializer);
 
   @protected
+  void sse_encode_download_book_dto(
+      DownloadBookDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_download_delete_dto(
+      DownloadDeleteDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_download_pump_dto(
+      DownloadPumpDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_download_sweep_dto(
+      DownloadSweepDto self, SseSerializer serializer);
+
+  @protected
   void sse_encode_entity_sync_state(
       EntitySyncState self, SseSerializer serializer);
 
@@ -838,6 +923,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<ContinueReadingRow> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_download_book_dto(
+      List<DownloadBookDto> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_entity_sync_state(
       List<EntitySyncState> self, SseSerializer serializer);
 
@@ -877,6 +966,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<ServerProfile> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_storage_book_dto(
+      List<StorageBookDto> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_thumbnail_row(
       List<ThumbnailRow> self, SseSerializer serializer);
 
@@ -901,6 +994,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_collection_detail_row(
       CollectionDetailRow? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_download_pump_dto(
+      DownloadPumpDto? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
@@ -997,6 +1094,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_sse_poll_result(SsePollResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_storage_book_dto(
+      StorageBookDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_storage_dto(StorageDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_thumbnail_row(ThumbnailRow self, SseSerializer serializer);

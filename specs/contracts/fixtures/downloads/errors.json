@@ -1,0 +1,115 @@
+{
+  "$comment": "Stage 9 failure classification. The signals are named after what a transport can actually prove, not after either platform's error enum, because Swift's URLSession failure and Rust's ApiError::Network are the same event seen from two sides. The line the stage spec cares about is `burnsAttempt`: 'the link is down' and 'this page is bad' must not share a counter, or a five-hour tunnel spends every retry the one genuinely broken page needed. Three other places already make the same choice for writes — store::outbox::record_outcome's BlockedAuthentication no-op and sync::upload's Decision::Defer — and this is the read-side restatement of it.",
+  "version": 1,
+  "signals": {
+    "$comment": "A signal is what the pass knows about one page attempt. Anything not listed here, including a future variant on either platform, is badPage by `default`: it is about this response, the page stays retryable, and treating the unknown as fatal would turn one odd server into a dead queue.",
+    "ok": "200, the container walks, and the byte count matches what the mirrored manifest declared.",
+    "link": "The request could not be made or not finished: no route, connection refused, DNS failure, socket timeout, a body that stopped mid-stream.",
+    "credential": "401 or 403.",
+    "notFound": "404 or 410 on a page route.",
+    "rateLimited": "429.",
+    "server": "Any other 4xx/5xx.",
+    "shortRead": "A whole response arrived with fewer bytes than the manifest declared for this page. Only the declared size can tell this apart from a genuinely small image, and the manifest is the only witness that has ever been able to.",
+    "corrupt": "The container walk failed: bad chunk stream, missing JPEG EOI, absent GIF trailer, RIFF length that does not describe the file.",
+    "tooSmall": "Below the floor a real page image cannot miss by, so the response is not an image at all.",
+    "writeFailed": "The durable write did not complete: disk full, read-only volume, rename refused."
+  },
+  "outcomesNote": "scope decides how far the news travels. `page` marks one row and continues the book; `book` ends this book and leaves it explainable; `pass` ends the pass with no write at all; `serverQueue` ends the pass AND parks every book for that server, because the next book would fail identically and the user is paying per request.",
+  "outcomes": {
+    "complete": {
+      "scope": "page",
+      "burnsAttempt": false
+    },
+    "badPage": {
+      "scope": "page",
+      "burnsAttempt": true
+    },
+    "linkDown": {
+      "scope": "pass",
+      "burnsAttempt": false
+    },
+    "blocked": {
+      "scope": "serverQueue",
+      "burnsAttempt": false
+    },
+    "gone": {
+      "scope": "book",
+      "burnsAttempt": false
+    },
+    "throttled": {
+      "scope": "pass",
+      "burnsAttempt": false
+    },
+    "ioFailed": {
+      "scope": "book",
+      "burnsAttempt": false
+    }
+  },
+  "classify": [
+    {
+      "signal": "ok",
+      "outcome": "complete"
+    },
+    {
+      "signal": "link",
+      "outcome": "linkDown"
+    },
+    {
+      "signal": "credential",
+      "outcome": "blocked"
+    },
+    {
+      "signal": "notFound",
+      "outcome": "gone"
+    },
+    {
+      "signal": "rateLimited",
+      "outcome": "throttled"
+    },
+    {
+      "signal": "server",
+      "outcome": "badPage"
+    },
+    {
+      "signal": "shortRead",
+      "outcome": "badPage"
+    },
+    {
+      "signal": "corrupt",
+      "outcome": "badPage"
+    },
+    {
+      "signal": "tooSmall",
+      "outcome": "badPage"
+    },
+    {
+      "signal": "writeFailed",
+      "outcome": "ioFailed"
+    }
+  ],
+  "default": "badPage",
+  "boundsNote": "maxPageAttempts is per page and per user retry. consecutiveBadPages degrades a run of badPage into a `pass`-scoped stop without burning anything more, so a dying server costs three attempts across the whole book instead of three per page (400 pages x 3). The three pass bounds exist for three different reasons and all three are needed: pages is the number the tests can state exactly, bytes is the number a 4K-page book can run away with (4 x 24 MB is a Dart `await` nobody should sit through), and elapsed is the one that keeps the pump from starving `reader_page`, which shares the process. Elapsed is checked BEFORE each page and overridden once only when zero pages have been served, so a pass always makes progress.",
+  "bounds": {
+    "maxPageAttempts": 3,
+    "consecutiveBadPages": 3,
+    "defaultMaxPages": 4,
+    "defaultMaxBytes": 33554432,
+    "maxElapsedMs": 1000,
+    "nextInMs": {
+      "linkDown": 2000,
+      "throttled": 5000,
+      "blocked": 60000,
+      "lowSpace": 60000,
+      "linkBlocked": 0,
+      "budget": 0,
+      "badRun": 5000
+    }
+  },
+  "linkPolicy": {
+    "unmetered": "always proceed",
+    "metered": "proceed only when the book's allowCellular is true; otherwise stop with linkBlocked",
+    "unknown": "continue a book that was already `downloading` when the pass planned it; never start a new one",
+    "$comment": "Android answers this from ConnectivityManager.isActiveNetworkMetered(), NOT from `transport == WIFI`: the emulator reports ETHERNET, and a transport test there would leave every download permanently blocked and look like a core bug. `unknown` is deliberately asymmetric with `metered` — refusing everything the platform cannot describe would make downloads unstartable on any device that will not answer, which is the same trap a no-op-equals-health counter fell into in Stage 8. The asymmetry is: unknown may finish work already started, may not start new work."
+  },
+  "stopReasonsNote": "stopReasons the planner can decide are in pump.json; the three runtime-only ones (badPage, badRun, paused) are produced by a pass and listed in bounds.nextInMs with how long to wait before the next one."
+}

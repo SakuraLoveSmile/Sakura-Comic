@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:comic_app/src/download_controller.dart';
+import 'package:comic_app/src/downloads_api.dart';
 import 'package:comic_app/src/library_repository.dart';
 import 'package:comic_app/src/models.dart';
 import 'package:comic_app/src/series.dart';
@@ -128,6 +130,50 @@ void main() {
     await tester.tap(find.text('标记已读'));
     await tester.pumpAndSettle();
     expect(repo.markedRead, ['book-3']);
+  });
+
+  testWidgets('one download button, driven by the queue state', (tester) async {
+    final repo = _MediaFakeRepository();
+    final api = InMemoryDownloadsApi();
+    final controller = DownloadController(
+      api,
+      link: () async => 'unmetered',
+      freeBytes: () async => 1 << 30,
+      interval: const Duration(hours: 1),
+      // This case is about which call a tap makes. `enqueue` is a user gesture and
+      // it kicks the pump at once, so a turn here is bounded to zero passes: the
+      // chained-pass behaviour is the download group's own test.
+      passesPerTurn: 0,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: SeriesDetailScreen(
+        repository: repo,
+        seriesId: 'series-1',
+        downloads: controller,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Book 3'));
+    await tester.pumpAndSettle();
+
+    // Unqueued: the button offers the download and nothing else.
+    expect(find.text('下载'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('download-book-3')));
+    await tester.pumpAndSettle();
+    expect(api.enqueueCalls, 1);
+    expect(api.deleteCalls, 0, reason: 'a tap that queued a book must not delete it');
+    expect(find.text('排队中'), findsOneWidget);
+
+    // Queued: the same button is now the pause, because that is the one gesture a
+    // running book has left.
+    await tester.tap(find.byKey(const Key('download-book-3')));
+    await tester.pumpAndSettle();
+    expect(api.pauseCalls, 1);
+    expect(api.enqueueCalls, 1, reason: 'the second tap did not re-queue it');
+    expect(find.text('已暂停'), findsOneWidget);
+    controller.stop();
   });
 }
 
