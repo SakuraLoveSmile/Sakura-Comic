@@ -3,6 +3,8 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import '../diagnostics/log.dart';
+import '../diagnostics/snapshot.dart';
 import '../frb_generated.dart';
 import '../model/server.dart';
 import '../store.dart';
@@ -11,7 +13,66 @@ import '../store/collections.dart';
 import '../store/query.dart';
 import '../store/readlists.dart';
 import '../store/series.dart';
+import '../store/sync_state.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+
+/// What this build can talk to. Static: it says nothing about the server that
+/// is currently answering, which is what `sync` rows and `probe` are for.
+class ApiPolicyDto {
+  final String contractVersion;
+  final String snapshotVersion;
+  final String minServerVersion;
+
+  const ApiPolicyDto({
+    required this.contractVersion,
+    required this.snapshotVersion,
+    required this.minServerVersion,
+  });
+
+  @override
+  int get hashCode =>
+      contractVersion.hashCode ^
+      snapshotVersion.hashCode ^
+      minServerVersion.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ApiPolicyDto &&
+          runtimeType == other.runtimeType &&
+          contractVersion == other.contractVersion &&
+          snapshotVersion == other.snapshotVersion &&
+          minServerVersion == other.minServerVersion;
+}
+
+/// What the credential for one server is currently believed to be.
+class AuthStateDto {
+  final String serverId;
+
+  /// `valid` | `expired` | `unknown`.
+  final String state;
+
+  /// When that was proved, RFC 3339; empty for `unknown`.
+  final String at;
+
+  const AuthStateDto({
+    required this.serverId,
+    required this.state,
+    required this.at,
+  });
+
+  @override
+  int get hashCode => serverId.hashCode ^ state.hashCode ^ at.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AuthStateDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          state == other.state &&
+          at == other.at;
+}
 
 /// Full book detail (row + metadata + tags + authors + read progress).
 class BookDetailRow {
@@ -408,6 +469,72 @@ class DeviceProfileDto {
           stable == other.stable;
 }
 
+/// One read of everything the client knows about itself.
+class DiagnosticsDto {
+  final String serverId;
+
+  /// The store's own account: pragmas, integrity verdict, per-table rows.
+  final DbHealth db;
+  final AuthStateDto auth;
+
+  /// Rows in `pending_mutations` for any server, counted straight from SQL.
+  /// Reported beside `outbox`, which is per-server: the two disagree by
+  /// design when a second server has queued writes.
+  final PlatformInt64 outboxQueuedRows;
+  final List<EntitySyncState> sync_;
+  final OutboxStatusDto outbox;
+  final CacheStatsDto cache;
+  final StorageDto storage;
+  final List<QueueStateCountDto> queue;
+  final ApiPolicyDto policy;
+  final LogStats log;
+
+  const DiagnosticsDto({
+    required this.serverId,
+    required this.db,
+    required this.auth,
+    required this.outboxQueuedRows,
+    required this.sync_,
+    required this.outbox,
+    required this.cache,
+    required this.storage,
+    required this.queue,
+    required this.policy,
+    required this.log,
+  });
+
+  @override
+  int get hashCode =>
+      serverId.hashCode ^
+      db.hashCode ^
+      auth.hashCode ^
+      outboxQueuedRows.hashCode ^
+      sync_.hashCode ^
+      outbox.hashCode ^
+      cache.hashCode ^
+      storage.hashCode ^
+      queue.hashCode ^
+      policy.hashCode ^
+      log.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DiagnosticsDto &&
+          runtimeType == other.runtimeType &&
+          serverId == other.serverId &&
+          db == other.db &&
+          auth == other.auth &&
+          outboxQueuedRows == other.outboxQueuedRows &&
+          sync_ == other.sync_ &&
+          outbox == other.outbox &&
+          cache == other.cache &&
+          storage == other.storage &&
+          queue == other.queue &&
+          policy == other.policy &&
+          log == other.log;
+}
+
 /// One queue row, as the Downloads screen reads it.
 class DownloadBookDto {
   final String serverId;
@@ -776,6 +903,49 @@ class OutboxStatusDto {
           failed == other.failed &&
           total == other.total &&
           failedEntries == other.failedEntries;
+}
+
+/// The queue grouped by the state the user gave it, summed across their books.
+class QueueStateCountDto {
+  /// `queued` | `downloading` | `paused` | `completed` | `failed`.
+  final String state;
+  final PlatformInt64 books;
+  final PlatformInt64 pagesDone;
+  final PlatformInt64 pagesTotal;
+  final PlatformInt64 bytesDone;
+
+  /// 0 whenever no book in this state ever learned its own size.
+  final PlatformInt64 bytesTotal;
+
+  const QueueStateCountDto({
+    required this.state,
+    required this.books,
+    required this.pagesDone,
+    required this.pagesTotal,
+    required this.bytesDone,
+    required this.bytesTotal,
+  });
+
+  @override
+  int get hashCode =>
+      state.hashCode ^
+      books.hashCode ^
+      pagesDone.hashCode ^
+      pagesTotal.hashCode ^
+      bytesDone.hashCode ^
+      bytesTotal.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is QueueStateCountDto &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          books == other.books &&
+          pagesDone == other.pagesDone &&
+          pagesTotal == other.pagesTotal &&
+          bytesDone == other.bytesDone &&
+          bytesTotal == other.bytesTotal;
 }
 
 class ReaderBookDto {

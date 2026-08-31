@@ -2,6 +2,7 @@
 //! (no Flutter SQLite plugin). 网络负责同步，本地数据库负责展示。
 
 pub mod app_state;
+pub mod auth_state;
 pub mod books;
 pub mod cache;
 pub mod collections;

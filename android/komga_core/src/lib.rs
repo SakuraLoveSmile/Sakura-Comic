@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod cache;
+pub mod diagnostics;
 pub mod downloads;
 pub mod ffi;
 pub mod model;

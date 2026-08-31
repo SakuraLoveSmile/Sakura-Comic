@@ -589,4 +589,28 @@ class FrbRustCoreApi extends RustCoreApi {
   }) {
     return frb.sseStop(dbPath: dbPath, serverId: serverId);
   }
+
+  @override
+  Future<AuthStateDto> authState({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.authState(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<DiagnosticsDto?> diagnosticsSnapshot({
+    required String dbPath,
+    required String serverId,
+  }) {
+    return frb.diagnosticsSnapshot(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<List<LogRecord>> diagnosticsLogs({
+    int limit = 100,
+    String minLevel = '',
+  }) {
+    return frb.diagnosticsLogs(limit: limit, minLevel: minLevel);
+  }
 }

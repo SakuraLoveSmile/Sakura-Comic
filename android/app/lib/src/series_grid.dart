@@ -10,7 +10,9 @@ import 'reader_device.dart';
 import 'libraries_screen.dart';
 import 'library_repository.dart';
 import 'live_sync.dart';
-import 'rust_core_api.dart' show OutboxStatusDto;
+import 'error_presentation.dart';
+import 'rust/ffi/error.dart' show ErrorCode;
+import 'rust_core_api.dart' show AuthStateDto, OutboxStatusDto;
 import 'models.dart';
 import 'readlists_screen.dart';
 import 'series_detail.dart';
@@ -53,6 +55,10 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
   bool _syncing = false;
   bool _autoSynced = false;
   SyncStatus _syncStatus = const SyncStatus();
+
+  /// Stage 10: what the last credentialed contact proved. Drives the
+  /// re-authenticate banner and nothing else.
+  AuthStateDto? _credential;
 
   /// Offline recovery. The shell has no connectivity plugin, so "the network
   /// came back" is detected the honest way: retry a sweep that failed, on a
@@ -186,6 +192,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         _loadSyncState(),
         _loadCovers(),
         _loadSyncStatus(),
+        _loadCredential(),
       ]);
     } catch (e) {
       if (!mounted) return;
@@ -198,6 +205,19 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     final status = await widget.repository.fetchSyncStatus();
     if (!mounted) return;
     setState(() => _syncStatus = status);
+  }
+
+  /// The credential verdict is a status line, not content: a store that cannot
+  /// answer must leave the wall standing rather than replace it with "加载失败".
+  Future<void> _loadCredential() async {
+    AuthStateDto? state;
+    try {
+      state = await widget.repository.fetchCredentialState();
+    } catch (_) {
+      state = null;
+    }
+    if (!mounted) return;
+    setState(() => _credential = state);
   }
 
   Future<void> _loadCovers() async {
@@ -493,6 +513,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
                 ),
               ),
             _syncStatusBanner(),
+            _credentialBanner(),
             Expanded(
               child: TabBarView(
                 children: [
@@ -527,6 +548,45 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       child: Text(
         _syncStatus.label,
         style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+
+  /// A rejected credential is the one failure the user has to fix themselves, so
+  /// it gets a line of its own and a way out of it. `unknown` deliberately gets
+  /// neither: never having asked is not the same as being wrong, and a banner
+  /// that appears on a fresh install would send the user to change a key that
+  /// works.
+  Widget _credentialBanner() {
+    if (credentialStatusOf(_credential?.state) != CredentialStatus.expired) {
+      return const SizedBox.shrink();
+    }
+    return Material(
+      key: const ValueKey('credential-banner'),
+      color: Theme.of(context).colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Row(
+          children: [
+            const Icon(Icons.lock_outline, size: 16),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                failureHeadline(ErrorCode.authExpired),
+                key: const ValueKey('credential-headline'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            // No manager means no way to edit a credential on this device, so
+            // the banner says what is wrong without offering a dead button.
+            if (widget.manager != null)
+              TextButton(
+                key: const ValueKey('credential-reauth'),
+                onPressed: _openServers,
+                child: const Text('重新登录'),
+              ),
+          ],
+        ),
       ),
     );
   }

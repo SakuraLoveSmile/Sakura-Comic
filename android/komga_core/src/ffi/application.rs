@@ -51,6 +51,11 @@ pub struct App {
 
 impl App {
     pub fn new(db_path: impl Into<String>) -> Self {
+        // Every FFI entry point and every smoke binary constructs an `App`, so
+        // this is the one place the log backend can be installed and be certain
+        // it happened. Losing the slot to a logger that got here first is
+        // possible and is reported by `stats().installed` rather than assumed.
+        crate::diagnostics::log::install();
         Self {
             db_path: db_path.into(),
         }
@@ -60,10 +65,45 @@ impl App {
         &self.db_path
     }
 
+    /// Record what a finished round trip proved about this server's credential.
+    ///
+    /// `Ok` says the key works. `ApiError::Authentication` says it does not.
+    /// Every other failure — no route, a 500, a page that would not decode —
+    /// says nothing about the key and therefore writes nothing: a client that
+    /// told the user their password had expired every time they went through a
+    /// tunnel would be worse than one that never notices an expiry.
+    ///
+    /// The write is best-effort in both directions. A store that cannot record
+    /// the note must not replace the outcome the caller is about to return, and
+    /// `test_connection` runs with no database at all (the add-server form has
+    /// not chosen a server id yet), which is skipped rather than failed.
+    fn note_credential<T>(&self, server_id: &str, result: &Result<T, ApiError>) {
+        let verdict = match result {
+            Ok(_) => store::auth_state::CredentialVerdict::Accepted,
+            Err(ApiError::Authentication) => store::auth_state::CredentialVerdict::Rejected,
+            Err(_) => return,
+        };
+        self.write_credential(server_id, verdict);
+    }
+
+    fn write_credential(&self, server_id: &str, verdict: store::auth_state::CredentialVerdict) {
+        if self.db_path.is_empty() {
+            return;
+        }
+        if let Ok(conn) = store::open(&self.db_path) {
+            let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let _ = store::auth_state::note(&conn, server_id, verdict, &at);
+        }
+    }
+
     /// Insert or update a server profile.
     pub fn save_server(&self, profile: &ServerProfile) -> Result<(), ApiError> {
         let conn = store::open(&self.db_path).map_err(db_err)?;
-        store::servers::save_server(&conn, profile).map_err(db_err)
+        store::servers::save_server(&conn, profile).map_err(db_err)?;
+        // Whatever the last verdict said, it was about the credential that used
+        // to be here. Only the next round trip can say anything about this one.
+        let _ = store::auth_state::clear(&conn, &profile.id);
+        Ok(())
     }
 
     pub fn list_servers(&self) -> Result<Vec<ServerProfile>, ApiError> {
@@ -102,12 +142,21 @@ impl App {
                 |row| row.get(0),
             )
             .unwrap_or(None);
+        // Read before the row goes away, and compare: the active pick belongs to
+        // the user, and deleting a server they were *not* browsing must not send
+        // them back to the server picker.
+        let was_active = store::app_state::is_active_server(&conn, server_id).map_err(db_err)?;
         let deleted = store::servers::delete_server(&conn, server_id).map_err(db_err)?;
         if deleted {
             if let Some(url) = base_url.as_deref() {
                 crate::api::series::KomgaClient::forget(url);
             }
-            let _ = store::app_state::clear_active_server(&conn);
+            if was_active {
+                let _ = store::app_state::clear_active_server(&conn);
+            }
+            // A verdict about a server that no longer exists must not outlive it:
+            // the id could come back as a brand new server with a working key.
+            let _ = store::auth_state::clear(&conn, server_id);
             store::delete_server_mirror(&conn, server_id).map_err(db_err)?;
             let cache = DiskCache::new(self.cache_root()).map_err(storage_err)?;
             for file in files {
@@ -142,6 +191,94 @@ impl App {
     pub fn get_active_server(&self) -> Result<Option<String>, ApiError> {
         let conn = store::open(&self.db_path).map_err(db_err)?;
         store::app_state::get_active_server(&conn).map_err(db_err)
+    }
+
+    /// What the last credentialed contact proved about this server's key.
+    ///
+    /// `unknown` is a real answer with its own meaning — never contacted, or a
+    /// note left by a build this one cannot read — and the UI has to render it
+    /// as "ask the server", not as a failure the user has to fix.
+    pub fn auth_state(&self, server_id: &str) -> Result<AuthStateDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let (state, at) = store::auth_state::get(&conn, server_id).map_err(db_err)?;
+        Ok(AuthStateDto {
+            server_id: server_id.to_string(),
+            state: state.as_str().to_string(),
+            at: at.unwrap_or_default(),
+        })
+    }
+
+    /// Everything the client can truthfully say about itself, in one read.
+    ///
+    /// This is the aggregate the release-hardening checklist is written
+    /// against: one place a gate can ask "what is the schema, is the file
+    /// intact, what does each server's sync think it owes, how many writes are
+    /// queued, how many bytes are in each of the three cache tiers, what is the
+    /// queue doing, did anything log an error" — and get numbers that also have
+    /// to be checkable from outside with `sqlite3` and `find`. A diagnostic that
+    /// cannot be corroborated is just a print statement with a struct around it.
+    ///
+    /// It reports and never repairs: no sweep, no reconcile, no eviction and no
+    /// credential write happens here, so asking the question cannot change the
+    /// answer. Every field is produced by the same per-area read the UI already
+    /// uses, which is what keeps the two from ever disagreeing.
+    pub fn diagnostics_snapshot(&self, server_id: &str) -> Result<DiagnosticsDto, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let db = crate::diagnostics::snapshot::db_health(&conn).map_err(db_err)?;
+        let (state, at) = store::auth_state::get(&conn, server_id).map_err(db_err)?;
+        let queued = crate::diagnostics::snapshot::count_rows_if_table(&conn, "pending_mutations")
+            .map_err(db_err)?
+            .unwrap_or_default();
+        let rows = downloads::store::list(&conn, Some(server_id)).map_err(download_err)?;
+        let log_stats = crate::diagnostics::log::stats();
+        drop(conn);
+
+        // Grouped from the listing the queue screen already uses, so the two can
+        // never report different totals for the same queue.
+        let mut queue: Vec<QueueStateCountDto> = Vec::new();
+        for row in rows {
+            let slot = match queue.iter_mut().find(|entry| entry.state == row.state) {
+                Some(slot) => slot,
+                None => {
+                    queue.push(QueueStateCountDto {
+                        state: row.state.clone(),
+                        ..Default::default()
+                    });
+                    queue.last_mut().expect("just pushed")
+                }
+            };
+            slot.books += 1;
+            slot.pages_done += row.pages_done;
+            slot.pages_total += row.pages_total;
+            slot.bytes_done += row.bytes_done;
+            slot.bytes_total += row.bytes_total;
+        }
+        queue.sort_by(|a, b| a.state.cmp(&b.state));
+
+        Ok(DiagnosticsDto {
+            server_id: server_id.to_string(),
+            db,
+            auth: AuthStateDto {
+                server_id: server_id.to_string(),
+                state: state.as_str().to_string(),
+                at: at.unwrap_or_default(),
+            },
+            outbox_queued_rows: queued,
+            sync: self.sync_states(server_id)?,
+            outbox: self.outbox_status(server_id)?,
+            cache: self.reader_cache_stats()?,
+            storage: self.download_storage(0)?,
+            queue,
+            policy: ApiPolicyDto {
+                contract_version: crate::api::contract::CONTRACT_VERSION.to_string(),
+                snapshot_version: crate::api::contract::SNAPSHOT_VERSION.to_string(),
+                min_server_version: {
+                    let (major, minor, patch) = crate::api::contract::MIN_SERVER_VERSION;
+                    format!("{major}.{minor}.{patch}")
+                },
+            },
+            log: log_stats,
+        })
     }
 
     // MARK: - Connection probe (acceptance chain: 添加 → 登录 → 验证 → 信息)
@@ -203,7 +340,9 @@ impl App {
         fetcher: &F,
         server_id: &str,
     ) -> Result<BootstrapSummary, ApiError> {
-        let page = sync::fetch_bootstrap_page(fetcher).await?;
+        let fetched = sync::fetch_bootstrap_page(fetcher).await;
+        self.note_credential(server_id, &fetched);
+        let page = fetched?;
         let conn = store::open(&self.db_path).map_err(db_err)?;
         sync::bootstrap_page_to_store(&conn, server_id, &page)
     }
@@ -431,7 +570,9 @@ impl App {
         fetcher: &F,
         server_id: &str,
     ) -> Result<FullSyncSummary, ApiError> {
-        sync::full_sync(&self.db_path, server_id, fetcher).await
+        let result = sync::full_sync(&self.db_path, server_id, fetcher).await;
+        self.note_credential(server_id, &result);
+        result
     }
 
     // MARK: - Stage 5: sync engine (resumable bootstrap + reconcile)
@@ -451,8 +592,9 @@ impl App {
         } else {
             sync::StartAt::Resume
         };
-        let summary = sync::full_sync_from(&self.db_path, &server_id, &client, start).await?;
-        Ok(summary)
+        let result = sync::full_sync_from(&self.db_path, &server_id, &client, start).await;
+        self.note_credential(&server_id, &result);
+        result
     }
 
     /// Reconcile Sync (live server): id sweep + delete propagation. Safe to
@@ -475,13 +617,18 @@ impl App {
         server_id: &str,
         trigger: &str,
     ) -> Result<ReconcileSummary, ApiError> {
-        let summary = sync::reconcile::reconcile(
+        let result = sync::reconcile::reconcile(
             &self.db_path,
             server_id,
             fetcher,
             ReconcileTrigger::parse(trigger),
         )
-        .await?;
+        .await;
+        // The highest-value of the four sites: every trigger — launch, foreground,
+        // network return, SSE reconnect, pull to refresh — ends up here, so this
+        // is how a key that died between sessions becomes visible on its own.
+        self.note_credential(server_id, &result);
+        let summary = result?;
         // Delete propagation contract: covers of pruned entities go too.
         self.remove_cover_files(&summary.orphaned_covers);
         Ok(summary)
@@ -921,6 +1068,20 @@ impl App {
         let summary = sync::upload::upload_outbox(&conn, server_id, writer, now)
             .await
             .map_err(db_err)?;
+        // A 401 in mid-queue ends the run as a *status*, not as an error, so the
+        // credential verdict has to be read off the summary. A run that
+        // considered nothing sent no request and therefore proves nothing —
+        // saying "your key is fine" because the queue was empty would be the
+        // same lie in the other direction.
+        match (summary.status, summary.considered) {
+            (sync::upload::RunStatus::BlockedAuthentication, _) => {
+                self.write_credential(server_id, store::auth_state::CredentialVerdict::Rejected);
+            }
+            (sync::upload::RunStatus::Complete, considered) if considered > 0 => {
+                self.write_credential(server_id, store::auth_state::CredentialVerdict::Accepted);
+            }
+            _ => {}
+        }
         Ok(UploadOutcomeDto::of(
             &summary,
             outbox_status_of(&conn, server_id, now)?,
@@ -1666,6 +1827,62 @@ pub struct ConnectionResult {
     pub libraries: Vec<Library>,
     /// e.g. `libraries:2`, `unknown-version`, `newer-than-snapshot:1.27.0`.
     pub capabilities: Vec<String>,
+}
+
+/// What the credential for one server is currently believed to be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStateDto {
+    pub server_id: String,
+    /// `valid` | `expired` | `unknown`.
+    pub state: String,
+    /// When that was proved, RFC 3339; empty for `unknown`.
+    pub at: String,
+}
+
+/// The queue grouped by the state the user gave it, summed across their books.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueStateCountDto {
+    /// `queued` | `downloading` | `paused` | `completed` | `failed`.
+    pub state: String,
+    pub books: i64,
+    pub pages_done: i64,
+    pub pages_total: i64,
+    pub bytes_done: i64,
+    /// 0 whenever no book in this state ever learned its own size.
+    pub bytes_total: i64,
+}
+
+/// What this build can talk to. Static: it says nothing about the server that
+/// is currently answering, which is what `sync` rows and `probe` are for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiPolicyDto {
+    pub contract_version: String,
+    pub snapshot_version: String,
+    pub min_server_version: String,
+}
+
+/// One read of everything the client knows about itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsDto {
+    pub server_id: String,
+    /// The store's own account: pragmas, integrity verdict, per-table rows.
+    pub db: crate::diagnostics::DbHealth,
+    pub auth: AuthStateDto,
+    /// Rows in `pending_mutations` for any server, counted straight from SQL.
+    /// Reported beside `outbox`, which is per-server: the two disagree by
+    /// design when a second server has queued writes.
+    pub outbox_queued_rows: i64,
+    pub sync: Vec<EntitySyncState>,
+    pub outbox: OutboxStatusDto,
+    pub cache: CacheStatsDto,
+    pub storage: StorageDto,
+    pub queue: Vec<QueueStateCountDto>,
+    pub policy: ApiPolicyDto,
+    pub log: crate::diagnostics::LogStats,
 }
 
 // MARK: - Stage 6 result types (Outbox + pollable SSE)
@@ -3305,7 +3522,8 @@ pub struct DownloadPumpDto {
     pub queue_active: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorageBookDto {
     pub server_id: String,
     pub book_id: String,
@@ -3321,7 +3539,8 @@ pub struct StorageBookDto {
     pub on_disk: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorageDto {
     pub download_bytes: i64,
     pub download_page_count: i64,
@@ -3472,7 +3691,8 @@ pub struct ReaderWindowDto {
 }
 
 /// Live cache occupancy, tier by tier.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CacheStatsDto {
     pub page_bytes: i64,
     pub prefetch_bytes: i64,
@@ -3756,6 +3976,224 @@ mod tests {
         ) -> Result<crate::model::series::SeriesPage, ApiError> {
             Ok(self.0.clone())
         }
+    }
+
+    /// The server answered 401. The only failure that says something about a key.
+    struct RejectingSeriesFetcher;
+
+    impl crate::sync::SeriesFetcher for RejectingSeriesFetcher {
+        async fn series_page(
+            &self,
+            _request: &crate::api::series::PageRequest,
+        ) -> Result<crate::model::series::SeriesPage, ApiError> {
+            Err(ApiError::Authentication)
+        }
+    }
+
+    /// No route. Says nothing about a key, which is the whole point of the test
+    /// that uses it.
+    struct UnreachableSeriesFetcher;
+
+    impl crate::sync::SeriesFetcher for UnreachableSeriesFetcher {
+        async fn series_page(
+            &self,
+            _request: &crate::api::series::PageRequest,
+        ) -> Result<crate::model::series::SeriesPage, ApiError> {
+            Err(ApiError::Network)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rejected_key_is_reported_expired_until_a_later_success_clears_it() {
+        let db = temp_db();
+        let app = App::new(&db);
+
+        // Never contacted: `unknown`, and the UI has to be able to tell that
+        // apart from a problem.
+        assert_eq!(app.auth_state("server-1").unwrap().state, "unknown");
+
+        let rejected = app
+            .bootstrap_with(&RejectingSeriesFetcher, "server-1")
+            .await;
+        assert!(matches!(rejected, Err(ApiError::Authentication)));
+        let expired = app.auth_state("server-1").unwrap();
+        assert_eq!(expired.state, "expired");
+        assert!(
+            !expired.at.is_empty(),
+            "an expiry with no moment is a banner the user cannot reason about"
+        );
+
+        // The user fixes the key. The same call, now accepted, is what clears it.
+        let json =
+            include_str!("../../../../specs/contracts/fixtures/initial-sync/series-page.json");
+        let page: crate::model::series::SeriesPage =
+            serde_json::from_str(json).expect("shared fixture must decode");
+        let accepted = app
+            .bootstrap_with(&FakeSeriesFetcher(page), "server-1")
+            .await;
+        assert!(accepted.is_ok(), "{accepted:?}");
+        let valid = app.auth_state("server-1").unwrap();
+        assert_eq!(valid.state, "valid");
+        assert_eq!(valid.server_id, "server-1");
+        cleanup_temp(&db);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_says_nothing_about_the_key() {
+        let db = temp_db();
+        let app = App::new(&db);
+
+        let unreachable = app
+            .bootstrap_with(&UnreachableSeriesFetcher, "server-1")
+            .await;
+        assert!(matches!(unreachable, Err(ApiError::Network)));
+        // A client that blamed the password for every lost tunnel would be
+        // worse than one that never notices an expiry.
+        assert_eq!(app.auth_state("server-1").unwrap().state, "unknown");
+
+        // And once a real verdict exists, a network failure must not spend it.
+        app.bootstrap_with(&RejectingSeriesFetcher, "server-1")
+            .await
+            .unwrap_err();
+        assert_eq!(app.auth_state("server-1").unwrap().state, "expired");
+        app.bootstrap_with(&UnreachableSeriesFetcher, "server-1")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            app.auth_state("server-1").unwrap().state,
+            "expired",
+            "an unreachable server overwrote a verdict the server itself gave"
+        );
+        cleanup_temp(&db);
+    }
+
+    #[tokio::test]
+    async fn the_diagnostics_snapshot_agrees_with_the_sql_underneath_it() {
+        let db = temp_db();
+        let app = App::new(&db);
+        // One run that touches most of the areas at once: series, books, covers
+        // on disk, sync_state rows and log lines.
+        app.bootstrap_demo("gate".to_string()).await.unwrap();
+        app.set_read_progress("gate", "berserk-01", 3, false)
+            .unwrap();
+        let conn = store::open(&db).unwrap();
+        conn.execute(
+            "INSERT INTO downloads (server_id, book_id, manifest_path, pages_total, pages_done,
+                                    bytes_total, bytes_done, state)
+             VALUES ('gate','berserk-01',NULL,120,40,1200,400,'queued'),
+                    ('gate','berserk-02',NULL,60,0,0,0,'failed')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let snap = app.diagnostics_snapshot("gate").unwrap();
+        let conn = store::open(&db).unwrap();
+        let count =
+            |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap() };
+
+        assert_eq!(snap.db.integrity, "ok");
+        assert_eq!(
+            snap.db.schema_version,
+            count("PRAGMA user_version"),
+            "the snapshot reported a schema the file does not have"
+        );
+        for table in [
+            "series",
+            "books",
+            "sync_state",
+            "pending_mutations",
+            "downloads",
+        ] {
+            let reported = snap
+                .db
+                .tables
+                .iter()
+                .find(|entry| entry.table == table)
+                .unwrap_or_else(|| panic!("{table} missing from the table report"))
+                .rows;
+            assert_eq!(
+                reported,
+                count(&format!("SELECT count(*) FROM {table}")),
+                "{table}: the snapshot and the table disagree"
+            );
+        }
+
+        // The per-server badge and the all-server total, read off the same rows.
+        let pending = count("SELECT count(*) FROM pending_mutations WHERE state = 'pending'");
+        assert_eq!(snap.outbox.pending, pending);
+        assert_eq!(snap.outbox_queued_rows, pending);
+        assert_eq!(snap.outbox.server_id, "gate");
+
+        // The queue grouping, against the two rows written above.
+        assert_eq!(snap.queue.len(), 2);
+        let queued = snap.queue.iter().find(|e| e.state == "queued").unwrap();
+        assert_eq!(
+            (queued.books, queued.pages_total, queued.pages_done),
+            (1, 120, 40)
+        );
+        assert_eq!((queued.bytes_total, queued.bytes_done), (1200, 400));
+        assert_eq!(
+            count("SELECT count(*) FROM downloads WHERE state = 'failed'"),
+            snap.queue
+                .iter()
+                .find(|e| e.state == "failed")
+                .unwrap()
+                .books
+        );
+
+        // The second witness for the byte figure is the filesystem itself, not
+        // another number the snapshot produced.
+        let paths: Vec<String> = conn
+            .prepare("SELECT local_path FROM thumbnails WHERE server_id = 'gate'")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        let on_disk: i64 = paths
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok())
+            .map(|meta| meta.len() as i64)
+            .sum();
+        assert!(!paths.is_empty(), "the demo wrote no covers to walk");
+        assert_eq!(snap.storage.cache_thumbnail_bytes, on_disk);
+
+        // An offline demo run used no credential, so it may not claim one works.
+        assert_eq!(snap.auth.state, "unknown");
+        assert_eq!(snap.policy.snapshot_version, "1.26.3");
+        assert!(snap.log.installed);
+        assert!(snap.log.retained > 0);
+        assert_eq!(snap.log.errors, 0);
+        assert!(snap.sync.iter().any(|row| row.entity_type == "full"));
+        drop(conn);
+        cleanup_temp(&db);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_server_you_were_not_browsing_keeps_the_pick_and_only_loses_its_own_note() {
+        let db = temp_db();
+        let app = App::new(&db);
+        for id in ["home", "work"] {
+            let mut profile = ServerProfile::new(id, "https://komga.example.com", AuthType::ApiKey);
+            profile.id = id.into();
+            app.save_server(&profile).unwrap();
+        }
+        app.set_active_server("home").unwrap();
+        for id in ["home", "work"] {
+            app.bootstrap_with(&RejectingSeriesFetcher, id)
+                .await
+                .unwrap_err();
+            assert_eq!(app.auth_state(id).unwrap().state, "expired");
+        }
+
+        assert!(app.delete_server("work").unwrap());
+        // The shelf the user was on is still theirs.
+        assert_eq!(app.get_active_server().unwrap().as_deref(), Some("home"));
+        // The deleted server's verdict goes with it; the survivor's does not.
+        assert_eq!(app.auth_state("work").unwrap().state, "unknown");
+        assert_eq!(app.auth_state("home").unwrap().state, "expired");
+        cleanup_temp(&db);
     }
 
     #[tokio::test]
