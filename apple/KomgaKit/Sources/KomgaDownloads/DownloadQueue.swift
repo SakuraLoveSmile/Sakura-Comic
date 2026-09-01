@@ -554,6 +554,55 @@ public extension DownloadQueue {
     }
 }
 
+/// Who is deriving. The state write is recorded as `settle` either way, because
+/// the question is not who is asking but who has looked at the disk: only the
+/// sweep has, and only it may take a completion back. (Mirror of Rust
+/// `downloads/queue.rs`'s `SettleMode`.)
+public enum SettleMode: Sendable, Equatable {
+    /// A download pass, settling rows it wrote itself.
+    case pass
+    /// The reconciliation sweep, which has just read every file.
+    case sweep
+}
+
+public extension DownloadQueue {
+    /// The state a book settles into, derived from its page counts and from who
+    /// looked. Never incremented and never taken from a stored counter: a row
+    /// lost to a half-applied transaction would otherwise make the book
+    /// permanently uncompletable, and the number the UI shows would stop
+    /// meaning anything. (Mirror of Rust `queue::settle_state`.)
+    static func settleState(
+        _ state: String,
+        pagesTotal: Int,
+        complete: Int,
+        failed: Int,
+        mode: SettleMode
+    ) -> String {
+        if state == BookState.paused.rawValue {
+            // A pause is the user's, and no derivation may overwrite it.
+            return state
+        }
+        if state == BookState.completed.rawValue && mode != .sweep {
+            // A completed book does not un-complete itself because a pass noticed
+            // a row: it has not looked at the disk. The sweep has, and for it
+            // completion is not sticky — without that exception a downloaded page
+            // that later fails the container check would leave the book labelled
+            // complete, and a completed book is not the queue's to run, so it
+            // could never be repaired. See `states.json#rules.healReopens`.
+            return state
+        }
+        if pagesTotal == 0 || complete >= pagesTotal {
+            return BookState.completed.rawValue
+        }
+        let summed = complete.addingReportingOverflow(failed)
+        let attempted = summed.overflow ? Int.max : summed.partialValue
+        if attempted >= pagesTotal {
+            return BookState.failed.rawValue
+        }
+        return BookState.waiting.rawValue
+    }
+}
+
 /// RFC 3339 in, `Date` out — the format both platforms store timestamps in.
 ///
 /// The formatter is built per call rather than cached: `DateFormatter` is not

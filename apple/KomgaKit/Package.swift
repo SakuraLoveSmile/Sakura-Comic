@@ -35,9 +35,13 @@ let package = Package(
             dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaReader"]
         ),
         // Stage 9's offline download system, ported. The queue policy is pure and
-        // depends on nothing; the store, tree and engine arrive with the rest of
-        // the port and will pull in KomgaStore / KomgaAPI / KomgaReader.
-        .target(name: "KomgaDownloads"),
+        // depends on nothing; the store speaks GRDB directly (mirror of
+        // `downloads/store.rs`), the tree is filesystem-only, and the engine will
+        // pull in KomgaAPI / KomgaReader when it lands.
+        .target(
+            name: "KomgaDownloads",
+            dependencies: [.product(name: "GRDB", package: "GRDB.swift")]
+        ),
         .testTarget(name: "KomgaKitTests", dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaReader", "KomgaDiagnostics", "KomgaDownloads"])
     ]
 )
