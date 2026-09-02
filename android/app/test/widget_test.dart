@@ -32,14 +32,28 @@ void main() {
     expect(find.text('Berserk'), findsOneWidget);
   });
 
-  testWidgets('rust status banner renders when provided', (tester) async {
+  testWidgets('core status banner appears only for a degraded (stub) core',
+      (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: SeriesGridScreen(
-        rustStatus: 'Rust core FFI 已连接',
+        rustStatus: 'Rust core 未加载（Stub 模式）',
       ),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Rust core FFI 已连接'), findsOneWidget);
+    expect(find.text('Rust core 未加载（Stub 模式）'), findsOneWidget);
+  });
+
+  testWidgets('no core status banner when the real core is healthy',
+      (tester) async {
+    // `rustStatus == null` is the healthy-real-core contract from
+    // `createServices` in main.dart: the daily shelf has no developer header.
+    await tester.pumpWidget(const MaterialApp(
+      home: SeriesGridScreen(
+        rustStatus: null,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('core-status-banner')), findsNothing);
   });
 
   testWidgets('grid with manager exposes the servers entry', (tester) async {

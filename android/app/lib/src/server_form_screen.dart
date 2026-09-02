@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'error_presentation.dart';
 import 'rust/ffi/application.dart';
 import 'rust/model/server_profile.dart';
 import 'server_manager.dart';
@@ -152,10 +153,7 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
           if (_testError != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '连接失败：$_testError',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+              child: _TestErrorView(error: _testError!),
             ),
           if (_isEdit && _tested == null && _testError == null)
             const Padding(
@@ -197,6 +195,42 @@ class _TestResultView extends StatelessWidget {
         title: Text('Komga $version · ${result.libraries.length} 个库'),
         subtitle: capabilities.isEmpty ? null : Text(capabilities),
       ),
+    );
+  }
+}
+
+/// A failed connection test, in the user's words: headline from the shared
+/// code map ([FailurePresentation]); the raw text is demoted to a detail line,
+/// never the headline.
+class _TestErrorView extends StatelessWidget {
+  const _TestErrorView({required this.error});
+
+  final Object error;
+
+  @override
+  Widget build(BuildContext context) {
+    final view = FailurePresentation.from(error);
+    final theme = Theme.of(context);
+    final errorStyle = theme.textTheme.bodyMedium!
+        .copyWith(color: theme.colorScheme.error);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          view.headline,
+          key: const ValueKey('test-error-headline'),
+          style: errorStyle,
+        ),
+        if (view.detail.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            view.detail,
+            key: const ValueKey('test-error-detail'),
+            style: theme.textTheme.bodySmall!
+                .copyWith(color: theme.colorScheme.error),
+          ),
+        ],
+      ],
     );
   }
 }

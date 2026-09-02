@@ -62,8 +62,17 @@ bash scripts/verify.sh
 # 2. FFI 接线（一次性；codegen 2.13 + cargo-ndk 4，生成绑定 + 三 ABI jniLibs）
 bash scripts/frb_wire.sh
 
-# 3. Android 模拟器/真机运行（需先完成步骤 2，否则 UI 回退 Stub 模式）
+# 3. Android 模拟器/真机运行（需先完成步骤 2，否则 UI 回退 Stub 模式并以横幅告知）
 cd android/app && flutter build apk --debug && flutter install
+# 正式/日常驱动包（自签 release；一次性：bash scripts/android_release_key.sh）
+bash scripts/android_release_key.sh
+cd android/app && flutter build apk --release --split-per-abi
+
+# Android 打包身份（首次安装即定死，改它 = 卸载重装 + 丢本地镜像与下载）：
+#   applicationId / namespace    dev.sakurasep.comic   (android/app/android/app/build.gradle.kts)
+#   Kotlin 包 + auth_store 通道  dev.sakurasep.comic   (MainActivity.kt ↔ lib/src/auth_store.dart)
+#   release 签名                 android/app/android/keystore/comic-release.jks（自签，git-忽略）
+#   key.properties               同目录，gradle 读取；keytool 生成器见 scripts/android_release_key.sh
 
 # 4. 真实服务器垂直切片验收（phase0_smoke：认证 → 前 10 个 Series → SQLite → 封面缓存）
 export KOMGA_BASE_URL=http://192.168.1.10:25600

@@ -1,4 +1,4 @@
-package com.example.comic.comic_app
+package dev.sakurasep.comic
 
 import android.content.Context
 import android.os.Build
@@ -21,7 +21,7 @@ import javax.crypto.spec.GCMParameterSpec
  * never in the app database (mirrors `ServerProfile.credential_ref` on the
  * Apple side, which points into Keychain).
  *
- * Methods (channel "com.example.comic/auth_store"):
+ * Methods (channel "dev.sakurasep.comic/auth_store"):
  *   save(ref: String, secret: String) -> bool
  *   read(ref: String) -> String?
  *   delete(ref: String) -> bool
@@ -155,7 +155,7 @@ class MainActivity : FlutterActivity() {
     private val store: AuthStore by lazy { AuthStore(applicationContext) }
 
     private companion object {
-        const val CHANNEL = "com.example.comic/auth_store"
+        const val CHANNEL = "dev.sakurasep.comic/auth_store"
         const val READER_CHANNEL = "comic/reader"
     }
 }

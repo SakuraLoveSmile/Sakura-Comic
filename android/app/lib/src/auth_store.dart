@@ -15,7 +15,7 @@ abstract interface class SecretStore {
 class KeystoreSecretStore implements SecretStore {
   const KeystoreSecretStore();
 
-  static const MethodChannel _channel = MethodChannel('com.example.comic/auth_store');
+  static const MethodChannel _channel = MethodChannel('dev.sakurasep.comic/auth_store');
 
   @override
   Future<void> save(String ref, String secret) async {
