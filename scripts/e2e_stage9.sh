@@ -407,6 +407,9 @@ else
   LIVE_URL="$KOMGA_BASE_URL"
   SERVER_ID="live"
   BOOK="$KOMGA_BOOK_ID"
+  # Live phases authenticate with the real key, not the fixture server's:
+  # `run_phase` passes --key "$KEY", so this must be swapped before the phases.
+  KEY="$KOMGA_API_KEY"
   PAGES=$(curl -s -H "X-API-Key: $KOMGA_API_KEY" \
     "$LIVE_URL/api/v1/books/$BOOK/pages" | grep -o '"number"' | wc -l | tr -d ' ')
   check_ge "the live book has pages to download" "$PAGES" "20"

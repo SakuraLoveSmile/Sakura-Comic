@@ -10,6 +10,13 @@
 //! After the sync phase the query battery runs entirely against SQLite —
 //! no request is made, which is exactly the "断开 Komga 网络" acceptance.
 //!
+//! The battery is DATA-ADAPTIVE on purpose: its assertions are mirror
+//! consistency checks ("the query layer serves exactly what the mirror
+//! holds"), not content assumptions about a particular library. A real
+//! server with no tags, no collections and no readlists must pass as long as
+//! the mirror and the query layer agree; only --fixture keeps a few
+//! fixture-content probes (the demo library is fixed and known).
+//!
 //! Usage:
 //!   cargo run --bin stage4_smoke -- --fixture --db /tmp/comic-stage4.sqlite --server-id demo
 //!   cargo run --bin stage4_smoke -- --base-url $KOMGA_BASE_URL --api-key $KOMGA_API_KEY \
@@ -104,13 +111,26 @@ fn main() {
             kind = "live full sync";
             let base = base_url.expect("--fixture or --base-url required unless --offline");
             let key = api_key.expect("--api-key required with --base-url");
-            match poll(async { app.full_sync(server_id.clone(), base, key).await }) {
+            match poll(async { app.full_sync(server_id.clone(), base.clone(), key.clone()).await }) {
                 Ok(s) => report = format!(
                     "series={} books={} collections={} readlists={} read_progress={} (pages: {} series / {} books)",
                     s.series, s.books, s.collections, s.readlists, s.read_progress, s.series_pages, s.book_pages
                 ),
                 Err(e) => {
                     println!("== sync (live full sync) ==\n  FAILED: {e}");
+                    std::process::exit(1);
+                }
+            }
+            // A live run mirrors what the app does after sync: covers are a
+            // backfill step, not part of FullSync (fixture demo seeds its own
+            // covers, so this only runs for a real server).
+            match poll(async {
+                app.ensure_covers(server_id.clone(), base.clone(), key.clone())
+                    .await
+            }) {
+                Ok(n) => println!("  covers backfilled: {n}"),
+                Err(e) => {
+                    println!("== cover backfill (live) ==\n  FAILED: {e}");
                     std::process::exit(1);
                 }
             }
@@ -224,13 +244,38 @@ fn main() {
         &format!("{} items", wall.items.len()),
     );
 
-    // Search (FTS5).
+    // Search (FTS5). Data-adaptive probes: the fixture library is fixed and
+    // known (Berserk / One Piece / Solo Leveling), a live library is whatever
+    // the server actually holds — probe with names the mirror itself contains
+    // so the check works for a Chinese-named or tag-less library too.
     section("本地搜索 (FTS5)");
-    for (term, expect) in [("berserk", 1), ("one", 1), ("piece", 1)] {
+    let mut probes: Vec<String> = Vec::new();
+    if fixture {
+        probes.extend(["berserk", "one", "piece"].iter().map(|s| s.to_string()));
+    }
+    for s in wall.items.iter().take(3) {
+        // A safe FTS query derived from the name: every non-alphanumeric char
+        // becomes a separator. Raw names are never safe as probes — FTS5 gives
+        // '+', '-', ':', '"', '*' etc. query meanings. The index tokenizes the
+        // same runs, so an AND query over them matches the row.
+        let term = s
+            .name
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+            .collect::<String>();
+        let term = term.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !term.is_empty() {
+            probes.push(term);
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    probes.retain(|p| seen.insert(p.clone()));
+    probes.truncate(4);
+    for term in &probes {
         let page = app
             .query_series(
                 &server_id,
-                Some(term.into()),
+                Some(term.clone()),
                 None,
                 None,
                 None,
@@ -244,70 +289,140 @@ fn main() {
         println!("  search \"{term}\" → {} hits", page.total);
         check(
             &format!("search \"{term}\""),
-            page.total >= expect,
-            &format!("expected ≥ {expect}, got {}", page.total),
+            page.total >= 1,
+            &format!("expected ≥ 1, got {}", page.total),
         );
     }
 
+    // Filter options, read once and reused by the three filter probes and the
+    // summary line below.
+    let options = app
+        .filter_options(&server_id)
+        .unwrap_or_else(|e| panic!("filter_options: {e}"));
+
     // Filters.
     section("筛选: Library / Tag / Genre / Status");
-    let tag_page = app
-        .query_series(
-            &server_id,
-            None,
-            None,
-            None,
-            Some("Seinen".into()),
-            None,
-            "name".into(),
-            true,
-            PAGE,
-            0,
-        )
-        .unwrap();
+    if let Some(tag) = options.tags.first() {
+        let tag_page = app
+            .query_series(
+                &server_id,
+                None,
+                None,
+                None,
+                Some(tag.clone()),
+                None,
+                "name".into(),
+                true,
+                PAGE,
+                0,
+            )
+            .unwrap();
+        check(
+            "tag filter (first available tag)",
+            tag_page.total >= 1,
+            &format!("tag \"{tag}\" → {}", tag_page.total),
+        );
+    } else {
+        // A library with no tags is not a defect: the mirror says so, and the
+        // query must simply return nothing for any tag.
+        let tag_page = app
+            .query_series(
+                &server_id,
+                None,
+                None,
+                None,
+                Some("Seinen".into()),
+                None,
+                "name".into(),
+                true,
+                PAGE,
+                0,
+            )
+            .unwrap();
+        check(
+            "tag filter (no tags on this server)",
+            tag_page.total == 0,
+            &format!("{} hits for a tag the mirror lacks", tag_page.total),
+        );
+    }
+    if let Some(genre) = options.genres.first() {
+        let genre_page = app
+            .query_series(
+                &server_id,
+                None,
+                None,
+                None,
+                None,
+                Some(genre.clone()),
+                "name".into(),
+                true,
+                PAGE,
+                0,
+            )
+            .unwrap();
+        println!("  genre '{genre}' → {} series", genre_page.total);
+        check(
+            "genre filter (first available genre)",
+            genre_page.total >= 1,
+            &format!("got {}", genre_page.total),
+        );
+    } else {
+        let genre_page = app
+            .query_series(
+                &server_id,
+                None,
+                None,
+                None,
+                None,
+                Some("Action".into()),
+                "name".into(),
+                true,
+                PAGE,
+                0,
+            )
+            .unwrap();
+        check(
+            "genre filter (no genres on this server)",
+            genre_page.total == 0,
+            &format!("{} hits for a genre the mirror lacks", genre_page.total),
+        );
+    }
+    // Statuses partition the wall: every series has exactly one status, so the
+    // per-status counts must add up to the wall total (works for any library).
+    let mut status_total: i64 = 0;
+    let mut status_parts: Vec<(String, i64)> = Vec::new();
+    for st in &options.statuses {
+        let page = app
+            .query_series(
+                &server_id,
+                None,
+                None,
+                Some(st.clone()),
+                None,
+                None,
+                "name".into(),
+                true,
+                PAGE,
+                0,
+            )
+            .unwrap();
+        status_total += page.total;
+        status_parts.push((st.clone(), page.total));
+    }
+    let status_partition_ok = if options.statuses.is_empty() {
+        wall.total == 0
+    } else {
+        status_total == wall.total && status_parts.iter().any(|(_, n)| *n >= 1)
+    };
     check(
-        "tag filter Seinen",
-        tag_page.total == 1,
-        &format!("got {}", tag_page.total),
-    );
-    let genre_page = app
-        .query_series(
-            &server_id,
-            None,
-            None,
-            None,
-            None,
-            Some("Action".into()),
-            "name".into(),
-            true,
-            PAGE,
-            0,
-        )
-        .unwrap();
-    println!("  genre 'Action' → {} series", genre_page.total);
-    check(
-        "genre filter Action",
-        genre_page.total >= 1,
-        &format!("got {}", genre_page.total),
-    );
-    let status_page = app
-        .query_series(
-            &server_id,
-            None,
-            None,
-            Some("ENDED".into()),
-            None,
-            None,
-            "name".into(),
-            true,
-            PAGE,
-            0,
-        )
-        .unwrap();
-    check(
-        "status filter ENDED",
-        status_page.total >= 1,
-        &format!("got {}", status_page.total),
+        "status filter partitions the wall",
+        status_partition_ok,
+        &format!(
+            "{} series across {} statuses (wall {})",
+            status_total,
+            options.statuses.len(),
+            wall.total
+        ),
     );
 
     // Sort + pagination.
@@ -499,13 +614,19 @@ fn main() {
             );
             check(
                 "book tags",
-                !detail.tags.is_empty() || books.total == 0,
+                // A real server may legitimately assign no book tags: the
+                // mirror faithfully carries what the server gave. The fixture
+                // library is fixed (it has tags), so the fixture leg keeps the
+                // strict shape and this only tolerates a tag-less live server.
+                !detail.tags.is_empty() || !fixture,
                 &format!("{:?}", detail.tags),
             );
         }
     }
 
-    // Continue reading.
+    // Continue reading. Data-adaptive: the shelf is derived from the mirror's
+    // read_progress rows (completed=0, page>0); an empty shelf is only wrong
+    // when the mirror has rows that should put a book on it.
     section("Continue Reading");
     let shelf = app
         .continue_reading(&server_id, 10)
@@ -520,10 +641,26 @@ fn main() {
             row.progress_pct.unwrap_or(0)
         );
     }
+    let in_progress_rows: i64 = {
+        let conn = komga_core::store::open(&db).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM read_progress
+             WHERE server_id = ?1 AND completed = 0 AND page IS NOT NULL AND page > 0",
+            rusqlite::params![server_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    };
+    let shelf_consistent =
+        (!shelf.is_empty() && in_progress_rows >= 1) || (shelf.is_empty() && in_progress_rows == 0);
     check(
         "continue reading shelf",
-        !shelf.is_empty(),
-        &format!("{} entries", shelf.len()),
+        shelf_consistent,
+        &format!(
+            "{} entries (mirror has {} in-progress rows)",
+            shelf.len(),
+            in_progress_rows
+        ),
     );
     // 本地标记阅读状态 → shelf 立即变化（本地优先，无网络）。
     if let Some(s) = &first_series {
@@ -556,19 +693,42 @@ fn main() {
                 !after_read.iter().any(|r| r.book_id == fresh.remote_id),
                 &format!("{} no longer on the shelf", fresh.title),
             );
-            let outbox: i64 = {
+            // Stage 6 contract (Mutation 合并): a device only ever uploads the
+            // user's LAST statement per book. The two writes above hit the same
+            // book, so coalescing must leave exactly one pending row — the
+            // MARK_READ — and no READ_PROGRESS for it. (!= 2: pre-Stage-6
+            // baselines counted both rows; the merge made that impossible.)
+            let rows: Vec<(String, String)> = {
                 let conn = komga_core::store::open(&db).unwrap();
-                conn.query_row(
-                    "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ?1",
-                    rusqlite::params![server_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0)
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT mutation_type, entity_id FROM pending_mutations
+                         WHERE server_id = ?1 AND entity_id = ?2",
+                    )
+                    .unwrap();
+                let iter = stmt
+                    .query_map(rusqlite::params![server_id, fresh.remote_id], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
+                    .unwrap();
+                iter.collect::<rusqlite::Result<Vec<_>>>().unwrap()
             };
             check(
                 "mutation outbox rows written",
-                outbox >= 2,
-                &format!("{outbox} pending"),
+                !rows.is_empty(),
+                &format!("{} pending for {}", rows.len(), fresh.remote_id),
+            );
+            check(
+                "outbox keeps the user's last statement per book",
+                rows.len() == 1 && rows[0].0 == "MARK_READ",
+                &format!(
+                    "{} rows: {}",
+                    rows.len(),
+                    rows.iter()
+                        .map(|(t, _)| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
             );
         }
     }
@@ -581,10 +741,25 @@ fn main() {
     for c in &collections.items {
         println!("  {} ({} total)", c.name, collections.total);
     }
+    // Mirror consistency, not content presence: a real server with no
+    // collections must pass (0 == 0), a fixture with two must serve both.
+    let collection_rows: i64 = {
+        let conn = komga_core::store::open(&db).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM collections WHERE server_id = ?1",
+            rusqlite::params![server_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    };
     check(
         "collections list",
-        !collections.items.is_empty(),
-        &format!("{} items", collections.items.len()),
+        collections.total == collection_rows && collections.items.len() as i64 == collection_rows,
+        &format!(
+            "{} listed vs {} rows",
+            collections.items.len(),
+            collection_rows
+        ),
     );
     if let Some(col) = collections.items.first() {
         let detail = app
@@ -617,10 +792,19 @@ fn main() {
     for rl in &readlists.items {
         println!("  {} — {}", rl.name, rl.summary.clone().unwrap_or_default());
     }
+    let readlist_rows: i64 = {
+        let conn = komga_core::store::open(&db).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM readlists WHERE server_id = ?1",
+            rusqlite::params![server_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    };
     check(
         "readlists list",
-        !readlists.items.is_empty(),
-        &format!("{} items", readlists.items.len()),
+        readlists.total == readlist_rows && readlists.items.len() as i64 == readlist_rows,
+        &format!("{} listed vs {} rows", readlists.items.len(), readlist_rows),
     );
     if let Some(rl) = readlists.items.first() {
         let detail = app
@@ -682,10 +866,38 @@ fn main() {
         "  tags: {:?}\n  genres: {:?}\n  statuses: {:?}",
         options.tags, options.genres, options.statuses
     );
+    // Data-adaptive like everything else: the only invariant a library must
+    // satisfy is that every mirrored series carries one of the statuses in the
+    // options (statuses are server-mandatory); tags/genres may be absent.
+    let statuses_cover_wall = options
+        .statuses
+        .iter()
+        .map(|st| {
+            app.query_series(
+                &server_id,
+                None,
+                None,
+                Some(st.clone()),
+                None,
+                None,
+                "name".into(),
+                true,
+                PAGE,
+                0,
+            )
+            .unwrap()
+            .total
+        })
+        .sum::<i64>();
     check(
-        "filter options tags",
-        !options.tags.is_empty() || wall.total == 0,
-        &format!("{} tags", options.tags.len()),
+        "filter options cover the wall",
+        statuses_cover_wall >= wall.total,
+        &format!(
+            "{} series across {} statuses (wall {})",
+            statuses_cover_wall,
+            options.statuses.len(),
+            wall.total
+        ),
     );
 
     let failures = FAILURES.load(std::sync::atomic::Ordering::SeqCst);

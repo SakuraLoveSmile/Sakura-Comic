@@ -358,10 +358,9 @@ fn phase_enqueue_pump(args: &Args) -> Smoke {
         "one file per page"
     );
     // The names are the contract's: zero-padded, extension from the container.
-    assert!(
-        files.first().is_some_and(|name| name == "0001.png"),
-        "{files:?}"
-    );
+    // The fixture serves PNG pages, a real CBZ lands JPEGs — the one thing
+    // every library must agree on is checked below against the manifest, not
+    // against a hardcoded extension.
     metric(
         "parts_left",
         root(args)
@@ -383,6 +382,19 @@ fn phase_enqueue_pump(args: &Args) -> Smoke {
         &root(args).manifest_path(&args.server, &args.book),
     )?
     .expect("a completed book has a manifest");
+    // Page 1's landed file must be exactly what the manifest recorded for
+    // page 1 (the names follow the bytes, so a real CBZ lands 0001.jpg while
+    // the fixture lands 0001.png — the manifest is the arbiter, not a
+    // hardcoded extension).
+    assert!(
+        files.first().is_some_and(|name| {
+            written
+                .pages
+                .first()
+                .is_some_and(|page| page.file_name == *name)
+        }),
+        "page-1 file does not match the manifest: {files:?}"
+    );
     let manifest_bytes: i64 = written.pages.iter().map(|page| page.size_bytes).sum();
     metric("manifest_bytes", manifest_bytes);
     metric("manifest_pages", written.pages.len());
