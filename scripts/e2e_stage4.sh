@@ -22,25 +22,38 @@ rm -rf "$(dirname "$DB")/cache"
 
 SMOKE=(cargo run --quiet --bin stage4_smoke --)
 
-echo "== 1/3 Offline fixture battery (no network) =="
-(cd "$ROOT/android/komga_core" && "${SMOKE[@]}" \
-  --fixture --db "$DB" --server-id demo)
+# Every leg below must gate the battery: a smoke that reports failures exits
+# non-zero (see stage4_smoke.rs), and this script has to fail with it instead
+# of printing "OK" on top of a broken run.
+FAILURES=0
+run_leg() { # run_leg <label> [args...]
+  local label="$1"; shift
+  echo "== $label =="
+  if ! (cd "$ROOT/android/komga_core" && "${SMOKE[@]}" "$@"); then
+    echo "   FAILED: $label" >&2
+    FAILURES=$((FAILURES + 1))
+  fi
+}
 
-echo "== 2/3 Offline replay on the fixture DB (network disconnected) =="
-(cd "$ROOT/android/komga_core" && "${SMOKE[@]}" \
-  --offline --db "$DB" --server-id demo)
+run_leg "1/3 Offline fixture battery (no network)" \
+  --fixture --db "$DB" --server-id demo
+
+run_leg "2/3 Offline replay on the fixture DB (network disconnected)" \
+  --offline --db "$DB" --server-id demo
 
 if [[ -n "${KOMGA_BASE_URL:-}" && -n "${KOMGA_API_KEY:-}" ]]; then
-  echo "== 3/3 Live: FullSync 完整媒体库 + 离线查询电池 =="
-  (cd "$ROOT/android/komga_core" && "${SMOKE[@]}" \
+  run_leg "3/3 Live: FullSync 完整媒体库 + 离线查询电池" \
     --db "$DB" --server-id "$SERVER_ID" \
-    --base-url "$KOMGA_BASE_URL" --api-key "$KOMGA_API_KEY")
+    --base-url "$KOMGA_BASE_URL" --api-key "$KOMGA_API_KEY"
 
-  echo "== 3b/3 Live replay WITHOUT credentials (断网 = 本地库浏览) =="
-  (cd "$ROOT/android/komga_core" && "${SMOKE[@]}" \
-    --offline --db "$DB" --server-id "$SERVER_ID")
+  run_leg "3b/3 Live replay WITHOUT credentials (断网 = 本地库浏览)" \
+    --offline --db "$DB" --server-id "$SERVER_ID"
 else
   echo "== 3/3 skipped: set KOMGA_BASE_URL + KOMGA_API_KEY for the live chain =="
 fi
 
+if [ "$FAILURES" -gt 0 ]; then
+  echo "STAGE 4 ACCEPTANCE FAILED — $FAILURES leg(s) above" >&2
+  exit 1
+fi
 echo "STAGE 4 ACCEPTANCE OK (offline battery complete; live chain ran when env was set)"
