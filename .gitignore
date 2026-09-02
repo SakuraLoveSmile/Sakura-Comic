@@ -30,3 +30,6 @@ android/app/.frb-verify-backup.*/
 
 # FRB cross-compiled Android libraries (regenerate with scripts/frb_wire.sh)
 android/app/android/app/src/main/jniLibs/
+
+# Tooling memory / scratch
+.workbuddy/

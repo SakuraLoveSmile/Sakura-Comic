@@ -39,7 +39,10 @@ class SeriesGridScreen extends StatefulWidget {
   /// Optional server manager — enables the server management entry point.
   final ServerManager? manager;
 
-  /// Optional FFI connectivity banner (e.g. "Rust core FFI 已连接").
+  /// Optional status line for a degraded core — shown only when the real Rust
+  /// core is NOT running (stub fallback / init error). Null (healthy real
+  /// core) or a normal screen means nothing to announce, so no banner renders:
+  /// the daily-driver shelf has no developer header.
   final String? rustStatus;
 
   @override
@@ -320,8 +323,10 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       _scheduleRecoveryRetry();
       if (!mounted) return;
       if (announce) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('同步失败（本地库仍可用）: $e')));
+        final view = FailurePresentation.from(e);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('同步失败（本地库仍可用）：${view.headline}'),
+        ));
       }
     } finally {
       if (mounted) setState(() => _syncing = false);
@@ -347,8 +352,10 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       _scheduleRecoveryRetry();
       if (!mounted) return;
       if (announce) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('同步失败: $e')));
+        final view = FailurePresentation.from(e);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('同步失败：${view.headline}'),
+        ));
       }
     } finally {
       if (mounted) setState(() => _syncing = false);
@@ -366,11 +373,34 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         SnackBar(content: Text('演示数据：${summary.syncedSeries} 个 Series')),
       );
     } catch (e) {
+      // A bootstrap/demo that dies mid-write must not strand the UI on the
+      // loading state: re-read whatever the core committed (the mirror is
+      // transactional) and say what failed.
+      await _reloadLocalOnly();
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('演示加载失败: $e')));
+      final view = FailurePresentation.from(e);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('演示加载失败：${view.headline}'),
+      ));
     } finally {
       if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  /// Re-read the four local shelves without touching the network. The
+  /// auto-sync flag stays as it is: this is a re-read, not a sync decision.
+  Future<void> _reloadLocalOnly() async {
+    try {
+      await Future.wait([
+        _loadWall(reset: true),
+        _loadSyncState(),
+        _loadCovers(),
+        _loadSyncStatus(),
+        _loadCredential(),
+      ]);
+    } catch (_) {
+      // The wall has local data from the last good read; a re-read that fails
+      // again must not blank it. The caller's error path still reports.
     }
   }
 
@@ -502,13 +532,17 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         ),
         body: Column(
           children: [
+            // Developer-status line, degraded-core modes only (see the field
+            // doc on [SeriesGridScreen.rustStatus]). Deliberately quiet: a
+            // healthy real core must not decorate the daily shelf.
             if (widget.rustStatus != null)
               Container(
                 width: double.infinity,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                color: Theme.of(context).colorScheme.errorContainer,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: Text(
                   widget.rustStatus!,
+                  key: const ValueKey('core-status-banner'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
@@ -593,7 +627,33 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
 
   Widget _buildBody() {
     if (_error != null) {
-      return Center(child: Text('加载失败: $_error'));
+      final view = FailurePresentation.from(_error!);
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 40),
+              const SizedBox(height: 8),
+              Text(
+                view.headline,
+                key: const ValueKey('wall-error-headline'),
+                textAlign: TextAlign.center,
+              ),
+              if (view.detail.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  view.detail,
+                  key: const ValueKey('wall-error-detail'),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
     }
     if (_series.isEmpty && _seriesTotal == 0 && _libraries.isEmpty) {
       return Center(

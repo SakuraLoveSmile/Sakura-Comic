@@ -299,10 +299,11 @@ class RustLibraryRepository extends LibraryRepository {
   Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async {
     final serverId = await _activeServerId();
     if (serverId == null) {
-      debugPrint('[RustCore] listServers -> 0 servers (grid stays empty)');
+      debugPrint('[RustCore] fetchSeries: no active server (servers empty)');
       return const [];
     }
     final page = await _api.querySeries(dbPath: dbPath, serverId: serverId, limit: limit, offset: offset);
+    debugPrint('[RustCore] fetchSeries($serverId) -> ${page.items.length}/${page.total}');
     return page.items.map(SeriesRowToSeries.toSeries).toList();
   }
 
@@ -835,7 +836,14 @@ class RustLibraryRepository extends LibraryRepository {
   /// The profile to display: the active server, else the first one.
   Future<String?> _activeServerId() async {
     final servers = await _api.listServers(dbPath: dbPath);
-    if (servers.isEmpty) return null;
+    if (servers.isEmpty) {
+      // A demo seed leaves the media tables populated and `active_server_id`
+      // set, but no `servers` row (the demo server has no base URL to store).
+      // The demo id is the one id queries must accept even without a row.
+      final demo = await _api.getActiveServer(dbPath: dbPath);
+      if (demo == 'demo') return 'demo';
+      return null;
+    }
     final activeId = await _api.getActiveServer(dbPath: dbPath);
     return activeId ?? servers.first.id;
   }
@@ -848,13 +856,15 @@ class RustLibraryRepository extends LibraryRepository {
     final servers = await _api.listServers(dbPath: dbPath);
     if (servers.isEmpty) return null;
     final activeId = await _api.getActiveServer(dbPath: dbPath);
-    final profile =
-        servers.firstWhere((s) => s.id == (activeId ?? servers.first.id), orElse: () => servers.first);
-    final ref = profile.credentialRef;
+    final active = servers.firstWhere(
+      (s) => s.id == activeId,
+      orElse: () => servers.first,
+    );
+    final ref = active.credentialRef;
     if (ref == null) return null;
     final secret = await manager.readSecret(ref);
     if (secret == null) return null;
-    return (profile, secret);
+    return (active, secret);
   }
 }
 

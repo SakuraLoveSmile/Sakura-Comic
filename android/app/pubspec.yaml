@@ -1,7 +1,7 @@
 name: comic_app
 description: "Komga media library client — Android shell (Flutter UI on top of Rust Core)."
 publish_to: "none"
-version: 0.1.0+1
+version: 0.1.0+2
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

@@ -23,8 +23,13 @@ Future<void> main() async {
 }
 
 /// Wires the UI to the Rust Core through flutter_rust_bridge; falls back to
-/// the in-memory stub (with an explicit status banner) whenever the native
-/// library cannot be loaded, so the app always launches.
+/// the in-memory stub whenever the native library cannot be loaded, so the app
+/// always launches.
+///
+/// The returned status string is *problem copy only*: null means the real core
+/// is connected and serving, and the shelf shows no banner. A non-null value
+/// names the failure mode (stub / init error) so the UI can say the app is
+/// running without its native core.
 Future<(LibraryRepository, ServerManager?, String?)> createServices() async {
   if (!await initRustCore()) {
     debugPrint('[RustCore] init failed — using StubRustCoreApi');
@@ -43,7 +48,9 @@ Future<(LibraryRepository, ServerManager?, String?)> createServices() async {
     return (
       RustLibraryRepository(dbPath: dbPath, api: api, serverManager: manager),
       manager,
-      'Rust core FFI 已连接',
+      // Healthy: no banner. The wall itself is the signal that the real core
+      // is serving — the banner exists for the degraded modes only.
+      null,
     );
   } catch (_) {
     debugPrint('[RustCore] init error — using StubRustCoreApi');

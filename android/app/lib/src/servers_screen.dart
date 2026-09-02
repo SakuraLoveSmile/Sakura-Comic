@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'error_presentation.dart';
 import 'rust/model/server_profile.dart';
 import 'server_form_screen.dart';
 import 'server_manager.dart';
@@ -113,7 +114,28 @@ class _ServersScreenState extends State<ServersScreen> {
 
   Widget _buildBody() {
     if (_error != null) {
-      return Center(child: Text('加载失败: $_error'));
+      final view = FailurePresentation.from(_error!);
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 40),
+              const SizedBox(height: 8),
+              Text(view.headline, textAlign: TextAlign.center),
+              if (view.detail.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  view.detail,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
     }
     final servers = _servers;
     if (servers == null) {
