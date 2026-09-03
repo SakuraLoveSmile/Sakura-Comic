@@ -59,15 +59,23 @@ android {
 
     buildTypes {
         release {
-            // Self-signed release key when scripts/android_release_key.sh has
-            // run; without it the build fails loudly rather than silently
-            // shipping unsigned or under the debug identity.
+            // 配置期不硬失败:keystore 缺失时 release signingConfig 留空。
             signingConfig = signingConfigs.findByName("release")
-                ?: error(
-                    "release signing is not configured — run " +
-                        "scripts/android_release_key.sh first"
-                )
         }
+    }
+}
+
+// debug 构建(CI 的 flutter build apk --debug)不应被 release 签名缺失阻断;
+// 仅当任务图确实要组装 release 产物、且签名材料缺失时才拦截。
+gradle.taskGraph.whenReady {
+    val hasReleaseSigning = releaseKeyStoreFile != null
+    val assemblesRelease = allTasks.any {
+        it.name.matches(Regex("(assemble|bundle|package).*Release.*", RegexOption.IGNORE_CASE))
+    }
+    if (assemblesRelease && !hasReleaseSigning) {
+        throw GradleException(
+            "release signing is not configured — run scripts/android_release_key.sh first"
+        )
     }
 }
 
