@@ -65,7 +65,7 @@ jobs:
         run: flutter build apk --debug
 
   swift-package:
-    runs-on: macos-14
+    runs-on: macos-15
     defaults:
       run:
         working-directory: apple/KomgaKit
@@ -77,7 +77,7 @@ jobs:
   # Stage 1: builds the iOS app (KomgaKit linked) and proves it launches on
   # a simulator. The .xcodeproj is generated from project.yml (gitignored).
   ios-app:
-    runs-on: macos-14
+    runs-on: macos-15
     defaults:
       run:
         working-directory: apple/ComicApp
@@ -88,9 +88,10 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Build for iOS Simulator
-        run: xcodebuild -project ComicApp.xcodeproj -scheme ComicApp_iOS \
-          -sdk iphonesimulator -configuration Debug \
-          -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
+        run: |
+          xcodebuild -project ComicApp.xcodeproj -scheme ComicApp_iOS \
+            -sdk iphonesimulator -configuration Debug \
+            -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
       - name: Boot simulator, install, and launch the app
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c '
