@@ -73,6 +73,7 @@ cd android/app && flutter build apk --release --split-per-abi
 #   Kotlin 包 + auth_store 通道  dev.sakurasep.comic   (MainActivity.kt ↔ lib/src/auth_store.dart)
 #   release 签名                 android/app/android/keystore/comic-release.jks（自签，git-忽略）
 #   key.properties               同目录，gradle 读取；keytool 生成器见 scripts/android_release_key.sh
+#   GitHub 发布                  推送 tag `v*` 或 Actions → Release → Run workflow 自动构建，见 .github/RELEASE.md
 
 # 4. 真实服务器垂直切片验收（phase0_smoke：认证 → 前 10 个 Series → SQLite → 封面缓存）
 export KOMGA_BASE_URL=http://192.168.1.10:25600

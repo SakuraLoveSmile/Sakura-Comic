@@ -1,0 +1,241 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to create (e.g. v0.1.0). Empty = use pubspec version."
+        required: false
+        default: ""
+      draft:
+        description: "Create as draft release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: stable
+
+jobs:
+  # Android — Flutter shell on top of Rust core, signed with the self-signed
+  # keystore that scripts/android_release_key.sh creates locally. The keystore
+  # itself never lands in git; CI recreates it from four repository secrets.
+  #
+  # Required secrets (Settings → Secrets and variables → Actions):
+  #   ANDROID_KEYSTORE_BASE64  — `base64 -w0 android/app/android/keystore/comic-release.jks`
+  #                              (macOS: `base64 -i android/app/android/keystore/comic-release.jks | tr -d '\n'`)
+  #   ANDROID_KEYSTORE_PASSWORD — storePassword from android/app/android/key.properties
+  #   ANDROID_KEY_PASSWORD      — keyPassword  from the same file (same value by default)
+  #   ANDROID_KEY_ALIAS         — keyAlias      (default: comic-release)
+  #
+  # Generate locally once: `bash scripts/android_release_key.sh`
+  # Keep the .jks + key.properties for the lifetime of dev.sakurasep.comic.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            PUB=$(grep '^version:' android/app/pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+            echo "tag=v$PUB" >> "$GITHUB_OUTPUT"
+            echo "version=v$PUB" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Android targets + cargo-ndk + flutter_rust_bridge_codegen
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo install cargo-ndk --locked || true
+          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked || true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore keystore + key.properties from secrets
+        env:
+          B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${B64:-}" ]]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set — add the four ANDROID_* secrets (see job header)."
+            exit 1
+          fi
+          mkdir -p android/app/android/keystore
+          echo "$B64" | base64 -d > android/app/android/keystore/comic-release.jks
+          ALIAS="${KEY_ALIAS:-comic-release}"
+          cat > android/app/android/key.properties <<EOF
+          storeFile=keystore/comic-release.jks
+          storePassword=$STORE_PASS
+          keyAlias=$ALIAS
+          keyPassword=$KEY_PASS
+          EOF
+          chmod 600 android/app/android/key.properties
+          echo "keystore restored: $(ls -lh android/app/android/keystore/comic-release.jks)"
+
+      - name: Wire Rust core (FRB codegen + 3-ABI .so)
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          export JAVA_HOME="${JAVA_HOME:-}"
+          bash scripts/frb_wire.sh
+
+      - name: Build Android APKs (signed, split-per-abi) + AAB
+        working-directory: android/app
+        run: |
+          flutter build apk --release --split-per-abi --verbose
+          flutter build appbundle --release --verbose
+          ls -lh build/app/outputs/flutter-apk/*.apk
+          ls -lh build/app/outputs/bundle/release/*.aab
+          # quick signature sanity
+          "$ANDROID_HOME/build-tools/"*/apksigner verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | head -4
+
+      - name: Checksum + upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ steps.version.outputs.tag }}
+          path: |
+            android/app/build/app/outputs/flutter-apk/*-release.apk
+            android/app/build/app/outputs/bundle/release/*.aab
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          draft: ${{ inputs.draft || false }}
+          generate_release_notes: true
+          files: |
+            android/app/build/app/outputs/flutter-apk/*-release.apk
+            android/app/build/app/outputs/bundle/release/*.aab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Apple — KomgaKit (SwiftPM) + ComicApp (iOS + macOS).
+  # tvOS / visionOS shells exist but are excluded from this Release pipeline
+  # per current scope. XcodeGen regenerates the .xcodeproj (gitignored).
+  # Builds are unsigned (CODE_SIGNING_ALLOWED=NO) for a portable GitHub
+  # artifact; replacing with a real identity is one setting:
+  #   CODE_SIGN_IDENTITY, PROVISIONING_PROFILE_SPECIFIER, DEVELOPMENT_TEAM
+  # and `CODE_SIGNING_ALLOWED=YES`. Bundle IDs are still com.example.comic.* —
+  # change apple/ComicApp/project.yml bundleIdPrefix to dev.sakurasep.comic
+  # before an App Store / TestFlight submission.
+  apple:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            PUB=$(grep '^version:' android/app/pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+            echo "tag=v$PUB" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - name: SwiftPM — KomgaKit build + test
+        working-directory: apple/KomgaKit
+        run: |
+          swift build -c release
+          swift test
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: apple/ComicApp
+        run: xcodegen generate
+
+      - name: Build iOS (Release, unsigned)
+        working-directory: apple/ComicApp
+        run: |
+          set -o pipefail
+          xcodebuild -project ComicApp.xcodeproj \
+            -scheme ComicApp_iOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -derivedDataPath build \
+            build | xcpretty || cat build/Logs/Build/*.log 2>/dev/null | tail -80
+
+      - name: Build macOS (Release, unsigned)
+        working-directory: apple/ComicApp
+        run: |
+          set -o pipefail
+          xcodebuild -project ComicApp.xcodeproj \
+            -scheme ComicApp_macOS \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath build \
+            build | xcpretty || true
+
+      - name: Zip .app bundles
+        working-directory: apple/ComicApp
+        run: |
+          set -e
+          mkdir -p dist
+          for app in $(find build/Build/Products -name "*.app" -maxdepth 4 2>/dev/null); do
+            name=$(basename "$app" .app)
+            cfg=$(basename $(dirname "$app"))
+            zipname="dist/${name}-${cfg}-${{ steps.version.outputs.tag }}.app.zip"
+            ditto -c -k --sequesterRsrc --keepParent "$app" "$zipname"
+            ls -lh "$zipname"
+          done
+          ls -lh dist/ || echo "no .app bundles found — check xcodebuild logs above"
+
+      - name: Upload Apple artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-${{ steps.version.outputs.tag }}
+          path: apple/ComicApp/dist/*.zip
+          if-no-files-found: warn
+
+      - name: Publish Apple zips to the same Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          draft: ${{ inputs.draft || false }}
+          generate_release_notes: true
+          files: apple/ComicApp/dist/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
