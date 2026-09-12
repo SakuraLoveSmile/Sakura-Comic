@@ -957,6 +957,11 @@ class ReaderBookDto {
   final String? fallback;
   final bool fromMirror;
   final PlatformInt64 startPage;
+
+  /// Where in `start_page` the reader was, 0..1, for a webtoon. `None` means
+  /// "top of the page" — and also "this book has no saved offset", which the
+  /// UI treats the same way.
+  final double? startPageOffsetRatio;
   final ReaderLayoutDto layout;
 
   const ReaderBookDto({
@@ -968,6 +973,7 @@ class ReaderBookDto {
     this.fallback,
     required this.fromMirror,
     required this.startPage,
+    this.startPageOffsetRatio,
     required this.layout,
   });
 
@@ -981,6 +987,7 @@ class ReaderBookDto {
       fallback.hashCode ^
       fromMirror.hashCode ^
       startPage.hashCode ^
+      startPageOffsetRatio.hashCode ^
       layout.hashCode;
 
   @override
@@ -996,6 +1003,7 @@ class ReaderBookDto {
           fallback == other.fallback &&
           fromMirror == other.fromMirror &&
           startPage == other.startPage &&
+          startPageOffsetRatio == other.startPageOffsetRatio &&
           layout == other.layout;
 }
 
@@ -1079,6 +1087,9 @@ class ReaderSettingsDto {
   final PlatformInt64 prefetchBack;
   final PlatformInt64 prefetchCap;
 
+  /// Whether the hardware volume keys turn pages (off by default).
+  final bool volumeKeysEnabled;
+
   const ReaderSettingsDto({
     required this.mode,
     required this.direction,
@@ -1091,6 +1102,7 @@ class ReaderSettingsDto {
     required this.prefetchForward,
     required this.prefetchBack,
     required this.prefetchCap,
+    required this.volumeKeysEnabled,
   });
 
   @override
@@ -1105,7 +1117,8 @@ class ReaderSettingsDto {
       restorePosition.hashCode ^
       prefetchForward.hashCode ^
       prefetchBack.hashCode ^
-      prefetchCap.hashCode;
+      prefetchCap.hashCode ^
+      volumeKeysEnabled.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1122,7 +1135,8 @@ class ReaderSettingsDto {
           restorePosition == other.restorePosition &&
           prefetchForward == other.prefetchForward &&
           prefetchBack == other.prefetchBack &&
-          prefetchCap == other.prefetchCap;
+          prefetchCap == other.prefetchCap &&
+          volumeKeysEnabled == other.volumeKeysEnabled;
 }
 
 class ReaderTurnDto {

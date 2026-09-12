@@ -18,7 +18,11 @@ use rusqlite::{Connection, OptionalExtension};
 /// budgetable (`bytes_total` / `bytes_done`) and explainable when it fails
 /// (`last_error` / `next_retry_at`). This is the only migration in the project
 /// whose failure mode is losing a user's bookkeeping rather than missing a column.
-pub const SCHEMA_VERSION: i64 = 9;
+///
+/// v11: library-list indexes only — no columns, no tables. See
+/// `V11_INDEX_STATEMENTS`. Because the shape is untouched, the two platforms'
+/// `user_version` distance does not change what either can read.
+pub const SCHEMA_VERSION: i64 = 11;
 
 /// Individual DDL statements, applied in order. `CREATE TABLE IF NOT EXISTS`
 /// keeps existing databases untouched, so older installs get their missing
@@ -183,8 +187,6 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       state TEXT NOT NULL DEFAULT 'pending',
       next_retry_at TEXT
     )",
-    "CREATE INDEX IF NOT EXISTS pending_mutations_due
-       ON pending_mutations (server_id, state, next_retry_at)",
     // Stage 9: the offline-download queue. `position` is the user's tap order
     // (rowid is neither that nor stable), and `state` is the whole point of the
     // table: pausing, resuming and retrying are UPDATEs, so a download survives
@@ -279,6 +281,7 @@ pub const CREATE_STATEMENTS: &[&str] = &[
       mode TEXT NOT NULL,
       direction TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      page_offset_ratio REAL,
       PRIMARY KEY (server_id, book_id)
     )",
     // v4: normalized filter tables — tags / genres / authors are queryable
@@ -410,6 +413,76 @@ pub const V9_ALTER_STATEMENTS: &[&str] = &[
     "ALTER TABLE download_pages ADD COLUMN updated_at TEXT",
 ];
 
+/// v10 (Stage 10): `reader_position` gains `page_offset_ratio` — how far into the
+/// page a webtoon reader was, as a 0..1 fraction.
+///
+/// A webtoon is one tall column, so "page 62" alone does not say where the
+/// reader was; without the offset, reopening drops them at the top of a page
+/// they had scrolled deep into. Single/double page modes leave it NULL, which is
+/// also what every pre-v10 row looks like — and `NULL` is the honest answer
+/// there, not `0.0`.
+///
+/// This is the one migration in the project that cannot lose anything: adding a
+/// nullable column to a table whose other columns are untouched either succeeds
+/// or leaves a row that reads as "start of the page".
+pub const V10_ALTER_STATEMENTS: &[&str] =
+    &["ALTER TABLE reader_position ADD COLUMN page_offset_ratio REAL"];
+
+/// Indexes over columns that an `ALTER TABLE` adds. These must be created
+/// **after** the ALTER loop, never in `CREATE_STATEMENTS` — which runs first, so
+/// on a database that has not been altered yet the index simply fails to parse
+/// and the database cannot be opened at all.
+///
+/// `pending_mutations_due` used to live in `CREATE_STATEMENTS` while indexing
+/// `state` and `next_retry_at` (`V7_ALTER_STATEMENTS`). A v6 database failed with
+/// `no such column: state` — stuck behind a store that refuses to open.
+/// `a_v6_outbox_row_survives_the_migration_and_gains_its_retry_columns` pins it.
+pub const POST_ALTER_INDEX_STATEMENTS: &[&str] =
+    &["CREATE INDEX IF NOT EXISTS pending_mutations_due
+       ON pending_mutations (server_id, state, next_retry_at)"];
+
+/// v11: the library-list indexes.
+///
+/// Before this, the only indexes in the whole store served the Outbox and the
+/// reader cache — no library query had one. Every page of the wall therefore
+/// sorted the server's entire `series` table in a temporary B-tree (twice: the
+/// page and its `COUNT(*)`), and listing one series' books scanned every book of
+/// the server, because the `books` primary key is `(server_id, remote_id)`.
+///
+/// `COLLATE NOCASE` is part of the name index, not decoration: a NOCASE sort
+/// cannot be satisfied by a BINARY-ordered index, and SQLite silently falls back
+/// to a temp B-tree. One index serves ASC and DESC (a backward scan), so there
+/// is no descending twin.
+///
+/// All five wall sorts get one, because they are one tap apart in the same menu
+/// (`sort` in `SeriesQuery`); accepting a filesort for any of them would be a
+/// visible cliff on a menu tap.
+///
+/// The sort-name index is an *expression* index and stops being used the moment
+/// `SeriesSort::order_expr` stops matching it character-for-character. That is
+/// why `a_series_wall_page_never_sorts_in_a_temp_btree` exists: to fail loudly
+/// when somebody edits `order_expr` and silently reintroduces the filesort.
+///
+/// Created after the ALTER loop (see `POST_ALTER_INDEX_STATEMENTS`): `books_count`
+/// is a v4 `ALTER TABLE ADD COLUMN`.
+pub const V11_INDEX_STATEMENTS: &[&str] = &[
+    "CREATE INDEX IF NOT EXISTS series_name_nocase
+       ON series (server_id, name COLLATE NOCASE)",
+    "CREATE INDEX IF NOT EXISTS series_sort_name_nocase
+       ON series (server_id, COALESCE(sort_name, name) COLLATE NOCASE)",
+    "CREATE INDEX IF NOT EXISTS series_created_at ON series (server_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS series_last_modified ON series (server_id, last_modified)",
+    "CREATE INDEX IF NOT EXISTS series_books_count ON series (server_id, books_count)",
+    // The library chip filter, and the join order `library_counts` needs: with
+    // statistics collected (see `PRAGMA optimize` in `sync::full`), the planner
+    // drives from here into `books_series_order` instead of scanning every book.
+    "CREATE INDEX IF NOT EXISTS series_library ON series (server_id, library_id)",
+    // `number_sort` third because it is the default book order, which bounds
+    // that query's own sort to one series' rows instead of the whole table.
+    "CREATE INDEX IF NOT EXISTS books_series_order
+       ON books (server_id, series_id, number_sort)",
+];
+
 /// True when a table exists and has the given column.
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
     let mut stmt = conn.prepare(&format!(
@@ -505,6 +578,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         .chain(V5_ALTER_STATEMENTS)
         .chain(V7_ALTER_STATEMENTS)
         .chain(V9_ALTER_STATEMENTS)
+        .chain(V10_ALTER_STATEMENTS)
         .copied()
         .collect();
     for statement in &alters {
@@ -521,6 +595,20 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             conn.execute(statement, [])?;
         }
     }
+    // After the ALTERs, never before: see POST_ALTER_INDEX_STATEMENTS.
+    for statement in POST_ALTER_INDEX_STATEMENTS
+        .iter()
+        .chain(V11_INDEX_STATEMENTS)
+    {
+        conn.execute(statement, [])?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    // Only on the version-changed path — the short-circuit above returns early —
+    // so this runs once per upgrade, never per connection. An upgrading user
+    // already has a full mirror, so its statistics are worth refreshing at once;
+    // a fresh install is empty here and gets better ones from the
+    // `PRAGMA optimize` at the end of its first bootstrap, because statistics
+    // describing an empty database actively mislead the planner.
+    let _ = conn.execute_batch("PRAGMA optimize");
     Ok(())
 }

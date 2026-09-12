@@ -409,6 +409,31 @@ impl App {
             .collect())
     }
 
+    /// Cover paths for a *page* of entities, so the wall asks for what it is
+    /// about to paint rather than for the server's whole thumbnail table.
+    ///
+    /// The existence check is kept deliberately: `list_series_missing_cover` and
+    /// `cover_path` both treat a vanished file as a cache miss so the backfill can
+    /// heal it. Dropping the check would leave permanently broken covers rendering
+    /// as placeholders forever. It is 50 `stat()` calls now instead of 20,000.
+    pub fn cover_paths(
+        &self,
+        server_id: &str,
+        variant: &str,
+        remote_ids: &[String],
+    ) -> Result<HashMap<String, String>, ApiError> {
+        if remote_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let rows = store::thumbnails::cover_paths(&conn, server_id, variant, remote_ids)
+            .map_err(db_err)?;
+        Ok(rows
+            .into_iter()
+            .filter(|(_, path)| Path::new(path).exists())
+            .collect())
+    }
+
     /// Backfill one series cover: cache-first; on miss (no record or file
     /// gone) download, store to disk and record the path in SQLite.
     pub async fn ensure_cover(
@@ -735,6 +760,18 @@ impl App {
         let conn = store::open(&self.db_path).map_err(db_err)?;
         store::query::query_books(&conn, server_id, series_id, &query, limit, offset)
             .map_err(db_err)
+    }
+
+    /// Which book a "start or continue reading" tap should open for this series
+    /// (本地查询). The shelf and the series detail both call this, so they cannot
+    /// disagree about what "继续阅读" means.
+    pub fn series_read_target(
+        &self,
+        server_id: &str,
+        series_id: &str,
+    ) -> Result<ReadTargetRow, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        store::query::series_read_target_row(&conn, server_id, series_id).map_err(db_err)
     }
 
     #[allow(clippy::type_complexity)]
@@ -1679,7 +1716,7 @@ fn forget_socket(key: &str) {
 // MARK: - FFI result types (plain Rust structs, FRB-friendly)
 
 /// Re-export for the bridge: paged series rows + total (本地查询).
-pub use crate::store::query::{BookPageResult, SeriesPageResult};
+pub use crate::store::query::{BookPageResult, ReadTargetRow, SeriesPageResult};
 
 /// Paged collection rows + total.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2287,21 +2324,35 @@ impl App {
             });
         }
 
-        let mut settings = reader::settings::ReaderSettings::load(&conn).map_err(db_err)?;
+        // The two-level rule, and nothing else: series override → global
+        // setting. The book's own remembered mode/direction is deliberately not
+        // consulted any more (the columns are still written — see
+        // `store::position`), because "I set volume 3 to a spread" must not be
+        // able to decide how volume 9 opens.
+        let global = reader::settings::ReaderSettings::load(&conn).map_err(db_err)?;
+        let series_id: Option<String> = conn
+            .query_row(
+                "SELECT series_id FROM books WHERE server_id = ?1 AND remote_id = ?2",
+                rusqlite::params![server_id, book_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+        let series = match series_id.as_deref() {
+            Some(id) => {
+                reader::series_override::load_override(&conn, &server_id, id).map_err(db_err)?
+            }
+            None => None,
+        };
+        let mut settings = reader::series_override::resolve_for_series(&global, series);
+        // An explicit request from the UI is the caller stating the effective
+        // choice (it is how a series override the user just made reaches the
+        // open path), so it comes after the override rather than before it.
         if !mode.is_empty() {
             settings.mode = reader::paging::ReadMode::parse(&mode);
         }
         if !direction.is_empty() {
-            // Per-book last-used direction wins over the global default; an
-            // explicit request from the UI beats both.
-            settings.direction = reader::settings::resolve_direction(
-                store::position::get(&conn, &server_id, &book_id)
-                    .map_err(db_err)?
-                    .as_ref()
-                    .map(|saved| reader::paging::Direction::parse(&saved.direction)),
-                None,
-                reader::paging::Direction::parse(&direction),
-            );
+            settings.direction = reader::paging::Direction::parse(&direction);
         }
         if let Some(first) = first_page_single {
             settings.first_page_single = first;
@@ -2323,6 +2374,7 @@ impl App {
             manifest.fallback.map(|kind| kind.as_str().to_string()),
         );
         let layout = layout_dto(&session, &settings);
+        let start_page_offset_ratio = session.page_offset_ratio();
         readers().insert(
             reader_key(&server_id, &book_id),
             LiveReader {
@@ -2341,6 +2393,7 @@ impl App {
             fallback: summary.3,
             from_mirror,
             start_page: layout.page,
+            start_page_offset_ratio,
             layout,
         })
     }
@@ -2563,6 +2616,64 @@ impl App {
             spread: live.session.spread() as i64,
             upload_now: upload == reader::session::Upload::Now,
         })
+    }
+
+    /// The reader mode / direction this series overrides, as JSON, or `None`
+    /// when the series follows the global preference (本地偏好).
+    pub fn series_read_override(
+        &self,
+        server_id: &str,
+        series_id: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let found =
+            reader::series_override::load_override(&conn, server_id, series_id).map_err(db_err)?;
+        Ok(found.and_then(|value| serde_json::to_string(&value).ok()))
+    }
+
+    /// Record what this series should read like, or clear it when neither
+    /// dimension is set. Returns the stored JSON — the caller shows it back to
+    /// the user, which is how "已把此系列设为双页" can be true.
+    pub fn set_series_read_override(
+        &self,
+        server_id: &str,
+        series_id: &str,
+        mode: Option<String>,
+        direction: Option<String>,
+    ) -> Result<Option<String>, ApiError> {
+        let conn = store::open(&self.db_path).map_err(db_err)?;
+        let value = reader::series_override::SeriesOverride {
+            mode: mode.as_deref().map(reader::paging::ReadMode::parse),
+            direction: direction.as_deref().map(reader::paging::Direction::parse),
+        };
+        if value.is_empty() {
+            reader::series_override::clear_override(&conn, server_id, series_id).map_err(db_err)?;
+            return Ok(None);
+        }
+        reader::series_override::save_override(&conn, server_id, series_id, &value)
+            .map_err(db_err)?;
+        Ok(serde_json::to_string(&value).ok())
+    }
+
+    /// Report how far into the current page a webtoon reader has scrolled.
+    ///
+    /// Deliberately not a database write: a scroll reports continuously, and the
+    /// offset rides along with the next persist — which a turn, a mode change or
+    /// closing the book always triggers. Persisting here would put the whole
+    /// position row through SQLite once per frame.
+    pub fn reader_set_page_offset(
+        &self,
+        server_id: String,
+        book_id: String,
+        ratio: Option<f64>,
+    ) -> Result<(), ApiError> {
+        let key = reader_key(&server_id, &book_id);
+        let mut guard = readers();
+        let live = guard.get_mut(&key).ok_or_else(|| ApiError::InvalidInput {
+            message: "reader is not open".to_string(),
+        })?;
+        live.session.set_page_offset_ratio(ratio);
+        Ok(())
     }
 
     /// Advance (delta = +1) or retreat (delta = -1) one spread, in whatever
@@ -3755,6 +3866,7 @@ fn settings_of(value: ReaderSettingsDto) -> reader::settings::ReaderSettings {
             back: value.prefetch_back.max(0) as usize,
             cap: value.prefetch_cap.max(1) as usize,
         },
+        volume_keys_enabled: value.volume_keys_enabled,
     }
 }
 
@@ -3771,6 +3883,7 @@ fn settings_dto(value: reader::settings::ReaderSettings) -> ReaderSettingsDto {
         prefetch_forward: value.prefetch.forward as i64,
         prefetch_back: value.prefetch.back as i64,
         prefetch_cap: value.prefetch.cap as i64,
+        volume_keys_enabled: value.volume_keys_enabled,
     }
 }
 
@@ -3784,6 +3897,10 @@ pub struct ReaderBookDto {
     pub fallback: Option<String>,
     pub from_mirror: bool,
     pub start_page: i64,
+    /// Where in `start_page` the reader was, 0..1, for a webtoon. `None` means
+    /// "top of the page" — and also "this book has no saved offset", which the
+    /// UI treats the same way.
+    pub start_page_offset_ratio: Option<f64>,
     pub layout: ReaderLayoutDto,
 }
 
@@ -3824,6 +3941,8 @@ pub struct ReaderSettingsDto {
     pub prefetch_forward: i64,
     pub prefetch_back: i64,
     pub prefetch_cap: i64,
+    /// Whether the hardware volume keys turn pages (off by default).
+    pub volume_keys_enabled: bool,
 }
 
 impl reader::manifest::Fallback {
@@ -3847,6 +3966,39 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("komga_app_test_{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("comic.sqlite").to_string_lossy().into_owned()
+    }
+
+    /// The DTO is the FFI contract, and it is easy to add a field to the Rust
+    /// struct and forget that the boundary now carries one more value: the Dart
+    /// decoder rejects a length mismatch at runtime, on a device, with no test
+    /// watching. This pins the round trip for the knob most likely to be
+    /// "helpfully" defaulted to true.
+    #[test]
+    fn reader_settings_dto_round_trips_the_volume_keys_knob() {
+        let dto = settings_dto(reader::settings::ReaderSettings::default());
+        assert!(
+            !dto.volume_keys_enabled,
+            "the default must be off: stealing the volume keys is the user's call"
+        );
+
+        let on = reader::settings::ReaderSettings {
+            volume_keys_enabled: true,
+            ..reader::settings::ReaderSettings::default()
+        };
+        let dto = settings_dto(on.clone());
+        assert!(dto.volume_keys_enabled);
+        assert_eq!(
+            settings_of(dto).volume_keys_enabled,
+            on.volume_keys_enabled,
+            "the field survives the boundary in both directions"
+        );
+
+        // And the whole default document survives N trips unchanged.
+        let dto = settings_dto(reader::settings::ReaderSettings::default());
+        assert_eq!(
+            settings_of(dto),
+            reader::settings::ReaderSettings::default().sanitized()
+        );
     }
 
     /// A book mirrored and partially on disk the way the engine leaves it: real PNG
@@ -4449,6 +4601,73 @@ mod tests {
             .unwrap()
             .expect("sync_state row must exist");
         assert!(state.last_successful_sync.is_some());
+
+        cleanup_temp(&db);
+    }
+
+    /// The wall asks for a page, not for the server's whole thumbnail table.
+    ///
+    /// Two things have to hold for that to be safe: only the asked-for ids come
+    /// back (and only for the asked-for variant), and a file that has vanished
+    /// still reads as a miss — `list_series_missing_cover` and `cover_path` both
+    /// depend on that so the backfill can heal a wiped cache. Dropping the
+    /// existence check would leave broken covers rendering as placeholders for
+    /// good.
+    #[tokio::test]
+    async fn page_scoped_cover_paths_answer_the_page_and_still_drop_dead_files() {
+        let db = temp_db();
+        let app = App::new(&db);
+        app.bootstrap_demo("demo".into()).await.unwrap();
+
+        let series_ids: Vec<String> = app
+            .fetch_series("demo", 10, 0)
+            .unwrap()
+            .iter()
+            .map(|row| row.remote_id.clone())
+            .collect();
+        assert_eq!(series_ids.len(), 3);
+
+        let found = app
+            .cover_paths("demo", VARIANT_SERIES, &series_ids)
+            .unwrap();
+        assert_eq!(found.len(), 3, "one per asked-for series");
+        assert!(found.values().all(|p| Path::new(p).exists()));
+        assert!(found.keys().all(|k| series_ids.contains(k)));
+
+        // The book variant never leaks into a series answer, even though the
+        // same server holds seven book thumbnails.
+        let book_ids: Vec<String> = app
+            .list_thumbnails("demo")
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.variant == VARIANT_BOOK)
+            .map(|t| t.remote_id)
+            .collect();
+        assert_eq!(book_ids.len(), 7);
+        let books = app.cover_paths("demo", VARIANT_BOOK, &book_ids).unwrap();
+        assert_eq!(books.len(), 7);
+        assert!(
+            books.keys().all(|k| !series_ids.contains(k)),
+            "a book id must not appear in a series answer, nor the reverse"
+        );
+
+        // Simulate a wiped cache: the row stays, the file goes.
+        let victim = series_ids[0].clone();
+        std::fs::remove_file(&found[&victim]).unwrap();
+        let after = app
+            .cover_paths("demo", VARIANT_SERIES, &series_ids)
+            .unwrap();
+        assert_eq!(after.len(), 2);
+        assert!(
+            !after.contains_key(&victim),
+            "a vanished file has to read as a miss so the backfill can restore it"
+        );
+
+        // An empty page asks nothing — it must not fall back to the whole table.
+        assert!(app
+            .cover_paths("demo", VARIANT_SERIES, &[])
+            .unwrap()
+            .is_empty());
 
         cleanup_temp(&db);
     }
@@ -5353,8 +5572,7 @@ mod tests {
         );
         assert_eq!(
             stats.disk_bytes, 0,
-            "a download wrote into the cache tiers: {:?}",
-            stats
+            "a download wrote into the cache tiers: {stats:?}"
         );
         let conn = store::open(&db).unwrap();
         let ledger: i64 = conn
@@ -5448,6 +5666,277 @@ mod tests {
         assert!(PumpSlot::claim(&db).is_some(), "the slot never came back");
         drop(PumpSlot::claim(&other));
         // The second key never existed on disk: a slot is a name, not a database.
+        cleanup_temp(&db);
+    }
+
+    /// The milestone's two-level rule, tested where it is actually applied: the
+    /// reader opens a book with what the *series* says, never with what that one
+    /// book was last left in.
+    ///
+    /// This is the FFI-level half of the "I pressed 双页 in volume 3 and now every
+    /// book is a spread" bug. `resolve_for_series` has its own unit tests; what
+    /// can break here is the wiring — loading the override at all, reading the
+    /// series id off the book row, or letting the old per-book tier back in.
+    #[tokio::test]
+    async fn a_series_override_decides_the_open_mode_and_a_books_own_row_does_not() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "s1", "b1", "2024-05-11T18:07:33Z");
+        plant_download(&app, "s1", "b1", &[1, 2, 3, 4]);
+
+        let conn = store::open(&db).unwrap();
+        // The book was last read as a double-page RTL spread, 40% down page 2.
+        // Page 2 rather than 3 because a spread layout makes page 2 an entry
+        // page: 3 would legitimately land the reader on 2, and this test is
+        // about which *settings* win, not about spread arithmetic.
+        store::position::save_with_offset(
+            &conn,
+            "s1",
+            "b1",
+            2,
+            "double",
+            "rtl",
+            Some(0.4),
+            "2024-05-11T18:07:33Z",
+        )
+        .unwrap();
+        drop(conn);
+
+        // The series says LTR, single page — the user's choice for this series.
+        let conn = store::open(&db).unwrap();
+        reader::series_override::save_override(
+            &conn,
+            "s1",
+            "se1",
+            &reader::series_override::SeriesOverride {
+                mode: Some(reader::paging::ReadMode::Single),
+                direction: Some(reader::paging::Direction::Ltr),
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let opened = app
+            .reader_open(
+                "s1".to_string(),
+                "b1".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "unused".to_string(),
+                String::new(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            opened.layout.mode, "single",
+            "the book's remembered 双页 must not decide how it opens"
+        );
+        assert_eq!(
+            opened.layout.direction, "ltr",
+            "and neither may the RTL it was last read in"
+        );
+        assert_eq!(
+            opened.start_page, 2,
+            "the page itself is still personal to the book"
+        );
+        assert_eq!(
+            opened.start_page_offset_ratio,
+            Some(0.4),
+            "and the scroll position comes back with it"
+        );
+
+        // An explicit request still wins: that is how a change the user just made
+        // inside the reader reaches the open path.
+        let reopened = app
+            .reader_open(
+                "s1".to_string(),
+                "b1".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "unused".to_string(),
+                "webtoon".to_string(),
+                "vertical".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(reopened.layout.mode, "webtoon");
+
+        cleanup_temp(&db);
+    }
+
+    /// A series nobody overrode follows the global preference, and a book that
+    /// has no saved offset reports `None` rather than a zero that would claim the
+    /// reader is at the top of a page they never scrolled.
+    #[tokio::test]
+    async fn a_series_without_an_override_follows_the_global_preference() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "s1", "b1", "2024-05-11T18:07:33Z");
+        plant_download(&app, "s1", "b1", &[1, 2, 3]);
+
+        let conn = store::open(&db).unwrap();
+        let mut global = reader::settings::ReaderSettings::load(&conn).unwrap();
+        global.mode = reader::paging::ReadMode::Double;
+        global.direction = reader::paging::Direction::Rtl;
+        reader::settings::ReaderSettings::save(&conn, &global).unwrap();
+        drop(conn);
+
+        let opened = app
+            .reader_open(
+                "s1".to_string(),
+                "b1".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "unused".to_string(),
+                String::new(),
+                String::new(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(opened.layout.mode, "double");
+        assert_eq!(opened.layout.direction, "rtl");
+        assert_eq!(opened.start_page_offset_ratio, None);
+        assert_eq!(opened.start_page, 1);
+
+        cleanup_temp(&db);
+    }
+
+    /// The 条漫 loop, through the two calls the app actually makes.
+    ///
+    /// `reader_set_page_offset` records where in the page the reader is, and
+    /// `reader_open` hands it back. The store's own tests cover the column; what
+    /// can break here is the session: whether the offset survives being set after
+    /// the open, and whether it is dropped once the reader is no longer on that
+    /// page.
+    #[tokio::test]
+    async fn a_webtoon_scroll_position_survives_a_reopen_on_the_same_page() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "offset-server", "offset-book", "2024-05-11T18:07:33Z");
+        plant_download(&app, "offset-server", "offset-book", &[1, 2, 3, 4]);
+
+        let opened = app
+            .reader_open(
+                "offset-server".to_string(),
+                "offset-book".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "unused".to_string(),
+                "webtoon".to_string(),
+                "vertical".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(opened.layout.mode, "webtoon");
+        assert_eq!(opened.start_page_offset_ratio, None, "全新的书从页首开始");
+
+        app.reader_set_page_offset(
+            "offset-server".to_string(),
+            "offset-book".to_string(),
+            Some(0.62),
+        )
+        .unwrap();
+        // The offset is held in the session, not written per scroll frame: a
+        // scroll reports continuously and a write per report would put the whole
+        // position row through SQLite on every frame. `close` is what commits it,
+        // and the app calls exactly this when the reader screen goes away.
+        app.reader_close("offset-server".to_string(), "offset-book".to_string())
+            .unwrap();
+
+        let reopened = app
+            .reader_open(
+                "offset-server".to_string(),
+                "offset-book".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "unused".to_string(),
+                "webtoon".to_string(),
+                "vertical".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.start_page_offset_ratio,
+            Some(0.62),
+            "读到一半关掉，下次必须回到同一个高度"
+        );
+        assert_eq!(reopened.start_page, 1);
+
+        // Moving to a different page ends the claim: page 1 at 62% says nothing
+        // about page 3, and carrying it over would drop the reader into the
+        // middle of a page they have never seen.
+        app.reader_turn("offset-server".to_string(), "offset-book".to_string(), 3)
+            .unwrap();
+        app.reader_close("offset-server".to_string(), "offset-book".to_string())
+            .unwrap();
+        let after_turn = app
+            .reader_open(
+                "offset-server".to_string(),
+                "offset-book".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "unused".to_string(),
+                "webtoon".to_string(),
+                "vertical".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(after_turn.start_page, 3);
+        assert_eq!(after_turn.start_page_offset_ratio, None);
+
+        cleanup_temp(&db);
+    }
+
+    /// An out-of-range ratio is clamped in the session rather than rejected: an
+    /// overscroll bounce reports 1.02, and the page is still worth recording.
+    #[tokio::test]
+    async fn an_out_of_range_scroll_ratio_is_clamped_at_the_session() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "clamp-server", "clamp-book", "2024-05-11T18:07:33Z");
+        plant_download(&app, "clamp-server", "clamp-book", &[1, 2]);
+
+        app.reader_open(
+            "clamp-server".to_string(),
+            "clamp-book".to_string(),
+            "http://127.0.0.1:1".to_string(),
+            "unused".to_string(),
+            "webtoon".to_string(),
+            "vertical".to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        app.reader_set_page_offset(
+            "clamp-server".to_string(),
+            "clamp-book".to_string(),
+            Some(1.4),
+        )
+        .unwrap();
+        {
+            let guard = readers();
+            let live = guard
+                .get(&reader_key("clamp-server", "clamp-book"))
+                .unwrap();
+            assert_eq!(live.session.page_offset_ratio(), Some(1.0));
+        }
+        app.reader_close("clamp-server".to_string(), "clamp-book".to_string())
+            .unwrap();
+
+        // Setting it on a reader that was never opened is an error, not a silent
+        // write to a row for a book nobody is reading.
+        assert!(app
+            .reader_set_page_offset(
+                "clamp-server".to_string(),
+                "clamp-unopened".to_string(),
+                Some(0.5)
+            )
+            .is_err());
+
         cleanup_temp(&db);
     }
 }

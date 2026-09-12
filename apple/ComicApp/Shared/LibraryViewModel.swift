@@ -1,9 +1,11 @@
 import Foundation
 import Combine
+import SwiftUI
 import KomgaStore
 import KomgaAPI
 import KomgaSync
 import KomgaReader
+import KomgaDownloads
 import Network
 
 /// Errors surfaced by the server-management flow (banner messages).
@@ -27,11 +29,16 @@ enum ServerConfigError: LocalizedError, Equatable {
 /// `app_state`. Every remote entity keys on `(serverId, remoteId)`.
 @MainActor
 final class LibraryViewModel: ObservableObject {
-    let store: KomgaStore
+    @Published var startupError: Error?
+    private(set) var store: KomgaStore?
+    private let dbURL: URL
+    private let cacheURL: URL
     private let cache: DiskImageCache
     private let keychain = KeychainStore()
     private var realCoverLoader: CoverLoader
     private let demoCoverLoader: CoverLoader
+
+    @Published private(set) var activeSessionID: UUID = UUID()
 
     @Published var server: ServerProfile?
     @Published var servers: [ServerProfile] = []
@@ -67,6 +74,13 @@ final class LibraryViewModel: ObservableObject {
     private var streamUnavailable: String?
     /// Queued client writes still waiting for the server (Outbox badge).
     @Published var outboxPending = 0
+    @Published var outboxCounts = OutboxCounts()
+
+    // MARK: Stage 9 — offline downloads
+    private(set) var downloadEngine: DownloadEngine?
+    @Published var downloads: [DownloadRow] = []
+    @Published var downloadStorageBytes: Int64 = 0
+    @Published var downloadPageCount: Int64 = 0
     /// The reachability watcher is started once per foreground session.
     private var syncTriggersStarted = false
 
@@ -81,8 +95,13 @@ final class LibraryViewModel: ObservableObject {
     }
 
     /// Connectivity watcher: coming back online is a Reconcile trigger.
-    private let pathMonitor = NWPathMonitor()
+    private var pathMonitor: NWPathMonitor?
     private var wasOffline = false
+
+    /// Sync mutual exclusion & coalescing
+    private var currentSyncTask: Task<Bool, Never>?
+    private var nextSyncTask: Task<Bool, Never>?
+    private var nextSyncTrigger: ReconcileTrigger?
 
     // MARK: Stage 4 — media library browsing state (全部来自 SQLite)
 
@@ -112,23 +131,39 @@ final class LibraryViewModel: ObservableObject {
     @Published var bookReadFilter: String? // "read" | "in_progress" | "unread" | nil
     @Published var bookSort = "number"
     @Published var bookCovers: [String: Data] = [:]
+    @Published var appSettings = AppSettings()
 
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let dbURL = documents.appendingPathComponent("comic.sqlite")
         let cacheURL = documents.appendingPathComponent("cache")
-        // Each `let` is assigned exactly once via a fallible-then-fallback helper.
-        self.store = LibraryViewModel.makeStore(at: dbURL)
+        self.dbURL = dbURL
+        self.cacheURL = cacheURL
         self.cache = LibraryViewModel.makeCache(at: cacheURL)
         self.realCoverLoader = CoverLoader(cache: cache, fetcher: URLSessionCoverFetcher(auth: .apiKey("")))
         self.demoCoverLoader = CoverLoader(cache: cache, fetcher: DemoCoverFetcher())
-        restoreState()
+
+        do {
+            let store = try KomgaStore(path: dbURL.path)
+            self.store = store
+            restoreState()
+        } catch {
+            self.store = nil
+            self.startupError = error
+        }
     }
 
-    /// Opens the on-disk store, falling back to an in-memory store if the
-    /// path is unavailable so the app can still launch.
-    private static func makeStore(at dbURL: URL) -> KomgaStore {
-        (try? KomgaStore(path: dbURL.path)) ?? (try! KomgaStore())
+    /// Retries opening the on-disk database after a startup failure.
+    func retryStartup() {
+        startupError = nil
+        do {
+            let store = try KomgaStore(path: dbURL.path)
+            self.store = store
+            restoreState()
+        } catch {
+            self.store = nil
+            self.startupError = error
+        }
     }
 
     /// Opens the on-disk cache, falling back to a temp cache if needed.
@@ -143,8 +178,13 @@ final class LibraryViewModel: ObservableObject {
     // MARK: - Restore / auth
 
     private func restoreState() {
+        guard let store else { return }
+        if let raw = try? store.appStateValue(key: AppSettings.stateKey) {
+            appSettings = AppSettings.decode(from: raw)
+        }
         do {
             servers = try store.fetchServers()
+            retryPendingCredentialCleanups()
         } catch {
             banner = "读取服务器列表失败：\(error.localizedDescription)"
         }
@@ -157,6 +197,61 @@ final class LibraryViewModel: ObservableObject {
             banner = banner ?? "读取当前服务器失败：\(error.localizedDescription)"
         }
         reloadCoverLoader()
+        if let server {
+            downloadEngine = makeDownloadEngine(for: server)
+            Task { await refreshDownloads() }
+        }
+    }
+
+    func updateAppSettings(_ newSettings: AppSettings) {
+        guard let store else { return }
+        appSettings = newSettings
+        try? store.putAppStateValue(key: AppSettings.stateKey, value: newSettings.encode())
+        if !newSettings.autoSyncMetadata {
+            stopLiveSync()
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch appSettings.appearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
+
+    var gridItemMinimumWidth: CGFloat {
+        switch appSettings.gridDensity {
+        case "compact": return 95
+        case "spacious": return 160
+        default: return 120
+        }
+    }
+
+    var gridSpacing: CGFloat {
+        switch appSettings.gridDensity {
+        case "compact": return 8
+        case "spacious": return 16
+        default: return 12
+        }
+    }
+
+    var gridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: gridItemMinimumWidth), spacing: gridSpacing)]
+    }
+
+    func diskCacheSizeBytes() -> Int64 {
+        (try? cache.bytesUsed()) ?? 0
+    }
+
+    func clearDiskCache() {
+        for tier in [DiskImageCache.prefetchTier, DiskImageCache.pagesTier] {
+            if let fileNames = try? cache.files(inTier: tier) {
+                for name in fileNames {
+                    try? cache.remove(cache.url(inTier: tier, named: name))
+                }
+            }
+        }
     }
 
     /// Rebuild the real cover fetcher with the active server's auth method.
@@ -209,17 +304,19 @@ final class LibraryViewModel: ObservableObject {
 
     /// 保存 Server Profile: secret → Keychain, profile → SQLite, libraries
     /// mirror, then activate + bootstrap. Called after a successful test.
+    @discardableResult
     func addServer(
         displayName: String,
         baseURL raw: String,
         authType: AuthType,
         secret: String,
         result: ConnectionResult
-    ) async {
+    ) async -> Bool {
         do {
             let base = try ServerURL.normalized(raw)
+            guard let store else { return false }
             let id = UUID().uuidString
-            let ref = KeychainStore.credentialRef(serverID: id)
+            let ref = "keychain:\(id)-\(UUID().uuidString)"
             try keychain.save(secret: secret, for: ref)
             let profile = ServerProfile(
                 id: id,
@@ -230,16 +327,27 @@ final class LibraryViewModel: ObservableObject {
                 capabilities: result.capabilities,
                 lastSuccessfulConnection: Date()
             )
-            try store.upsertServer(profile)
-            try store.upsertLibraries(serverID: id, libraries: result.libraries)
-            try await activate(profile)
-            banner = "已连接\(result.serverVersion.map { " Komga \($0)" } ?? "") · \(result.libraries.count) 个库"
+            do {
+                try store.upsertServerWithLibraries(profile: profile, libraries: result.libraries)
+            } catch {
+                try? keychain.delete(ref: ref)
+                throw error
+            }
+            do {
+                try await transitionServer(to: profile)
+                banner = "已连接\(result.serverVersion.map { " Komga \($0)" } ?? "") · \(result.libraries.count) 个库"
+            } catch {
+                banner = "已添加「\(displayName)」，但连接激活失败：\(error.localizedDescription)"
+            }
+            return true
         } catch {
             banner = "添加服务器失败：\(error.localizedDescription)"
+            return false
         }
     }
 
-    /// Edit: re-connect, overwrite the secret, refresh profile + libraries.
+    /// Edit: re-connect, overwrite the secret, refresh profile + libraries atomically.
+    @discardableResult
     func updateServer(
         _ existing: ServerProfile,
         displayName: String,
@@ -247,38 +355,87 @@ final class LibraryViewModel: ObservableObject {
         authType: AuthType,
         secret: String,
         result: ConnectionResult
-    ) async {
+    ) async -> Bool {
         do {
             let base = try ServerURL.normalized(raw)
-            let ref = existing.credentialRef ?? KeychainStore.credentialRef(serverID: existing.id)
-            try keychain.save(secret: secret, for: ref)
+            guard let store else { return false }
+            let oldRef = existing.credentialRef
+            let newRef = "keychain:\(existing.id)-\(UUID().uuidString)"
+            try keychain.save(secret: secret, for: newRef)
             let profile = ServerProfile(
                 id: existing.id,
                 displayName: displayName,
                 baseURL: base,
                 authType: authType,
-                credentialRef: ref,
+                credentialRef: newRef,
                 capabilities: result.capabilities,
                 lastSuccessfulConnection: Date()
             )
-            try store.upsertServer(profile)
-            _ = try store.upsertLibraries(serverID: existing.id, libraries: result.libraries)
+            do {
+                try store.upsertServerWithLibraries(profile: profile, libraries: result.libraries)
+            } catch {
+                try? keychain.delete(ref: newRef)
+                throw error
+            }
+
+            if let old = oldRef, old != newRef {
+                scheduleCredentialCleanup(ref: old)
+            }
+
             if server?.id == existing.id {
-                try await activate(profile)
+                do {
+                    try await transitionServer(to: profile)
+                } catch {
+                    banner = "已更新「\(displayName)」，但重连失败：\(error.localizedDescription)"
+                    return true
+                }
             } else {
-                servers = try store.fetchServers()
+                servers = (try? store.fetchServers()) ?? []
                 banner = "已更新「\(displayName)」"
             }
+            return true
         } catch {
             banner = "更新服务器失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func scheduleCredentialCleanup(ref: String) {
+        guard let store else {
+            try? keychain.delete(ref: ref)
+            return
+        }
+        var pending = (try? store.pendingCredentialCleanups()) ?? []
+        if !pending.contains(ref) {
+            pending.append(ref)
+            try? store.setPendingCredentialCleanups(pending)
+        }
+        if (try? keychain.delete(ref: ref)) != nil {
+            pending.removeAll(where: { $0 == ref })
+            try? store.setPendingCredentialCleanups(pending)
+        }
+    }
+
+    func retryPendingCredentialCleanups() {
+        guard let store else { return }
+        let pending = (try? store.pendingCredentialCleanups()) ?? []
+        var remaining: [String] = []
+        for ref in pending {
+            do {
+                try keychain.delete(ref: ref)
+            } catch {
+                remaining.append(ref)
+            }
+        }
+        if remaining != pending {
+            try? store.setPendingCredentialCleanups(remaining)
         }
     }
 
     /// 切换服务器.
     func switchServer(to profile: ServerProfile) async {
         do {
-            try store.setActiveServer(id: profile.id)
-            try await activate(profile)
+            try await transitionServer(to: profile)
             banner = "已切换到「\(profile.displayName)」"
         } catch {
             banner = "切换失败：\(error.localizedDescription)"
@@ -288,21 +445,19 @@ final class LibraryViewModel: ObservableObject {
     /// 删除服务器 (secret + profile + active state + cover records/files).
     func deleteServer(_ profile: ServerProfile) async {
         do {
-            if let ref = profile.credentialRef {
-                try keychain.delete(ref: ref)
-            }
+            guard let store else { return }
             // Cover files are removed together with their SQLite records.
             let coverFiles = (try? store.listThumbnails(serverID: profile.id)) ?? []
-            _ = try store.deleteServer(id: profile.id)
+            let deleted = try store.deleteServer(id: profile.id)
+            if deleted, let ref = profile.credentialRef {
+                scheduleCredentialCleanup(ref: ref)
+            }
             for record in coverFiles {
                 try? cache.remove(URL(fileURLWithPath: record.localPath))
             }
             servers = try store.fetchServers()
             if server?.id == profile.id {
-                self.server = nil
-                series = []
-                covers = [:]
-                reloadCoverLoader()
+                try await transitionServer(to: nil)
             }
             banner = "已删除「\(profile.displayName)」"
         } catch {
@@ -310,15 +465,70 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    /// Make the profile the active server, reload the auth-dependent pieces
-    /// and pull the first series page.
-    private func activate(_ profile: ServerProfile) async throws {
-        try store.setActiveServer(id: profile.id)
-        self.server = profile
-        self.servers = try store.fetchServers()
-        reloadCoverLoader()
-        try loadSeries()
-        await refreshAllCovers()
+    /// Centralized server transition: cancels in-flight tasks, generates a new session ID,
+    /// cleans up or activates the profile, and starts new data loads under the active generation.
+    func transitionServer(to profile: ServerProfile?) async throws {
+        let runningLiveSync = liveSyncTask
+        stopLiveSync()
+        _ = await runningLiveSync?.value
+
+        if let engine = downloadEngine {
+            await engine.stop()
+            downloadEngine = nil
+        }
+        let runningSync = currentSyncTask
+        currentSyncTask?.cancel()
+        nextSyncTask?.cancel()
+        currentSyncTask = nil
+        nextSyncTask = nil
+        _ = await runningSync?.value
+
+        activeSessionID = UUID()
+        let sessionID = activeSessionID
+
+        guard let store else { return }
+
+        if let profile {
+            try store.setActiveServer(id: profile.id)
+            guard activeSessionID == sessionID else { return }
+            self.server = profile
+            self.servers = (try? store.fetchServers()) ?? []
+            self.series = []
+            self.covers = [:]
+            self.libraries = []
+            self.continueReading = []
+            self.collections = []
+            self.readlists = []
+            self.seriesDetail = nil
+            self.books = []
+            self.bookCovers = [:]
+            reloadCoverLoader()
+            downloadEngine = makeDownloadEngine(for: profile)
+            Task { await refreshDownloads() }
+            try loadSeries()
+            guard activeSessionID == sessionID && self.server?.id == profile.id else { return }
+            await refreshAllCovers()
+            guard activeSessionID == sessionID && self.server?.id == profile.id else { return }
+            try syncMediaState()
+            refreshSyncState()
+            startLiveSync()
+        } else {
+            self.server = nil
+            self.series = []
+            self.covers = [:]
+            self.libraries = []
+            self.continueReading = []
+            self.collections = []
+            self.readlists = []
+            self.seriesDetail = nil
+            self.books = []
+            self.bookCovers = [:]
+            self.downloads = []
+            self.downloadStorageBytes = 0
+            self.downloadPageCount = 0
+            reloadCoverLoader()
+            refreshSyncState()
+        }
     }
 
     private func makeAuth(authType: AuthType, secret: String) throws -> AuthMethod {
@@ -339,7 +549,8 @@ final class LibraryViewModel: ObservableObject {
     func startSyncTriggers() {
         if !syncTriggersStarted {
             syncTriggersStarted = true
-            pathMonitor.pathUpdateHandler = { [weak self] path in
+            let monitor = NWPathMonitor()
+            monitor.pathUpdateHandler = { [weak self] path in
                 // The handler runs off the main actor: only the derived Bool crosses.
                 let offline = path.status != .satisfied
                 Task { @MainActor [weak self] in
@@ -353,7 +564,8 @@ final class LibraryViewModel: ObservableObject {
                     self.wasOffline = offline
                 }
             }
-            pathMonitor.start(queue: DispatchQueue(label: "komga.reachability"))
+            monitor.start(queue: DispatchQueue(label: "komga.reachability"))
+            self.pathMonitor = monitor
         }
         startLiveSync()
     }
@@ -361,8 +573,9 @@ final class LibraryViewModel: ObservableObject {
     /// Tears the watchers down (background / teardown). Disconnecting here never
     /// reconciles — the next foreground entry does that instead.
     func stopSyncTriggers() {
-        pathMonitor.pathUpdateHandler = nil
-        pathMonitor.cancel()
+        pathMonitor?.pathUpdateHandler = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
         syncTriggersStarted = false
         stopLiveSync()
     }
@@ -388,6 +601,10 @@ final class LibraryViewModel: ObservableObject {
     /// Scene came back: reconnect now, and make up for the window we were away.
     func enterForeground() async {
         startSyncTriggers()
+        if let engine = downloadEngine {
+            await engine.resume()
+            await refreshDownloads()
+        }
         guard server != nil else { return }
         await reconcile(trigger: .didBecomeActive)
         await refreshShelfAfterLiveUpdate()
@@ -397,13 +614,19 @@ final class LibraryViewModel: ObservableObject {
     /// entry is what converges, and a background task must not spend the server.
     func enterBackground() {
         stopSyncTriggers()
+        Task {
+            await downloadEngine?.stop()
+        }
     }
 
     /// A live update may have moved anything the shelf reads.
     private func refreshShelfAfterLiveUpdate() async {
-        guard server != nil else { return }
+        let sessionID = activeSessionID
+        let serverID = server?.id
+        guard let server, server.id == serverID else { return }
         try? loadSeries()
         try? syncMediaState()
+        guard activeSessionID == sessionID && self.server?.id == serverID else { return }
         refreshSyncState()
     }
 
@@ -412,65 +635,121 @@ final class LibraryViewModel: ObservableObject {
     /// other, so there is exactly one owner of each while the scene is active.
     private func liveSyncLoop(serverID: String, baseURL: String, auth: AuthMethod) async {
         let transport = KomgaTransport(baseURL: baseURL, auth: auth)
+        let sessionID = activeSessionID
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                await self.outboxTicker(serverID: serverID, transport: transport)
+                await self.outboxTicker(serverID: serverID, transport: transport, sessionID: sessionID)
             }
             group.addTask {
-                await self.streamLoop(serverID: serverID, baseURL: baseURL, transport: transport)
+                await self.streamLoop(serverID: serverID, baseURL: baseURL, transport: transport, sessionID: sessionID)
             }
         }
     }
 
     /// Stage 7: build the reader model for one book.
     ///
-    /// Returns nil when there is no active server to read pages from; the book
-    /// sheet turns that into a disabled 开始阅读 rather than a crash. The cache
-    /// and the store are the ones this view model already owns, so the reader
-    /// sees exactly the mirror the shelf shows.
-    func readerModel(for book: BookRecord) -> ReaderModel? {
-        guard let server else { return nil }
-        let auth = (try? authMethod(for: server)) ?? .apiKey("")
-        let transport = KomgaTransport(baseURL: server.baseURL, auth: auth)
-        let store = self.store
-        return ReaderModel(
+    /// Active reader sessions cached by composite key "\(serverID):\(bookID)".
+    private var activeReaders: [String: ReaderModel] = [:]
+
+    /// Returns an existing or new ReaderModel for the given (serverID, bookID).
+    /// Reuses active sessions if not closed, satisfying desktop window session reuse.
+    func readerModel(serverID: String? = nil, bookID: String, title: String? = nil, mediaType: String? = nil) -> ReaderModel? {
+        guard let store else { return nil }
+        let targetServerID = serverID ?? server?.id ?? ""
+        guard !targetServerID.isEmpty else { return nil }
+        let key = "\(targetServerID):\(bookID)"
+        if let existing = activeReaders[key], !existing.isClosed {
+            return existing
+        }
+
+        let targetServer = (server?.id == targetServerID) ? server : servers.first(where: { $0.id == targetServerID })
+        let auth = targetServer.flatMap { try? authMethod(for: $0) } ?? .apiKey("")
+        let baseURL = targetServer?.baseURL ?? "http://localhost"
+        let transport = KomgaTransport(baseURL: baseURL, auth: auth)
+
+        let resolvedTitle: String
+        let resolvedMediaType: String?
+        if let title, !title.isEmpty {
+            resolvedTitle = title
+            resolvedMediaType = mediaType
+        } else if let book = books.first(where: { $0.remoteID == bookID }) {
+            resolvedTitle = book.title
+            resolvedMediaType = book.mediaType
+        } else if let row = continueReading.first(where: { $0.bookID == bookID }) {
+            resolvedTitle = row.bookTitle
+            resolvedMediaType = (try? store.bookDetail(serverID: targetServerID, bookID: bookID))?.mediaType
+        } else if let detail = try? store.bookDetail(serverID: targetServerID, bookID: bookID) {
+            resolvedTitle = detail.title
+            resolvedMediaType = detail.mediaType
+        } else {
+            resolvedTitle = bookID
+            resolvedMediaType = mediaType
+        }
+
+        let reader = ReaderModel(
             store: store,
-            serverID: server.id,
-            bookID: book.remoteID,
-            title: book.title,
-            bookMediaType: book.mediaType,
-            baseURL: server.baseURL,
+            serverID: targetServerID,
+            bookID: bookID,
+            title: resolvedTitle,
+            bookMediaType: resolvedMediaType,
+            baseURL: baseURL,
             auth: auth,
             disk: cache,
+            cacheBudgetBytes: Int64(appSettings.cacheLimitMiB) * 1024 * 1024,
             flush: {
-                // Draining the queue stays Stage 6's code path; the reader only
-                // nudges it so an explicit mark leaves immediately.
-                _ = try? await OutboxUpload.run(store: store, serverID: server.id, writer: transport)
+                _ = try? await OutboxUpload.run(store: store, serverID: targetServerID, writer: transport)
             }
         )
+        activeReaders[key] = reader
+        return reader
+    }
+
+    func readerModel(bookID: String, title: String, mediaType: String?) -> ReaderModel? {
+        readerModel(serverID: server?.id, bookID: bookID, title: title, mediaType: mediaType)
+    }
+
+    func readerModel(for book: BookRecord) -> ReaderModel? {
+        readerModel(serverID: server?.id, bookID: book.remoteID, title: book.title, mediaType: book.mediaType)
+    }
+
+    func readerModel(forBookID bookID: String) -> ReaderModel? {
+        readerModel(serverID: server?.id, bookID: bookID)
+    }
+
+    func releaseReader(serverID: String, bookID: String) {
+        let key = "\(serverID):\(bookID)"
+        activeReaders.removeValue(forKey: key)
     }
 
     /// Background Upload Sync: drain whatever the Outbox has made due. A pass
     /// with an empty queue costs one indexed query, so the tick can be short.
-    private func outboxTicker(serverID: String, transport: KomgaTransport) async {
+    private func outboxTicker(serverID: String, transport: KomgaTransport, sessionID: UUID) async {
         while !Task.isCancelled {
+            guard activeSessionID == sessionID && server?.id == serverID, let store else { return }
             do {
                 _ = try await OutboxUpload.run(store: store, serverID: serverID, writer: transport)
             } catch {
                 // A queue we could not read is not a reason to stop trying: the
                 // next tick looks at it again. Nothing is ever dropped here.
             }
+            guard activeSessionID == sessionID && server?.id == serverID else { return }
             refreshOutboxBadge(serverID: serverID)
             try? await Task.sleep(nanoseconds: Self.outboxTickNanoseconds)
         }
     }
 
+    private enum LiveSyncError: Error {
+        case reconcileFailed
+    }
+
     /// Event Driven Sync: hold the stream, apply hints, and reconnect with the
     /// shared backoff. A reconnect always reconciles before its hints are trusted.
-    private func streamLoop(serverID: String, baseURL: String, transport: KomgaTransport) async {
+    private func streamLoop(serverID: String, baseURL: String, transport: KomgaTransport, sessionID: UUID) async {
         var attempts = 0
         var hasEverConnected = false
+        var hints = EventHints()
         while !Task.isCancelled {
+            guard activeSessionID == sessionID && server?.id == serverID, let store else { return }
             if let reason = streamUnavailable {
                 // Reconcile-only mode: the socket is not attempted again, and the
                 // mirror keeps converging through every other trigger.
@@ -478,19 +757,23 @@ final class LibraryViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
                 continue
             }
-            var hints = EventHints()
             var reconciledForThisConnection = !hasEverConnected
             do {
                 let client = SSEClient(baseURL: baseURL, auth: transport.auth)
                 for try await event in client.events(lastEventID: lastEventID) {
+                    guard activeSessionID == sessionID && server?.id == serverID else { return }
                     attempts = 0
                     hasEverConnected = true
                     liveSyncStatus = nil
                     if !reconciledForThisConnection {
                         // The gap this connection replaces is unknowable, so the
                         // sweep comes first — even if events are already in hand.
+                        let ok = await reconcile(trigger: .sseReconnected)
+                        if !ok {
+                            hints.merge(EventClassifying.classify(event))
+                            throw LiveSyncError.reconcileFailed
+                        }
                         reconciledForThisConnection = true
-                        await reconcile(trigger: .sseReconnected)
                     }
                     if let id = event.id { lastEventID = id }
                     if let retry = event.retryMS { retryFloorSeconds = TimeInterval(retry / 1000) }
@@ -498,17 +781,27 @@ final class LibraryViewModel: ObservableObject {
                     let batch = hints
                     hints = EventHints()
                     if batch.isEmpty { continue }
-                    let needsSweep = try await EventApplication.apply(
-                        hints: batch, store: store, serverID: serverID, reader: transport
-                    )
-                    if needsSweep != nil {
-                        await reconcile(trigger: .manualRefresh)
-                    } else {
-                        await refreshShelfAfterLiveUpdate()
+                    do {
+                        let needsSweep = try await EventApplication.apply(
+                            hints: batch, store: store, serverID: serverID, reader: transport
+                        )
+                        guard activeSessionID == sessionID && server?.id == serverID else { return }
+                        if needsSweep != nil {
+                            let ok = await reconcile(trigger: .manualRefresh)
+                            if !ok {
+                                hints.merge(batch)
+                            }
+                        } else {
+                            await refreshShelfAfterLiveUpdate()
+                        }
+                    } catch {
+                        hints.merge(batch)
                     }
                 }
                 // The server closed the stream cleanly: that is a reconnect too.
                 hasEverConnected = true
+            } catch LiveSyncError.reconcileFailed {
+                // Reconcile failed: back off and retry bounded without dropping hints or advancing cursor
             } catch let error as KomgaAPIError {
                 switch error {
                 case .apiCompatibility(let message):
@@ -523,10 +816,10 @@ final class LibraryViewModel: ObservableObject {
             } catch {
                 // Anything else is a broken socket: back off and try again.
             }
-            if Task.isCancelled { return }
+            if Task.isCancelled || activeSessionID != sessionID || server?.id != serverID { return }
             attempts += 1
-            let delay = max(Double(outboxBackoffSeconds(Int64(attempts))), retryFloorSeconds)
-            liveSyncStatus = "事件流断开，\(Int(delay)) 秒后重连"
+            let delay = min(max(Double(outboxBackoffSeconds(Int64(attempts))), retryFloorSeconds), 60.0)
+            liveSyncStatus = "事件流重连中（第 \(attempts) 次尝试，\(Int(delay)) 秒后重试）"
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
     }
@@ -536,14 +829,41 @@ final class LibraryViewModel: ObservableObject {
     private static let outboxTickNanoseconds: UInt64 = 5_000_000_000
 
     /// The queued-mutation badge (SQLite only).
-    private func refreshOutboxBadge(serverID: String) {
-        let counts = try? store.outboxCounts(serverID: serverID, now: outboxSecondText(Date()))
-        outboxPending = Int(counts?.total ?? 0)
+    func refreshOutboxBadge(serverID: String) {
+        guard let store else { return }
+        let counts = (try? store.outboxCounts(serverID: serverID, now: outboxSecondText(Date()))) ?? OutboxCounts()
+        outboxCounts = counts
+        outboxPending = Int(counts.total)
+    }
+
+    func fetchOutboxEntries() -> [OutboxEntry] {
+        guard let store, let server else { return [] }
+        return (try? store.allOutboxEntries(serverID: server.id)) ?? []
+    }
+
+    @discardableResult
+    func retryFailedOutbox() async -> Int {
+        guard let store, let server else { return 0 }
+        do {
+            let reset = try store.retryAllFailed(serverID: server.id)
+            refreshOutboxBadge(serverID: server.id)
+            if reset > 0, let transport {
+                _ = try? await OutboxUpload.run(
+                    store: store,
+                    serverID: server.id,
+                    writer: transport
+                )
+                refreshOutboxBadge(serverID: server.id)
+            }
+            return reset
+        } catch {
+            return 0
+        }
     }
 
     /// Reads `sync_state` into the published fields (SQLite only).
     func refreshSyncState() {
-        guard let server else {
+        guard let store, let server else {
             lastSyncAt = nil
             resumableEntities = []
             syncError = nil
@@ -571,80 +891,145 @@ final class LibraryViewModel: ObservableObject {
 
     /// Bootstrap Sync: Libraries → Series → Books → Collections → Readlists →
     /// Progress, resuming from the cursors a previous run left behind.
-    func bootstrapLibrary(fresh: Bool = false) async {
-        guard let transport, let server else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
-        do {
-            let summary = try await FullSync.run(
-                fetcher: transport,
-                store: store,
-                serverID: server.id,
-                start: fresh ? .fresh : .resume
-            )
-            try loadSeries()
-            await refreshAllCovers()
-            try syncMediaState()
-            refreshSyncState()
-            var message = "已镜像 \(summary.series) Series / \(summary.books) Books"
-            if !summary.resumedSteps.isEmpty {
-                message += "（续跑 \(summary.resumedSteps.joined(separator: "、"))）"
-            }
-            banner = message
-        } catch {
-            refreshSyncState()
-            banner = "同步失败（本地库仍可用）：\(error.localizedDescription)"
+    @discardableResult
+    func bootstrapLibrary(fresh: Bool = false) async -> Bool {
+        guard let server else { return false }
+        let sessionID = activeSessionID
+        let serverID = server.id
+
+        if let current = currentSyncTask {
+            _ = await current.value
         }
+        guard activeSessionID == sessionID && self.server?.id == serverID else { return false }
+
+        let task = Task<Bool, Never> { @MainActor [weak self] in
+            guard let self else { return false }
+            guard let transport = self.transport, let store = self.store else { return false }
+            self.isRefreshing = true
+            defer { self.isRefreshing = false }
+            do {
+                let summary = try await FullSync.run(
+                    fetcher: transport,
+                    store: store,
+                    serverID: serverID,
+                    start: fresh ? .fresh : .resume
+                )
+                guard self.activeSessionID == sessionID && self.server?.id == serverID else { return false }
+                try self.loadSeries()
+                await self.refreshAllCovers()
+                try self.syncMediaState()
+                self.refreshSyncState()
+                var message = "已镜像 \(summary.series) Series / \(summary.books) Books"
+                if !summary.resumedSteps.isEmpty {
+                    message += "（续跑 \(summary.resumedSteps.joined(separator: "、"))）"
+                }
+                self.banner = message
+                return true
+            } catch {
+                guard self.activeSessionID == sessionID && self.server?.id == serverID else { return false }
+                self.refreshSyncState()
+                self.banner = "同步失败（本地库仍可用）：\(error.localizedDescription)"
+                return false
+            }
+        }
+        currentSyncTask = task
+        let result = await task.value
+        if currentSyncTask == task {
+            currentSyncTask = nil
+        }
+        return result
     }
 
     /// Reconcile Sync for one trigger. Every trigger runs the same full id
     /// sweep, so the mirror converges even when no SSE event ever arrived.
-    func reconcile(trigger: ReconcileTrigger) async {
-        guard let transport, let server, !isRefreshing else { return }
-        do {
-            guard try ReconcileSync.shouldRun(store: store, serverID: server.id, trigger: trigger)
-            else { return } // background trigger inside the throttle window
-        } catch {
-            return
+    @discardableResult
+    func reconcile(trigger: ReconcileTrigger) async -> Bool {
+        guard let server else { return false }
+        let sessionID = activeSessionID
+        let serverID = server.id
+
+        if let current = currentSyncTask {
+            if nextSyncTrigger == nil || !trigger.isBackground {
+                nextSyncTrigger = trigger
+            }
+            if let next = nextSyncTask {
+                return await next.value
+            }
+            let next = Task<Bool, Never> { @MainActor [weak self] in
+                _ = await current.value
+                guard let self, self.activeSessionID == sessionID, self.server?.id == serverID else {
+                    return false
+                }
+                let t = self.nextSyncTrigger ?? trigger
+                self.nextSyncTrigger = nil
+                self.nextSyncTask = nil
+                return await self.performReconcile(trigger: t, sessionID: sessionID, serverID: serverID)
+            }
+            nextSyncTask = next
+            return await next.value
         }
-        isRefreshing = true
-        defer { isRefreshing = false }
+
+        return await performReconcile(trigger: trigger, sessionID: sessionID, serverID: serverID)
+    }
+
+    private func performReconcile(trigger: ReconcileTrigger, sessionID: UUID, serverID: String) async -> Bool {
+        guard let transport = self.transport, let store = self.store else { return false }
         do {
-            let summary = try await ReconcileSync.run(
-                fetcher: transport, store: store, serverID: server.id, trigger: trigger
-            )
-            // Delete propagation reaches the disk too: pruned covers are gone.
-            for path in summary.orphanedCovers {
-                try? cache.remove(URL(fileURLWithPath: path))
-            }
-            let changed = summary.totalMutations() > 0
-            if changed {
-                try loadSeries()
-                await refreshAllCovers()
-                try syncMediaState()
-            }
-            refreshSyncState()
-            if trigger == .manualRefresh {
-                let added = summary.seriesAdded + summary.booksAdded
-                let edited = summary.seriesChanged + summary.booksChanged
-                let removed = summary.seriesRemoved + summary.booksRemoved
-                banner = changed
-                    ? "同步完成：新增 \(added) · 更新 \(edited) · 删除 \(removed)"
-                    : "本地库已与服务器一致"
-            }
+            guard try ReconcileSync.shouldRun(store: store, serverID: serverID, trigger: trigger)
+            else { return false }
         } catch {
-            // An unreachable server never takes the shelf down.
-            refreshSyncState()
-            if trigger == .manualRefresh {
-                banner = "同步失败（本地库仍可用）：\(error.localizedDescription)"
+            return false
+        }
+
+        let task = Task<Bool, Never> { @MainActor [weak self] in
+            guard let self else { return false }
+            self.isRefreshing = true
+            defer { self.isRefreshing = false }
+            do {
+                let summary = try await ReconcileSync.run(
+                    fetcher: transport, store: store, serverID: serverID, trigger: trigger
+                )
+                guard self.activeSessionID == sessionID && self.server?.id == serverID else { return false }
+                for path in summary.orphanedCovers {
+                    try? self.cache.remove(URL(fileURLWithPath: path))
+                }
+                let changed = summary.totalMutations() > 0
+                if changed {
+                    try self.loadSeries()
+                    await self.refreshAllCovers()
+                    try self.syncMediaState()
+                }
+                self.refreshSyncState()
+                if trigger == .manualRefresh {
+                    let added = summary.seriesAdded + summary.booksAdded
+                    let edited = summary.seriesChanged + summary.booksChanged
+                    let removed = summary.seriesRemoved + summary.booksRemoved
+                    self.banner = changed
+                        ? "同步完成：新增 \(added) · 更新 \(edited) · 删除 \(removed)"
+                        : "本地库已与服务器一致"
+                }
+                return true
+            } catch {
+                guard self.activeSessionID == sessionID && self.server?.id == serverID else { return false }
+                self.refreshSyncState()
+                if trigger == .manualRefresh {
+                    self.banner = "同步失败（本地库仍可用）：\(error.localizedDescription)"
+                }
+                return false
             }
         }
+        currentSyncTask = task
+        let result = await task.value
+        if currentSyncTask == task {
+            currentSyncTask = nil
+        }
+        return result
     }
 
     // MARK: - Sync (write-through to SQLite)
 
     func loadSeries() throws {
-        guard let server else { return }
+        guard let store, let server else { return }
         series = try store.fetchSeries(serverID: server.id, limit: 200, offset: 0)
     }
 
@@ -656,7 +1041,7 @@ final class LibraryViewModel: ObservableObject {
     /// miss (no record or file gone) downloads, stores to disk and records
     /// the path so the next read never touches the network.
     func coverData(for record: SeriesRecord) async -> Data? {
-        guard let server else { return nil }
+        guard let store, let server, record.serverID == server.id else { return nil }
         let loader: CoverLoader = server.id == "demo" ? demoCoverLoader : realCoverLoader
         do {
             let url = try KomgaTransport.seriesThumbnailURL(baseURL: server.baseURL, seriesID: record.remoteID)
@@ -683,13 +1068,19 @@ final class LibraryViewModel: ObservableObject {
 
     /// Loads (or reloads) the cover for one series into `covers`.
     func refreshCover(_ record: SeriesRecord) async {
-        covers[record.remoteID] = await coverData(for: record)
+        let sessionID = activeSessionID
+        let serverID = record.serverID
+        let data = await coverData(for: record)
+        guard activeSessionID == sessionID, server?.id == serverID else { return }
+        covers[record.remoteID] = data
     }
 
     /// Reloads covers for every series currently in the grid.
     func refreshAllCovers() async {
         covers.removeAll()
+        let sessionID = activeSessionID
         for s in series {
+            guard activeSessionID == sessionID else { return }
             await refreshCover(s)
         }
     }
@@ -699,15 +1090,14 @@ final class LibraryViewModel: ObservableObject {
     /// Injects the shared fixture into the local store and loads the grid, so
     /// the cover wall is demonstrable without a Komga server.
     func loadDemo() async {
+        guard let store else { return }
         isRefreshing = true
         defer { isRefreshing = false }
         do {
             let profile = ServerProfile(id: "demo", displayName: "Demo", baseURL: "https://demo.local", authType: .apiKey)
             try store.upsertServer(profile)
             try store.setActiveServer(id: profile.id)
-            self.server = profile
-            self.servers = try store.fetchServers()
-            reloadCoverLoader()
+            try await transitionServer(to: profile)
             let summary = try await BootstrapSync.run(fetcher: DemoPageFetcher(), store: store, serverID: "demo")
             try loadSeries()
             await refreshAllCovers()
@@ -722,15 +1112,14 @@ final class LibraryViewModel: ObservableObject {
     /// Full demo: seeds the whole media library from the shared fixtures
     /// (libraries / series / books / collections / readlists / progress).
     func loadFullDemo() async {
+        guard let store else { return }
         isRefreshing = true
         defer { isRefreshing = false }
         do {
             let profile = ServerProfile(id: "demo", displayName: "Demo", baseURL: "https://demo.local", authType: .apiKey)
             try store.upsertServer(profile)
             try store.setActiveServer(id: profile.id)
-            self.server = profile
-            self.servers = try store.fetchServers()
-            reloadCoverLoader()
+            try await transitionServer(to: profile)
             let fetcher = DemoLibraryFetcher()
             let libraries = try await fetcher.fetchLibraries()
             _ = try store.upsertLibraries(serverID: "demo", libraries: libraries)
@@ -747,7 +1136,7 @@ final class LibraryViewModel: ObservableObject {
     /// Shelf entry points: libraries, filter options, continue reading,
     /// collections, readlists — all SQLite (断网可用).
     func syncMediaState() throws {
-        guard let server else { return }
+        guard let store, let server else { return }
         libraries = try store.libraryCounts(serverID: server.id)
         filterOptions = try store.filterOptions(serverID: server.id)
         continueReading = try store.continueReading(serverID: server.id, limit: 10)
@@ -761,7 +1150,7 @@ final class LibraryViewModel: ObservableObject {
 
     /// Library 详情 row + its own paged series wall — SQLite only (断网可用).
     func libraryDetail(id: String) throws -> LibraryCountRecord? {
-        guard let server else { return nil }
+        guard let store, let server else { return nil }
         return try store.libraryDetail(serverID: server.id, libraryID: id)
     }
 
@@ -773,7 +1162,7 @@ final class LibraryViewModel: ObservableObject {
         limit: Int = 50,
         offset: Int = 0
     ) throws -> PagedSeries {
-        guard let server else { return PagedSeries(items: [], total: 0) }
+        guard let store, let server else { return PagedSeries(items: [], total: 0) }
         return try store.querySeries(
             serverID: server.id,
             search: search,
@@ -796,7 +1185,7 @@ final class LibraryViewModel: ObservableObject {
 
     /// (Re)load the series wall honoring search/filters/sort (SQLite FTS).
     func loadSeriesWall(reset: Bool = true) {
-        guard let server else { return }
+        guard let store, let server else { return }
         let pageSize = 50
         let offset = reset ? 0 : series.count
         do {
@@ -838,7 +1227,7 @@ final class LibraryViewModel: ObservableObject {
 
     /// Open a series detail: metadata + first book page + book-cover backfill.
     func openSeries(_ record: SeriesRecord) {
-        guard let server else { return }
+        guard let store, let server else { return }
         do {
             seriesDetail = try store.seriesDetail(serverID: server.id, seriesID: record.remoteID)
             loadBooks(seriesID: record.remoteID, reset: true)
@@ -852,7 +1241,7 @@ final class LibraryViewModel: ObservableObject {
 
     /// Open a series detail from a shelf entry (no wall record in memory).
     func openSeries(seriesID: String) {
-        guard let server else { return }
+        guard let store, let server else { return }
         do {
             guard let detail = try store.seriesDetail(serverID: server.id, seriesID: seriesID) else { return }
             seriesDetail = detail
@@ -874,12 +1263,12 @@ final class LibraryViewModel: ObservableObject {
 
     /// Book detail metadata (SQLite only).
     func bookDetail(for book: BookRecord) throws -> BookDetailRecord? {
-        guard let server else { return nil }
+        guard let store, let server else { return nil }
         return try store.bookDetail(serverID: server.id, bookID: book.remoteID)
     }
 
     func loadBooks(seriesID: String, reset: Bool = true) {
-        guard let server else { return }
+        guard let store, let server else { return }
         let pageSize = 100
         let offset = reset ? 0 : books.count
         do {
@@ -902,7 +1291,7 @@ final class LibraryViewModel: ObservableObject {
     /// Book cover bytes (variant "book"), resolved SQLite-first — same
     /// cache discipline as series covers.
     func bookCoverData(for book: BookRecord) async -> Data? {
-        guard let server else { return nil }
+        guard let store, let server, book.serverID == server.id else { return nil }
         let loader: CoverLoader = server.id == "demo" ? demoCoverLoader : realCoverLoader
         do {
             // Resolve the cover path from SQLite (`variant = 'book'`).
@@ -930,12 +1319,16 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func refreshBookCover(_ book: BookRecord) async {
-        bookCovers[book.remoteID] = await bookCoverData(for: book)
+        let sessionID = activeSessionID
+        let serverID = book.serverID
+        let data = await bookCoverData(for: book)
+        guard activeSessionID == sessionID, server?.id == serverID else { return }
+        bookCovers[book.remoteID] = data
     }
 
     /// Local read-status mutations (本地优先 + Outbox), then reload.
     func markRead(_ book: BookRecord) {
-        guard let server else { return }
+        guard let store, let server else { return }
         do {
             try store.markRead(serverID: server.id, bookID: book.remoteID)
             if let seriesDetail {
@@ -949,7 +1342,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func markUnread(_ book: BookRecord) {
-        guard let server else { return }
+        guard let store, let server else { return }
         do {
             try store.markUnread(serverID: server.id, bookID: book.remoteID)
             if let seriesDetail {
@@ -960,5 +1353,117 @@ final class LibraryViewModel: ObservableObject {
         } catch {
             banner = "标记未读失败：\(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Offline downloads
+
+    private func makeDownloadEngine(for server: ServerProfile) -> DownloadEngine? {
+        guard let store, let auth = try? authMethod(for: server) else { return nil }
+        guard let root = try? DownloadRoot.forDatabase(dbURL) else { return nil }
+        let pageSource = RemotePageSource(baseURL: server.baseURL, auth: auth)
+        let transport = ClosureDownloadTransport { bookID, pageNumber in
+            let (data, contentType) = try await pageSource.fetchPage(bookID: bookID, number: UInt32(pageNumber))
+            return (data, contentType)
+        }
+        return DownloadEngine(
+            store: store,
+            root: root,
+            transport: transport,
+            serverID: server.id
+        )
+    }
+
+    func refreshDownloads() async {
+        guard let engine = downloadEngine else {
+            downloads = []
+            downloadStorageBytes = 0
+            downloadPageCount = 0
+            return
+        }
+        downloads = (try? await engine.list()) ?? []
+        if let store {
+            downloadStorageBytes = (try? DownloadStore.bytesDoneAll(store: store)) ?? 0
+            downloadPageCount = (try? DownloadStore.pageCountAll(store: store)) ?? 0
+        }
+    }
+
+    func enqueueDownload(book: BookRecord) async {
+        guard let server, let engine = downloadEngine else { return }
+        do {
+            let auth = try authMethod(for: server)
+            let pageSource = RemotePageSource(baseURL: server.baseURL, auth: auth)
+            let pages = try await pageSource.fetchPages(bookID: book.remoteID)
+            let pageTuples: [(number: Int, fileName: String, mediaType: String, sizeBytes: Int64)] = pages.map { p in
+                (number: Int(p.number), fileName: p.fileName, mediaType: p.mediaType, sizeBytes: p.sizeBytes ?? 0)
+            }
+            try await engine.enqueue(
+                bookID: book.remoteID,
+                bookTitle: book.title,
+                seriesTitle: book.seriesTitle,
+                pages: pageTuples
+            )
+            await engine.start()
+            await refreshDownloads()
+        } catch {
+            banner = "加入下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    func pauseDownload(bookID: String) async {
+        guard let engine = downloadEngine else { return }
+        do {
+            try await engine.pause(bookID: bookID)
+            await refreshDownloads()
+        } catch {
+            banner = "暂停下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    func resumeDownload(bookID: String) async {
+        guard let engine = downloadEngine else { return }
+        do {
+            try await engine.resumeBook(bookID: bookID)
+            await engine.start()
+            await refreshDownloads()
+        } catch {
+            banner = "继续下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    func retryDownload(bookID: String) async {
+        guard let engine = downloadEngine else { return }
+        do {
+            try await engine.retryBook(bookID: bookID)
+            await engine.start()
+            await refreshDownloads()
+        } catch {
+            banner = "重试下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    func deleteDownload(bookID: String) async {
+        guard let engine = downloadEngine else { return }
+        do {
+            try await engine.delete(bookID: bookID)
+            await refreshDownloads()
+        } catch {
+            banner = "删除下载失败：\(error.localizedDescription)"
+        }
+    }
+
+    func sweepDownloads() async -> RecoveryReport? {
+        guard let engine = downloadEngine else { return nil }
+        do {
+            let report = try await engine.sweep()
+            await refreshDownloads()
+            return report
+        } catch {
+            banner = "检查修复失败：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func downloadStatus(bookID: String) -> DownloadRow? {
+        downloads.first { $0.bookId == bookID }
     }
 }

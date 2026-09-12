@@ -1,5 +1,8 @@
 import SwiftUI
 import KomgaReader
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// The Stage 7 reader screen.
 ///
@@ -9,12 +12,21 @@ import KomgaReader
 /// (`specs/contracts/fixtures/reader/paging.json`), so the two platforms cannot
 /// disagree about what "next page" means for a right-to-left manga.
 struct ReaderScreen: View {
-    @StateObject var model: ReaderModel
+    @ObservedObject var model: ReaderModel
     @Environment(\.dismiss) private var dismiss
     @State private var selection = 0
     @State private var showSettings = false
     @State private var scrolledTo: UInt32 = 1
     @State private var scrub: Double = 1
+
+    private var isTextInputFocused: Bool {
+        #if os(macOS)
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        return responder is NSTextView || responder is NSTextField || responder is NSText
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
         ZStack {
@@ -32,6 +44,55 @@ struct ReaderScreen: View {
                 }
             }
         }
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.leftArrow) {
+            guard !isTextInputFocused else { return .ignored }
+            Task {
+                if model.reversed {
+                    await model.next()
+                } else {
+                    await model.previous()
+                }
+            }
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            guard !isTextInputFocused else { return .ignored }
+            Task {
+                if model.reversed {
+                    await model.previous()
+                } else {
+                    await model.next()
+                }
+            }
+            return .handled
+        }
+        .onKeyPress(.space) {
+            guard !isTextInputFocused else { return .ignored }
+            Task { await model.next() }
+            return .handled
+        }
+        .onKeyPress(.pageUp) {
+            guard !isTextInputFocused else { return .ignored }
+            Task { await model.previous() }
+            return .handled
+        }
+        .onKeyPress(.pageDown) {
+            guard !isTextInputFocused else { return .ignored }
+            Task { await model.next() }
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            guard !isTextInputFocused else { return .ignored }
+            Task { await model.previous() }
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            guard !isTextInputFocused else { return .ignored }
+            Task { await model.next() }
+            return .handled
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -43,6 +104,7 @@ struct ReaderScreen: View {
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
+                .keyboardShortcut(",", modifiers: .command)
                 .accessibilityLabel("阅读设置")
             }
         }

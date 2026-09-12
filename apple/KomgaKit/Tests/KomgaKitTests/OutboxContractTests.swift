@@ -876,6 +876,91 @@ final class OutboxContractTests: XCTestCase {
             )
         }
     }
+
+    func testF01ConcurrentPageTurnDuringUploadIsNotCleared() async throws {
+        let store = try KomgaStore()
+        try store.setReadProgress(serverID: serverID, bookID: "b1", page: 10, completed: false)
+        XCTAssertEqual(try store.outboxCounts(serverID: serverID, now: "2026-08-28T12:00:00Z").total, 1)
+
+        final class InFlightWriter: ProgressWriting, @unchecked Sendable {
+            let store: KomgaStore
+            let serverID: String
+            init(store: KomgaStore, serverID: String) {
+                self.store = store
+                self.serverID = serverID
+            }
+            func refetch(bookID: String) async -> Refetch {
+                .found(RemoteProgress(page: 5, completed: false, lastModified: "2026-08-28T09:00:00Z"))
+            }
+            func apply(request: WireRequest) async -> Attempt {
+                // User turns page to 11 while upload is in flight!
+                try? store.setReadProgress(serverID: serverID, bookID: "b1", page: 11, completed: false)
+                return .succeeded
+            }
+            func book(bookID: String) async -> BookOutcome {
+                .unavailable
+            }
+        }
+
+        let writer = InFlightWriter(store: store, serverID: serverID)
+        let summary = try await OutboxUpload.run(store: store, serverID: serverID, writer: writer, now: "2026-08-28T12:00:00Z")
+        XCTAssertEqual(summary.uploaded, 1)
+
+        // After pass 1, the new mutation (page 11) must NOT be deleted, and mutation_pending must stay 1!
+        let counts = try store.outboxCounts(serverID: serverID, now: "2026-08-28T12:00:00Z")
+        XCTAssertEqual(counts.total, 1, "page 11 mutation must survive")
+        let row = try readProgressRow(store, "b1")
+        XCTAssertEqual(row.pending, true, "mutation_pending must stay true because page 11 is waiting")
+        XCTAssertEqual(row.page, 11)
+
+        // Pass 2: plain server accepts page 11
+        let server = ScriptedWriter(
+            refetches: ["b1": .found(RemoteProgress(page: 10, completed: false, lastModified: "2026-08-28T12:00:00Z"))],
+            attempts: [.succeeded]
+        )
+        let summary2 = try await OutboxUpload.run(store: store, serverID: serverID, writer: server, now: "2026-08-28T12:01:00Z")
+        XCTAssertEqual(summary2.uploaded, 1)
+        XCTAssertEqual(try store.outboxCounts(serverID: serverID, now: "2026-08-28T12:01:00Z").total, 0)
+        let rowAfter = try readProgressRow(store, "b1")
+        XCTAssertEqual(rowAfter.pending, false, "now that all mutations are uploaded, pending is false")
+    }
+
+    func testF03StaleEntrySupersededDuringRefetchIsSkipped() async throws {
+        let store = try KomgaStore()
+        try store.setReadProgress(serverID: serverID, bookID: "b1", page: 10, completed: false)
+
+        final class SupersedingWriter: ProgressWriting, @unchecked Sendable {
+            let store: KomgaStore
+            let serverID: String
+            var applied = false
+            init(store: KomgaStore, serverID: String) {
+                self.store = store
+                self.serverID = serverID
+            }
+            func refetch(bookID: String) async -> Refetch {
+                // While refetch is happening, user turns to page 20, which coalesces (deletes old entry)
+                try? store.setReadProgress(serverID: serverID, bookID: "b1", page: 20, completed: false)
+                return .found(RemoteProgress(page: 5, completed: false, lastModified: "2026-08-28T09:00:00Z"))
+            }
+            func apply(request: WireRequest) async -> Attempt {
+                applied = true
+                return .succeeded
+            }
+            func book(bookID: String) async -> BookOutcome {
+                .unavailable
+            }
+        }
+
+        let writer = SupersedingWriter(store: store, serverID: serverID)
+        let summary = try await OutboxUpload.run(store: store, serverID: serverID, writer: writer, now: "2026-08-28T12:00:00Z")
+        // The stale entry was skipped!
+        XCTAssertEqual(summary.uploaded, 0)
+        XCTAssertFalse(writer.applied, "stale request must not be sent to wire")
+
+        // The new entry (page 20) is still in the queue!
+        let counts = try store.outboxCounts(serverID: serverID, now: "2026-08-28T12:00:00Z")
+        XCTAssertEqual(counts.total, 1)
+    }
 }
 
 /// A fixture that does not fit the shape this test reads is a contract break,

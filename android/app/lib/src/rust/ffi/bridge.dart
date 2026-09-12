@@ -98,6 +98,23 @@ Future<List<ThumbnailRow>> listThumbnails(
     RustLib.instance.api
         .crateFfiBridgeListThumbnails(dbPath: dbPath, serverId: serverId);
 
+/// Cover paths for a page of series or books.
+///
+/// `list_thumbnails` stays for the backfill paths, but a wall or a book list
+/// should ask for the ids it is about to paint: at 20,000 books the whole-server
+/// answer cost 20,000 decoded rows plus a `stat()` each, on every screen load.
+/// `variant` is `"series"` or `"book"`.
+Future<Map<String, String>> coverPaths(
+        {required String dbPath,
+        required String serverId,
+        required String variant,
+        required List<String> remoteIds}) =>
+    RustLib.instance.api.crateFfiBridgeCoverPaths(
+        dbPath: dbPath,
+        serverId: serverId,
+        variant: variant,
+        remoteIds: remoteIds);
+
 /// Backfill one series cover (cache miss → download → disk → SQLite row),
 /// returning the local file path.
 Future<String> ensureCover(
@@ -242,6 +259,16 @@ Future<BookPageResult> queryBooks(
         ascending: ascending,
         limit: limit,
         offset: offset);
+
+/// Which book a "start or continue reading" tap should open for this series
+/// (本地查询). `intent` is one of continue / start / reread / empty; an empty
+/// `book.remoteId` with intent "empty" means the series has nothing readable.
+Future<ReadTargetRow> seriesReadTarget(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId}) =>
+    RustLib.instance.api.crateFfiBridgeSeriesReadTarget(
+        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
 
 /// Full series detail: row + metadata + genres + tags + authors +
 /// collection memberships (all local).
@@ -572,6 +599,39 @@ Future<ReaderTurnDto> readerTurn(
         required PlatformInt64 page}) =>
     RustLib.instance.api.crateFfiBridgeReaderTurn(
         dbPath: dbPath, serverId: serverId, bookId: bookId, page: page);
+
+/// The reader mode / direction this series overrides, as JSON, or `None` when
+/// the series follows the global preference.
+Future<String?> seriesReadOverride(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId}) =>
+    RustLib.instance.api.crateFfiBridgeSeriesReadOverride(
+        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+
+/// Record what this series should read like, or clear it when neither dimension
+/// is set.
+Future<String?> setSeriesReadOverride(
+        {required String dbPath,
+        required String serverId,
+        required String seriesId,
+        String? mode,
+        String? direction}) =>
+    RustLib.instance.api.crateFfiBridgeSetSeriesReadOverride(
+        dbPath: dbPath,
+        serverId: serverId,
+        seriesId: seriesId,
+        mode: mode,
+        direction: direction);
+
+/// Report how far into the current page a webtoon reader has scrolled (0..1).
+Future<void> readerSetPageOffset(
+        {required String dbPath,
+        required String serverId,
+        required String bookId,
+        double? ratio}) =>
+    RustLib.instance.api.crateFfiBridgeReaderSetPageOffset(
+        dbPath: dbPath, serverId: serverId, bookId: bookId, ratio: ratio);
 
 /// Move one spread forward (delta >= 0) or backward (delta < 0).
 Future<ReaderTurnDto> readerStep(

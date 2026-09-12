@@ -78,6 +78,10 @@ pub struct ReaderSession {
     current: u32,
     spread: usize,
     throttle: ProgressThrottle,
+    /// How far into the current page a webtoon reader is, 0..1. `None` in the
+    /// paged modes and for a book that has never been scrolled — the two are the
+    /// same fact to a paged reader, and neither is `0.0`.
+    page_offset_ratio: Option<f64>,
 }
 
 impl ReaderSession {
@@ -143,6 +147,15 @@ impl ReaderSession {
             restored,
         );
 
+        // Restored from the same row the page came from, and only when the page
+        // itself was restored: landing on page 1 because the user turned position
+        // restore off must not also scroll halfway down it.
+        let page_offset_ratio = if current == start {
+            saved.as_ref().and_then(|saved| saved.page_offset_ratio)
+        } else {
+            None
+        };
+
         let session = ReaderSession {
             server_id: server_id.to_string(),
             book_id: book_id.to_string(),
@@ -155,6 +168,7 @@ impl ReaderSession {
             current,
             spread,
             throttle,
+            page_offset_ratio,
         };
         // A restore can legally move the page: the stored page may be the second
         // half of a pair, or past the end of a manifest that shrank. Stamp the
@@ -188,6 +202,20 @@ impl ReaderSession {
         self.direction
     }
 
+    /// How far into the current page the reader is, 0..1.
+    pub fn page_offset_ratio(&self) -> Option<f64> {
+        self.page_offset_ratio
+    }
+
+    /// Record the scroll offset without writing to the database.
+    ///
+    /// A scroll reports continuously, and a write per report would put the whole
+    /// position row through SQLite on every frame; the offset rides along with
+    /// the next persist, which a turn or a close always triggers.
+    pub fn set_page_offset_ratio(&mut self, ratio: Option<f64>) {
+        self.page_offset_ratio = ratio.map(|r| r.clamp(0.0, 1.0));
+    }
+
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -218,6 +246,11 @@ impl ReaderSession {
         };
         self.current = page;
         self.spread = spread;
+        // A scroll offset is a statement about *one* page: "62% down page 1" says
+        // nothing about page 3, and carrying it over would drop the reader into
+        // the middle of a page they have never seen. Cleared here rather than by
+        // the caller so it cannot be forgotten by a caller in another language.
+        self.page_offset_ratio = None;
         self.persist(conn, clock)?;
         // T9: a book the image reader cannot drive (EPUB/PDF) must never enter
         // the page-progress stream, not even as a queued row.
@@ -343,13 +376,14 @@ impl ReaderSession {
     }
 
     fn persist(&self, conn: &Connection, clock: &Clock) -> rusqlite::Result<()> {
-        position::save(
+        position::save_with_offset(
             conn,
             &self.server_id,
             &self.book_id,
             self.current,
             self.mode.as_str(),
             self.direction.as_str(),
+            self.page_offset_ratio,
             &clock.rfc3339,
         )?;
         if self.writes_progress && self.current > 0 {
@@ -442,6 +476,25 @@ mod tests {
         assert_eq!(session.visible(), vec![1]);
         assert_eq!(session.outbox_state(&conn).unwrap(), None);
         assert_eq!(stored_page(&conn), -1, "opening must not write progress");
+    }
+
+    /// The offset belongs to one page. Moving on has to drop it, and the place
+    /// that enforces this is the session rather than the UI: a page change from
+    /// any caller in any language must not carry "62% down page 1" onto page 3,
+    /// because that would open the reader in the middle of a page nobody has seen.
+    #[test]
+    fn a_page_change_drops_the_scroll_offset_it_was_standing_on() {
+        let conn = open_in_memory().unwrap();
+        let mut session = open(&conn, 30, &settings(), 0);
+        session.set_page_offset_ratio(Some(0.62));
+
+        session.turn_to(&conn, 3, &Clock::at_ms(1_000)).unwrap();
+
+        assert_eq!(session.page(), 3);
+        assert_eq!(session.page_offset_ratio(), None);
+        let stored = position::get(&conn, SERVER, BOOK).unwrap().unwrap();
+        assert_eq!(stored.page, 3i64);
+        assert_eq!(stored.page_offset_ratio, None);
     }
 
     #[test]

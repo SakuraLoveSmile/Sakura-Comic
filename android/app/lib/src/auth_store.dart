@@ -1,5 +1,16 @@
 import 'package:flutter/services.dart';
 
+/// Thrown when an Android Keystore or platform credential operation fails.
+class KeystoreException implements Exception {
+  const KeystoreException(this.code, this.message);
+
+  final String code;
+  final String message;
+
+  @override
+  String toString() => 'KeystoreException($code: $message)';
+}
+
 /// Secret store contract — credentials live in platform secure storage
 /// (Android Keystore via the platform channel; Keychain on Apple), never in
 /// the SQLite mirror. `ref` is the keychain/keystore identifier carried by
@@ -15,20 +26,43 @@ abstract interface class SecretStore {
 class KeystoreSecretStore implements SecretStore {
   const KeystoreSecretStore();
 
-  static const MethodChannel _channel = MethodChannel('dev.sakurasep.comic/auth_store');
+  static const MethodChannel _channel =
+      MethodChannel('dev.sakurasep.comic/auth_store');
 
   @override
   Future<void> save(String ref, String secret) async {
-    await _channel.invokeMethod<bool>('save', {'ref': ref, 'secret': secret});
+    try {
+      final success = await _channel
+          .invokeMethod<bool>('save', {'ref': ref, 'secret': secret});
+      if (success != true) {
+        throw const KeystoreException(
+            'SAVE_FAILED', 'Keystore save returned false');
+      }
+    } on PlatformException catch (e) {
+      throw KeystoreException(e.code, e.message ?? 'Keystore save failed');
+    }
   }
 
   @override
-  Future<String?> read(String ref) async =>
-      await _channel.invokeMethod<String>('read', {'ref': ref});
+  Future<String?> read(String ref) async {
+    try {
+      return await _channel.invokeMethod<String>('read', {'ref': ref});
+    } on PlatformException catch (e) {
+      throw KeystoreException(e.code, e.message ?? 'Keystore read failed');
+    }
+  }
 
   @override
   Future<void> delete(String ref) async {
-    await _channel.invokeMethod<bool>('delete', {'ref': ref});
+    try {
+      final success = await _channel.invokeMethod<bool>('delete', {'ref': ref});
+      if (success != true) {
+        throw const KeystoreException(
+            'DELETE_FAILED', 'Keystore delete returned false');
+      }
+    } on PlatformException catch (e) {
+      throw KeystoreException(e.code, e.message ?? 'Keystore delete failed');
+    }
   }
 }
 

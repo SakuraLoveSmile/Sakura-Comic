@@ -40,7 +40,8 @@ DownloadController _controller(
     );
 
 Future<void> _mount(WidgetTester tester, DownloadController controller) async {
-  await tester.pumpWidget(MaterialApp(home: DownloadsScreen(controller: controller)));
+  await tester
+      .pumpWidget(MaterialApp(home: DownloadsScreen(controller: controller)));
   await tester.pumpAndSettle();
 }
 
@@ -48,7 +49,9 @@ void main() {
   group('泵：一个回合做有界的几步', () {
     test('一个回合串起多个 pass，直到队列没有进展', () async {
       final api = InMemoryDownloadsApi(
-        books: [FakeDownload(bookId: 'b1', title: 'One Piece #1', pagesTotal: 10)],
+        books: [
+          FakeDownload(bookId: 'b1', title: 'One Piece #1', pagesTotal: 10)
+        ],
       )..pumpPages = 2;
       final facts = _Facts();
       final controller = _controller(api, facts);
@@ -60,10 +63,12 @@ void main() {
       expect(api.pumpCalls, 5);
       expect(controller.books.single.state, 'completed');
       expect(controller.books.single.pagesDone, 10);
-      expect(facts.linkReads, 1, reason: 'the link is read once per turn, not per pass');
+      expect(facts.linkReads, 1,
+          reason: 'the link is read once per turn, not per pass');
       expect(facts.freeReads, greaterThan(0));
       expect(controller.lastPump?.queueActive, isFalse);
-      expect(controller.hasWork, isFalse, reason: 'a finished queue must not claim work');
+      expect(controller.hasWork, isFalse,
+          reason: 'a finished queue must not claim work');
       controller.stop();
     });
 
@@ -74,10 +79,12 @@ void main() {
       final controller = _controller(api, _Facts());
       await controller.enqueue('b1');
       await controller.pumpTurn();
-      expect(api.pumpCalls, 8, reason: 'the turn ceiling, not the queue length');
+      expect(api.pumpCalls, 8,
+          reason: 'the turn ceiling, not the queue length');
       expect(controller.books.single.pagesDone, 16);
       expect(controller.hasWork, isTrue);
-      expect(controller.pumping, isFalse, reason: 'the turn must not leave itself busy');
+      expect(controller.pumping, isFalse,
+          reason: 'the turn must not leave itself busy');
       controller.stop();
     });
 
@@ -119,7 +126,8 @@ void main() {
       await controller.pumpTurn();
       expect(facts.linkReads, 0, reason: 'no work, so no question to ask');
       expect(facts.freeReads, 0);
-      expect(api.pumpCalls, 0, reason: 'a no-op pass is not evidence of a live queue');
+      expect(api.pumpCalls, 0,
+          reason: 'a no-op pass is not evidence of a live queue');
       expect(controller.hasWork, isFalse);
     });
 
@@ -148,7 +156,8 @@ void main() {
       await controller.enqueue('b1');
       await controller.pause('b1');
       expect(api.pauseCalls, 1);
-      expect(api.deleteCalls, 0, reason: 'a pause that deletes is the worst bug here');
+      expect(api.deleteCalls, 0,
+          reason: 'a pause that deletes is the worst bug here');
       expect(controller.books.single.state, 'paused');
 
       await controller.resumeBook('b1');
@@ -179,7 +188,6 @@ void main() {
           reason: 'a retry that resets progress re-downloads seven pages');
       controller.stop();
     });
-
   });
 
   group('屏幕说的是人话', () {
@@ -194,7 +202,8 @@ void main() {
               bytesTotal: 10000)
         ],
       );
-      final controller = _controller(api, _Facts(), interval: const Duration(hours: 1));
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
       await controller.refresh(withStorage: true);
       await _mount(tester, controller);
       expect(find.textContaining('已下载 4/10 页'), findsOneWidget);
@@ -218,7 +227,8 @@ void main() {
           )
         ],
       );
-      final controller = _controller(api, _Facts(), interval: const Duration(hours: 1));
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
       await controller.refresh();
       await _mount(tester, controller);
       expect(find.text('服务器上已经没有这本书，本机的这份仍可阅读'), findsOneWidget);
@@ -228,7 +238,9 @@ void main() {
     testWidgets('平台不说剩余空间时写「未知」，不写 0 B', (tester) async {
       final facts = _Facts()..free = 0;
       final controller = DownloadController(InMemoryDownloadsApi(),
-          link: facts.readLink, freeBytes: facts.readFree, interval: const Duration(hours: 1));
+          link: facts.readLink,
+          freeBytes: facts.readFree,
+          interval: const Duration(hours: 1));
       await controller.refresh(withStorage: true);
       await _mount(tester, controller);
       expect(find.text('未知'), findsOneWidget);
@@ -239,7 +251,8 @@ void main() {
       final api = InMemoryDownloadsApi(
         books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 4)],
       )..nextStop = 'linkBlocked';
-      final controller = _controller(api, _Facts(), interval: const Duration(hours: 1));
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
       await controller.enqueue('b1');
       await controller.pumpTurn();
       expect(controller.stopReason, 'linkBlocked');
@@ -255,7 +268,8 @@ void main() {
       final api = InMemoryDownloadsApi(
         books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 6)],
       );
-      final controller = _controller(api, _Facts(), interval: const Duration(hours: 1));
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
       // `refresh`, not `enqueue`: enqueue is a user gesture and it legitimately kicks
       // the pump immediately, which would finish this 6-page book before the tap.
       await controller.refresh();
@@ -270,9 +284,13 @@ void main() {
 
     testWidgets('确认删除才真的删', (tester) async {
       final api = InMemoryDownloadsApi(
-        books: [FakeDownload(bookId: 'b1', title: 'One Piece #1', pagesTotal: 6, pagesDone: 4)],
+        books: [
+          FakeDownload(
+              bookId: 'b1', title: 'One Piece #1', pagesTotal: 6, pagesDone: 4)
+        ],
       );
-      final controller = _controller(api, _Facts(), interval: const Duration(hours: 1));
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
       await controller.refresh(withStorage: true);
       await _mount(tester, controller);
 
@@ -291,6 +309,66 @@ void main() {
       expect(api.deleteCalls, 1);
       expect(controller.books, isEmpty);
       expect(find.text('还没有下载'), findsOneWidget);
+    });
+  });
+
+  group('通知：只在状态真的变了才响', () {
+    // The ticker fires every second whether or not anything moved. Notifying
+    // unconditionally is what used to rebuild the shelf's whole tile wall once a
+    // second; the shelf now only wraps the download badge in a listener, so an
+    // unconditional notify would still repaint it forever for nothing.
+
+    test('空队列连转五次，一个监听器都不惊动', () async {
+      final api = InMemoryDownloadsApi();
+      final controller = _controller(api, _Facts());
+      var notifications = 0;
+      controller.addListener(() => notifications += 1);
+
+      for (var i = 0; i < 5; i += 1) {
+        await controller.pumpTurn();
+      }
+
+      expect(notifications, 0,
+          reason: 'an idle queue produces an identical revision every tick');
+      controller.stop();
+    });
+
+    test('队列真的动了就通知', () async {
+      final api = InMemoryDownloadsApi(
+        books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 40)],
+      )..pumpPages = 2;
+      final controller = _controller(api, _Facts());
+      await controller.enqueue('b1');
+
+      var notifications = 0;
+      controller.addListener(() => notifications += 1);
+
+      await controller.pumpTurn();
+
+      expect(notifications, greaterThan(0));
+      expect(controller.books.single.pagesDone, 16);
+      controller.stop();
+    });
+
+    test('只有退避原因变了，也要通知', () async {
+      // The status line reads `stopReason`; a park with no row moving still has
+      // to reach the screen, or the queue looks stuck with no explanation.
+      final api = InMemoryDownloadsApi(
+        books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 40)],
+      )..pumpPages = 2;
+      final controller = _controller(api, _Facts());
+      await controller.enqueue('b1');
+      await controller.pumpTurn();
+
+      var notifications = 0;
+      controller.addListener(() => notifications += 1);
+
+      api.nextStop = 'linkDown';
+      await controller.pumpTurn();
+
+      expect(controller.stopReason, 'linkDown');
+      expect(notifications, greaterThan(0));
+      controller.stop();
     });
   });
 }

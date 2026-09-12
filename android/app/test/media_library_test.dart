@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:comic_app/src/download_controller.dart';
 import 'package:comic_app/src/downloads_api.dart';
 import 'package:comic_app/src/library_repository.dart';
+import 'package:comic_app/src/reader_api.dart';
+import 'package:comic_app/src/reader_screen.dart';
 import 'package:comic_app/src/models.dart';
 import 'package:comic_app/src/series.dart';
 import 'package:comic_app/src/series_detail.dart';
@@ -13,7 +15,8 @@ import 'package:comic_app/src/series_grid.dart';
 void main() {
   testWidgets('search field queries the local FTS surface', (tester) async {
     final repo = _MediaFakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'berserk');
@@ -25,9 +28,41 @@ void main() {
     expect(find.text('One Piece'), findsNothing);
   });
 
-  testWidgets('library chip filter sends libraryId to the query', (tester) async {
+  testWidgets('official series title is consistent across shelf, search and detail',
+      (tester) async {
     final repo = _MediaFakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester.pumpAndSettle();
+
+    // Shelf: the resolved official title, never the folder name.
+    expect(find.text('示例漫画'), findsOneWidget);
+    expect(find.text('cbz'), findsNothing);
+
+    // Search by the official title finds it, and only it. (A partial term
+    // keeps the search field's own text from matching the card assertion.)
+    await tester.enterText(find.byType(TextField), '示例');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(repo.lastSearch, '示例');
+    expect(find.text('示例漫画'), findsOneWidget);
+    expect(find.text('One Piece'), findsNothing);
+
+    // Detail: the same title (AppBar + header), with tags/authors intact.
+    await tester.pumpWidget(MaterialApp(
+      home: SeriesDetailScreen(repository: repo, seriesId: 'series-3'),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('示例漫画'), findsWidgets);
+    expect(find.text('Manga'), findsOneWidget);
+    expect(find.textContaining('Oda'), findsOneWidget);
+  });
+
+  testWidgets('library chip filter sends libraryId to the query',
+      (tester) async {
+    final repo = _MediaFakeRepository();
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Manga Main'), findsOneWidget);
@@ -39,7 +74,8 @@ void main() {
 
   testWidgets('continue reading shelf renders local progress', (tester) async {
     final repo = _MediaFakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(find.text('继续阅读'), findsOneWidget);
@@ -47,9 +83,11 @@ void main() {
     expect(find.textContaining('第 12 / 20 页'), findsOneWidget);
   });
 
-  testWidgets('collections tab lists and opens the detail wall', (tester) async {
+  testWidgets('collections tab lists and opens the detail wall',
+      (tester) async {
     final repo = _MediaFakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('合集'));
@@ -63,7 +101,8 @@ void main() {
 
   testWidgets('readlists tab opens ordered book list', (tester) async {
     final repo = _MediaFakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('书单'));
@@ -77,7 +116,8 @@ void main() {
 
   testWidgets('library list → detail → switch the shelf scope', (tester) async {
     final repo = _MediaFakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('图书馆'));
@@ -163,7 +203,8 @@ void main() {
     await tester.tap(find.byKey(const Key('download-book-3')));
     await tester.pumpAndSettle();
     expect(api.enqueueCalls, 1);
-    expect(api.deleteCalls, 0, reason: 'a tap that queued a book must not delete it');
+    expect(api.deleteCalls, 0,
+        reason: 'a tap that queued a book must not delete it');
     expect(find.text('排队中'), findsOneWidget);
 
     // Queued: the same button is now the pause, because that is the one gesture a
@@ -175,20 +216,179 @@ void main() {
     expect(find.text('已暂停'), findsOneWidget);
     controller.stop();
   });
+  group('the read button says what it does', () {
+    testWidgets('a part-read series reads 继续阅读 and opens the core target',
+        (tester) async {
+      final repo = _TargetFakeRepository(_target(
+        bookId: 'book-2',
+        title: 'Book 2',
+        intent: ReadIntent.continueReading,
+      ));
+      await tester.pumpWidget(MaterialApp(
+        home: SeriesDetailScreen(repository: repo, seriesId: 'series-1'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('继续阅读'), findsOneWidget);
+      expect(find.text('打开Book 2'), findsOneWidget,
+          reason: 'the line under the button must agree with the label');
+
+      // Bounded pumps, not pumpAndSettle: the reader keeps a frame scheduled
+      // while it loads, so "settle" would time out on a screen that is behaving.
+      await tester.tap(find.byKey(const Key('series-read-action')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(repo.openedBookId, 'book-2',
+          reason:
+              'and it opens exactly the volume the core named, not volume 1');
+      expect(find.byType(ReaderScreen), findsOneWidget);
+    });
+
+    testWidgets('a series nobody started reads 开始阅读', (tester) async {
+      final repo = _TargetFakeRepository(_target(
+        bookId: 'book-1',
+        title: 'Book 1',
+        intent: ReadIntent.startReading,
+      ));
+      await tester.pumpWidget(MaterialApp(
+        home: SeriesDetailScreen(repository: repo, seriesId: 'series-1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('开始阅读'), findsOneWidget);
+      expect(find.text('从Book 1开始'), findsOneWidget);
+    });
+
+    testWidgets(
+        'an empty series disables the button instead of opening nothing',
+        (tester) async {
+      final repo = _TargetFakeRepository(const ReadTarget(
+        book: Book(remoteId: '', seriesId: 'series-1', title: ''),
+        intent: ReadIntent.empty,
+        position: 0,
+        bookCount: 0,
+        catalogComplete: true,
+      ));
+      await tester.pumpWidget(MaterialApp(
+        home: SeriesDetailScreen(repository: repo, seriesId: 'series-1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('没有可打开的册'), findsOneWidget);
+      final button = tester.widget<FilledButton>(
+        find.byKey(const Key('series-read-action')),
+      );
+      expect(button.onPressed, isNull,
+          reason: 'nothing to open means nothing to tap');
+    });
+
+    testWidgets('an incomplete mirror says so instead of claiming the end',
+        (tester) async {
+      final repo = _TargetFakeRepository(_target(
+        bookId: 'book-2',
+        title: 'Book 2',
+        intent: ReadIntent.continueReading,
+        bookCount: 3,
+        complete: false,
+      ));
+      await tester.pumpWidget(MaterialApp(
+        home: SeriesDetailScreen(repository: repo, seriesId: 'series-1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('本地目录尚未完整同步'),
+        findsOneWidget,
+        reason:
+            'the UI must not imply "this is the last volume" when it cannot know',
+      );
+    });
+
+    testWidgets('a repository with no answer shows no read button at all',
+        (tester) async {
+      final repo = _MediaFakeRepository();
+      await tester.pumpWidget(MaterialApp(
+        home: SeriesDetailScreen(repository: repo, seriesId: 'series-1'),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('series-read-action')), findsNothing);
+    });
+  });
 }
+
+/// A repository whose read-target answer the test controls.
+///
+/// `readTarget` is the one thing the read button trusts, so every state — and
+/// the "the core has no answer" case — has to be reachable without a core.
+class _TargetFakeRepository extends _MediaFakeRepository {
+  _TargetFakeRepository(this._target);
+
+  final ReadTarget? _target;
+  String? openedBookId;
+
+  @override
+  Future<ReadTarget?> readTarget({required String seriesId}) async => _target;
+
+  @override
+  Future<ReaderApi> readerApi({required String bookId}) async {
+    openedBookId = bookId;
+    return InMemoryReaderApi(pageCount: 3);
+  }
+}
+
+ReadTarget _target({
+  required String bookId,
+  required String title,
+  required ReadIntent intent,
+  int bookCount = 3,
+  bool complete = true,
+}) =>
+    ReadTarget(
+      book: Book(remoteId: bookId, seriesId: 'series-1', title: title),
+      intent: intent,
+      position: 2,
+      bookCount: bookCount,
+      catalogComplete: complete,
+    );
 
 /// Recording fake: exercises the Stage 4 wall/search/filter/shelf/detail
 /// paths with a small in-memory media library.
 class _MediaFakeRepository extends LibraryRepository {
   static const _series = [
-    Series(remoteId: 'series-1', libraryId: 'lib-1', name: 'One Piece', status: 'ENDED'),
-    Series(remoteId: 'series-2', libraryId: 'lib-1', name: 'Berserk', status: 'ONGOING'),
-    Series(remoteId: 'series-4', libraryId: 'lib-2', name: 'Solo Leveling', status: 'COMPLETED'),
+    Series(
+        remoteId: 'series-1',
+        libraryId: 'lib-1',
+        name: 'One Piece',
+        status: 'ENDED'),
+    // The core resolved this series' folder name (`cbz`) to its official
+    // Komga title; only the title ever reaches the UI.
+    Series(
+        remoteId: 'series-3',
+        libraryId: 'lib-1',
+        name: '示例漫画',
+        sortName: 'Example',
+        status: 'ONGOING'),
+    Series(
+        remoteId: 'series-2',
+        libraryId: 'lib-1',
+        name: 'Berserk',
+        status: 'ONGOING'),
+    Series(
+        remoteId: 'series-4',
+        libraryId: 'lib-2',
+        name: 'Solo Leveling',
+        status: 'COMPLETED'),
   ];
 
   static const _books = [
-    Book(remoteId: 'book-1', seriesId: 'series-1', title: 'Book 1', progressCompleted: true),
-    Book(remoteId: 'book-2', seriesId: 'series-1', title: 'Book 2', progressPage: 12, pagesCount: 20),
+    Book(
+        remoteId: 'book-1',
+        seriesId: 'series-1',
+        title: 'Book 1',
+        progressCompleted: true),
+    Book(
+        remoteId: 'book-2',
+        seriesId: 'series-1',
+        title: 'Book 2',
+        progressPage: 12,
+        pagesCount: 20),
     Book(remoteId: 'book-3', seriesId: 'series-1', title: 'Book 3'),
   ];
 
@@ -211,11 +411,13 @@ class _MediaFakeRepository extends LibraryRepository {
     lastSearch = search;
     lastLibraryId = libraryId;
     final items = _series
-        .where((s) => search == null || s.name.toLowerCase().contains(search.toLowerCase()))
+        .where((s) =>
+            search == null ||
+            s.name.toLowerCase().contains(search.toLowerCase()))
         .where((s) => libraryId == null || s.libraryId == libraryId)
         .toList();
-    return PagedSeries(items: items, total: items.length); // items is runtime-filtered
-
+    return PagedSeries(
+        items: items, total: items.length); // items is runtime-filtered
   }
 
   @override
@@ -246,11 +448,14 @@ class _MediaFakeRepository extends LibraryRepository {
   }
 
   @override
-  Future<FilterOptions> fetchFilterOptions() async =>
-      const FilterOptions(tags: ['Manga', 'Seinen'], genres: ['Action'], statuses: ['ENDED', 'ONGOING']);
+  Future<FilterOptions> fetchFilterOptions() async => const FilterOptions(
+      tags: ['Manga', 'Seinen'],
+      genres: ['Action'],
+      statuses: ['ENDED', 'ONGOING']);
 
   @override
-  Future<List<ContinueReadingItem>> continueReading({int limit = 10}) async => const [
+  Future<List<ContinueReadingItem>> continueReading({int limit = 10}) async =>
+      const [
         ContinueReadingItem(
           bookId: 'book-2',
           bookTitle: 'One Piece #2',
@@ -263,28 +468,37 @@ class _MediaFakeRepository extends LibraryRepository {
       ];
 
   @override
-  Future<PagedCollections> listCollections({String? search, int limit = 100, int offset = 0}) async =>
+  Future<PagedCollections> listCollections(
+          {String? search, int limit = 100, int offset = 0}) async =>
       const PagedCollections(
         items: [CollectionItem(remoteId: 'col-1', name: 'Favorites')],
         total: 1,
       );
 
   @override
-  Future<CollectionDetail?> collectionDetail({required String collectionId}) async =>
+  Future<CollectionDetail?> collectionDetail(
+          {required String collectionId}) async =>
       const CollectionDetail(
         item: CollectionItem(remoteId: 'col-1', name: 'Favorites'),
         members: PagedSeries(items: _series, total: 2),
       );
 
   @override
-  Future<PagedReadlists> listReadlists({String? search, int limit = 100, int offset = 0}) async =>
+  Future<PagedReadlists> listReadlists(
+          {String? search, int limit = 100, int offset = 0}) async =>
       const PagedReadlists(
-        items: [ReadlistItem(remoteId: 'rl-1', name: 'Weekend Manga', summary: 'Relaxed reading')],
+        items: [
+          ReadlistItem(
+              remoteId: 'rl-1',
+              name: 'Weekend Manga',
+              summary: 'Relaxed reading')
+        ],
         total: 1,
       );
 
   @override
-  Future<ReadlistDetail?> readlistDetail({required String readlistId}) async => const ReadlistDetail(
+  Future<ReadlistDetail?> readlistDetail({required String readlistId}) async =>
+      const ReadlistDetail(
         item: ReadlistItem(remoteId: 'rl-1', name: 'Weekend Manga'),
         books: PagedBooks(items: _books, total: 3),
       );
@@ -325,6 +539,7 @@ class _MediaFakeRepository extends LibraryRepository {
       remoteId: series.remoteId,
       libraryId: series.libraryId,
       name: series.name,
+      sortName: series.sortName,
       status: series.status,
       booksCount: 3,
       booksReadCount: 1,
@@ -338,7 +553,11 @@ class _MediaFakeRepository extends LibraryRepository {
 
   @override
   Future<BookDetail?> bookDetail({required String bookId}) async =>
-      const BookDetail(remoteId: 'book-3', seriesId: 'series-1', title: 'Book 3', tags: ['Manga']);
+      const BookDetail(
+          remoteId: 'book-3',
+          seriesId: 'series-1',
+          title: 'Book 3',
+          tags: ['Manga']);
 
   @override
   Future<void> markRead({required String bookId}) async {
@@ -347,13 +566,18 @@ class _MediaFakeRepository extends LibraryRepository {
 
   // Keep the pre-Stage-4 surface honest.
   @override
-  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => _series;
+  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async =>
+      _series;
 
   @override
-  Future<Map<String, String>> fetchCoverPaths() async => const {};
+  Future<Map<String, String>> fetchCoverPaths({
+    required List<String> seriesIds,
+  }) async =>
+      const {};
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async => null;
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async =>
+      null;
 
   @override
   Future<int> syncCovers() async => 0;
@@ -368,7 +592,4 @@ class _MediaFakeRepository extends LibraryRepository {
 
   @override
   bool get demoSupported => false;
-
-  @override
-  Stream<List<Series>> observeSeries() => const Stream.empty();
 }

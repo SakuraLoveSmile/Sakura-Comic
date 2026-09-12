@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import KomgaStore
 
 // MARK: - Every SQL the offline download queue speaks (mirror of Rust `downloads/store.rs`)
 //
@@ -815,6 +816,10 @@ public enum DownloadStore {
         ) ?? 0
     }
 
+    public static func bytesDoneAll(store: KomgaStore) throws -> Int64 {
+        try store.read { try bytesDoneAll(db: $0) }
+    }
+
     public static func bytesDoneFor(db: GRDB.Database, serverId: String) throws -> Int64 {
         try Int64.fetchOne(
             db,
@@ -833,6 +838,10 @@ public enum DownloadStore {
             sql: "SELECT COUNT(*) FROM download_pages WHERE state = ?",
             arguments: [PageState.complete.rawValue]
         ) ?? 0
+    }
+
+    public static func pageCountAll(store: KomgaStore) throws -> Int64 {
+        try store.read { try pageCountAll(db: $0) }
     }
 
     /// Per-book storage rows, newest download first. Ordered in SQL rather than in

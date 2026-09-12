@@ -1,3 +1,4 @@
+import 'package:feedback_widget/feedback_widget.dart';
 import 'package:flutter/material.dart';
 
 import 'error_presentation.dart';
@@ -129,13 +130,52 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
               border: OutlineInputBorder(),
             ),
           ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _url,
+            builder: (context, value, _) {
+              if (!value.text.trim().toLowerCase().startsWith('http://')) {
+                return const SizedBox.shrink();
+              }
+              return Container(
+                key: const ValueKey('plaintext-http-warning'),
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade800),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade900),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '当前连接为明文 HTTP，账号密码与阅读记录在局域网/公共网络可能被窃听，建议尽可能配置 HTTPS',
+                        style: TextStyle(
+                          color: Colors.amber.shade900,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _apiKey,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'API Key（X-API-Key）',
-              border: OutlineInputBorder(),
+          // 服务器凭据：截图时整块被中性遮罩覆盖，最终图片中不可读。
+          FeedbackCaptureMask(
+            child: TextField(
+              controller: _apiKey,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'API Key（X-API-Key）',
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -158,8 +198,8 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
           if (_isEdit && _tested == null && _testError == null)
             const Padding(
               padding: EdgeInsets.only(top: 8),
-              child: Text('编辑后需重新测试连接才能保存',
-                  style: TextStyle(color: Colors.grey)),
+              child:
+                  Text('编辑后需重新测试连接才能保存', style: TextStyle(color: Colors.grey)),
             ),
           const SizedBox(height: 24),
           FilledButton(
@@ -211,8 +251,8 @@ class _TestErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     final view = FailurePresentation.from(error);
     final theme = Theme.of(context);
-    final errorStyle = theme.textTheme.bodyMedium!
-        .copyWith(color: theme.colorScheme.error);
+    final errorStyle =
+        theme.textTheme.bodyMedium!.copyWith(color: theme.colorScheme.error);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

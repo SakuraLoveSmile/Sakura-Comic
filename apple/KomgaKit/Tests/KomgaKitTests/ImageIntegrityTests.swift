@@ -3,6 +3,7 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 @testable import KomgaReader
+@testable import KomgaDownloads
 
 // MARK: - Mirror of `reader/integrity.rs`'s unit tests
 //

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import KomgaDownloads
 @testable import KomgaReader
 @testable import KomgaStore
 

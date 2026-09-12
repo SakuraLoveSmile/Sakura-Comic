@@ -296,7 +296,8 @@ class _DownloadStressScreenState extends State<DownloadStressScreen> {
     }
     _metric('treeFiles', pageFiles);
     _metric('treeParts', parts);
-    final seconds = DateTime.now().difference(startedAt).inMilliseconds / 1000.0;
+    final seconds =
+        DateTime.now().difference(startedAt).inMilliseconds / 1000.0;
     _metric('passes', passes);
     _metric('served', served);
     // The reason the last pass stopped, which is the difference between a queue that

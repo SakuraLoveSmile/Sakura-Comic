@@ -106,7 +106,8 @@ class FailurePresentation {
 /// failure without inventing an exception object just to render it; it still
 /// goes through the exhaustive switch above, which is what makes a code added
 /// on the Rust side a compile error here rather than a silent fallback.
-String failureHeadline(ErrorCode code) => FailurePresentation._headlineFor(code);
+String failureHeadline(ErrorCode code) =>
+    FailurePresentation._headlineFor(code);
 
 /// The credential verdict for one server, as the shelf reads it.
 enum CredentialStatus {

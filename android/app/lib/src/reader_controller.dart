@@ -25,6 +25,8 @@ class ReaderController extends ChangeNotifier {
     this.tickInterval = const Duration(seconds: 2),
     this.settleWindow = const Duration(milliseconds: 400),
     this.slowResponseThreshold = const Duration(milliseconds: 1500),
+    this.seriesId,
+    this.onSeriesLayoutChanged,
   });
 
   final ReaderApi api;
@@ -47,10 +49,65 @@ class ReaderController extends ChangeNotifier {
   /// that knows whether anyone is still reading.
   final Duration tickInterval;
 
+  /// The series this book belongs to, so a mode or direction chosen inside the
+  /// reader can be recorded against the series.
+  final String? seriesId;
+
+  /// Called when the reader's page mode or direction changes.
+  ///
+  /// The controller deliberately does not write this itself: "what this series
+  /// reads like" is a preference store the controller has no business owning,
+  /// and the bug this replaces was exactly a controller writing a per-book
+  /// gesture into the global preference. The screen owns the write and the
+  /// message that explains it.
+  final void Function(String mode, String direction)? onSeriesLayoutChanged;
+
   ReaderBookDto? book;
   ReaderSettingsDto? settings;
   String? error;
   bool busy = true;
+
+  /// How far into the opening page the core restored this reader, 0..1, or
+  /// `null` for "top of the page". The screen reads it once to place a webtoon
+  /// where the user left off; the controller does not act on it itself.
+  double? get startPageOffsetRatio => book?.startPageOffsetRatio;
+
+  /// Where the reader is right now, as of the last scroll notification. This is
+  /// the value the closing flush writes, which is why it is tracked separately
+  /// from what has already been sent: the whole point of the flush is to write
+  /// the position the throttle skipped.
+  double? _pendingOffset;
+
+  /// What the core was last told, so a scroll that has not moved meaningfully
+  /// does not become a write. `null` means "the core has been told there is no
+  /// offset" — which is a different state from "we have not told it yet".
+  double? _reportedOffset;
+  bool _offsetNeverSent = true;
+  DateTime? _lastOffsetWrite;
+
+  /// The in-flight closing write, if the screen asked for one. `dispose` awaits
+  /// it before closing the reader, because closing is what commits the session's
+  /// offset to SQLite — closing first would write the old position over the new
+  /// one and the reader would come back to where they were two scrolls ago.
+  Future<void>? _offsetFlush;
+  Future<void> _offsetWriteChain = Future<void>.value();
+  bool _offsetWriteFailed = false;
+  double? _queuedOffset;
+  bool _offsetWriteInFlight = false;
+  int _offsetWriteSequence = 0;
+
+  /// A scroll burst reports at most this often. A user dragging through a long
+  /// strip emits a notification per frame, and a SQLite write per frame would
+  /// make the reader the slowest thing on the screen it is trying to draw.
+  static const Duration offsetWriteInterval = Duration(milliseconds: 600);
+
+  bool _isClosed = false;
+  bool get isClosed => _isClosed;
+  Future<void>? _closedFuture;
+  Future<void> get closed => _closedFuture ?? Future<void>.value();
+
+  int _turnGeneration = 0;
+  int get turnGeneration => _turnGeneration;
 
   /// Stage 8: bounded. A path string is cheap, but so is the discipline of never
   /// letting a map grow with the length of a session — on a 500-page book the
@@ -59,7 +116,7 @@ class ReaderController extends ChangeNotifier {
   /// the map is always the entry that went unused longest.
   final Map<int, String> _paths = <int, String>{};
   int _memoLimit = 64;
-  final Set<int> _inFlight = <int>{};
+  final Map<int, Completer<String?>> _inFlight = {};
 
   /// The numbers the core derived from the last device report.
   ReaderWindowDto? window;
@@ -99,6 +156,7 @@ class ReaderController extends ChangeNotifier {
   }
 
   int get spreadCount => spreads.length;
+
   /// Gap between pages, in logical pixels (the core stores it that way, and the
   /// paged view splits it between the two halves of a spread).
   double get pageGap => (layout?.pageGap.toInt() ?? 8).toDouble();
@@ -111,34 +169,136 @@ class ReaderController extends ChangeNotifier {
       };
 
   Future<void> start() async {
+    if (_isClosed) return;
     busy = true;
     error = null;
     notifyListeners();
     try {
-      settings = await api.settings();
-      book = await api.open();
+      final loadedSettings = await api.settings();
+      if (_isClosed) return;
+      settings = loadedSettings;
+      final openedBook = await api.open();
+      if (_isClosed) return;
+      book = openedBook;
+      // Closing before image layout must preserve the position read from disk.
+      _pendingOffset = openedBook.startPageOffsetRatio;
       await _applySystemSettings();
+      if (_isClosed) return;
       // The plan has to exist before the first prefetch, or the very first window
       // is the one sized for a device we do have information about — too late.
       await _reportDevice();
+      if (_isClosed) return;
       _startTicker();
       await _warmWindow();
     } catch (exception) {
+      if (_isClosed) return;
       error = '$exception';
     } finally {
-      busy = false;
-      notifyListeners();
+      if (!_isClosed) {
+        busy = false;
+        notifyListeners();
+      }
     }
   }
 
+  /// Record where inside the current page the reader is, 0..1, or `null` for
+  /// the top of the page.
+  ///
+  /// Called from a scroll handler, so it is deliberately cheap and drop-tolerant:
+  /// a report inside [offsetWriteInterval] of the last one, or one that barely
+  /// moved, is skipped rather than queued. The write that matters — the one when
+  /// the reader leaves — goes through [flushPageOffset].
+  Future<void> reportPageOffset(double? ratio) async {
+    if (_isClosed) return;
+    final normalized = ratio?.clamp(0.0, 1.0);
+    _pendingOffset = normalized;
+    if (!_offsetMovedEnough(normalized)) return;
+    final now = DateTime.now();
+    final last = _lastOffsetWrite;
+    if (last != null && now.difference(last) < offsetWriteInterval) return;
+    await _writeOffset(normalized, now);
+  }
+
+  /// Send the current offset regardless of throttling. Called when the reader
+  /// closes: this is the write that makes "stop halfway, come back halfway" true
+  /// even when the last scroll frame was a moment ago and was therefore skipped.
+  Future<void> flushPageOffset() {
+    if (_isClosed) return _offsetFlush ?? Future<void>.value();
+    if (_offsetWriteInFlight && _pendingOffset == _queuedOffset) {
+      return _offsetWriteChain;
+    }
+    if (!_offsetNeverSent &&
+        _pendingOffset == _reportedOffset &&
+        !_offsetWriteFailed) {
+      return _offsetWriteChain;
+    }
+    final pending = _writeOffset(_pendingOffset, DateTime.now());
+    _offsetFlush = pending;
+    return pending;
+  }
+
+  Future<void> _writeOffset(double? ratio, DateTime now) async {
+    _lastOffsetWrite = now;
+    _queuedOffset = ratio;
+    _offsetWriteInFlight = true;
+    final sequence = ++_offsetWriteSequence;
+    final write = _offsetWriteChain.then((_) async {
+      try {
+        await api.setPageOffset(ratio);
+        _reportedOffset = ratio;
+        _offsetNeverSent = false;
+        _offsetWriteFailed = false;
+      } catch (exception) {
+        _offsetWriteFailed = true;
+        // Losing a scroll position costs the reader one re-scroll next time.
+        // Surfacing it as a reader error would cost them the page they are on.
+        debugPrint('[Reader] page offset not saved: $exception');
+      } finally {
+        if (sequence == _offsetWriteSequence) _offsetWriteInFlight = false;
+      }
+    });
+    _offsetWriteChain = write;
+    _offsetFlush = write;
+    await write;
+  }
+
+  /// A scroll within the same page is not a reason to write: below this much
+  /// movement the reader is where they were, and a 5000px strip crossed at a
+  /// hundredth of a page is a rounding error nobody can see.
+  bool _offsetMovedEnough(double? next) {
+    if (_offsetNeverSent) return true;
+    final previous = _reportedOffset;
+    if (next == null || previous == null) return next != previous;
+    return (next - previous).abs() > 0.005;
+  }
+
   Future<void> turnTo(int target) async {
-    if (pageCount == 0) return;
+    if (_isClosed || pageCount == 0) return;
+    final generation = ++_turnGeneration;
     _noteMove();
     try {
       final turn = await api.turn(target);
+      if (_isClosed || generation != _turnGeneration) return;
+      if (turn.page != page && _offsetNeverSent == false) {
+        // A different page means the old offset described a page we are no
+        // longer on, and the *stored* one has to go with it: page 40's "60%
+        // down" must not be applied to page 41 on the next open.
+        //
+        // Written unconditionally rather than only for a vertical reader. That
+        // was the tempting optimisation and it is wrong: whether this book is a
+        // webtoon *now* says nothing about how it will render next time (mode is
+        // per-series and switchable), and a ratio left behind would spring back
+        // then. The row is already being touched by this turn, so the extra cost
+        // is one column in a write that was happening anyway.
+        _reportedOffset = null;
+        _pendingOffset = null;
+        await _writeOffset(null, DateTime.now());
+        if (_isClosed || generation != _turnGeneration) return;
+      }
       _moveTo(turn);
       await _warmWindow();
     } catch (exception) {
+      if (_isClosed || generation != _turnGeneration) return;
       error = '$exception';
       notifyListeners();
     }
@@ -151,18 +311,23 @@ class ReaderController extends ChangeNotifier {
   Future<void> previous() => _step(-1);
 
   Future<void> _step(int delta) async {
-    if (pageCount == 0) return;
+    if (_isClosed || pageCount == 0) return;
+    final generation = ++_turnGeneration;
     _noteMove();
     try {
-      _moveTo(await api.step(delta));
+      final turn = await api.step(delta);
+      if (_isClosed || generation != _turnGeneration) return;
+      _moveTo(turn);
       await _warmWindow();
     } catch (exception) {
+      if (_isClosed || generation != _turnGeneration) return;
       error = '$exception';
       notifyListeners();
     }
   }
 
   void _moveTo(ReaderTurnDto turn) {
+    if (_isClosed) return;
     final current = layout;
     if (current == null) return;
     book = book?.copyWith(layout: current.copyWithTurn(turn));
@@ -174,15 +339,31 @@ class ReaderController extends ChangeNotifier {
   Future<void> setDirection(String wanted) => _setLayout(direction: wanted);
 
   Future<void> _setLayout({String? mode, String? direction}) async {
+    if (_isClosed) return;
     try {
       final next = await api.setLayout(
         mode: mode ?? this.mode,
         direction: direction ?? this.direction,
       );
+      if (_isClosed) return;
       book = book?.copyWith(layout: next);
-      await _persistSettings(next);
+      if (next.axis != 'vertical' && !_offsetNeverSent) {
+        // Leaving a scrolling layout: the stored ratio described a scroll inside
+        // a page that no longer scrolls. Left alone it would sit in the database
+        // and spring back the next time this book opened as a webtoon.
+        _reportedOffset = null;
+        _pendingOffset = null;
+        await _writeOffset(null, DateTime.now());
+      }
+      if (_isClosed) return;
+      // Only the two dimensions this gesture changed: a tap on 双页 says nothing
+      // about the background colour, and re-persisting everything would fight
+      // whatever else is writing the global document.
+      onSeriesLayoutChanged?.call(next.mode, next.direction);
+      if (_isClosed) return;
       await _warmWindow();
     } catch (exception) {
+      if (_isClosed) return;
       error = '$exception';
       notifyListeners();
     }
@@ -213,51 +394,52 @@ class ReaderController extends ChangeNotifier {
   Future<void> _updateSettings(
     ReaderSettingsDto Function(ReaderSettingsDto) change,
   ) async {
+    if (_isClosed) return;
     final current = settings;
     if (current == null) return;
     try {
-      settings = await api.setSettings(change(current));
+      final updated = await api.setSettings(change(current));
+      if (_isClosed) return;
+      settings = updated;
       final next = await api.setLayout(
         mode: settings!.mode,
         direction: settings!.direction,
       );
+      if (_isClosed) return;
       book = book?.copyWith(layout: next);
       await _applySystemSettings();
+      if (_isClosed) return;
       notifyListeners();
     } catch (exception) {
+      if (_isClosed) return;
       error = '$exception';
       notifyListeners();
     }
   }
 
-  Future<void> _persistSettings(ReaderLayoutDto applied) async {
-    final current = settings;
-    if (current == null) return;
-    settings = await api.setSettings(current.copyWith(
-      mode: applied.mode,
-      direction: applied.direction,
-    ));
-    notifyListeners();
-  }
-
   Future<void> _applySystemSettings() async {
+    if (_isClosed) return;
     final applied = settings;
     if (applied == null || systemControls == null) return;
     if (applied.keepScreenAwake && !_keepAwakeApplied) {
       await systemControls!.setKeepScreenAwake(true);
+      if (_isClosed) return;
       _keepAwakeApplied = true;
     } else if (!applied.keepScreenAwake && _keepAwakeApplied) {
       await systemControls!.setKeepScreenAwake(false);
+      if (_isClosed) return;
       _keepAwakeApplied = false;
     }
   }
 
   /// Local first: ask where the page is, and only fetch when the answer is no.
   Future<String?> imageFor(int number) async {
+    if (_isClosed) return null;
     final known = _remembered(number);
     if (known != null) return known;
     try {
       final path = await api.pagePath(number);
+      if (_isClosed) return path;
       if (path != null) {
         _remember(number, path);
         notifyListeners();
@@ -267,15 +449,21 @@ class ReaderController extends ChangeNotifier {
       // A missing local path is not an error state; the fetch below may still
       // succeed, and if it cannot the page reports itself as unavailable.
     }
-    if (_inFlight.contains(number)) return null;
-    _inFlight.add(number);
+    if (_isClosed) return null;
+    final existing = _inFlight[number];
+    if (existing != null) return existing.future;
+    final completion = Completer<String?>();
+    _inFlight[number] = completion;
+    String? resolvedPath;
     // The fetch is the only place the reader can see the link's real behaviour.
     // There is no connectivity permission here, and none is needed: two failures
     // say "offline" more honestly than any broadcast listener.
     final clock = Stopwatch()..start();
     try {
       final path = await api.page(number);
+      resolvedPath = path;
       clock.stop();
+      if (_isClosed) return path;
       if (clock.elapsed >= slowResponseThreshold) _recentSlowResponses += 1;
       // A page that arrived is evidence the link works — and it is the only thing
       // that clears the banner. Leaving a stale error up after a successful turn is
@@ -287,6 +475,7 @@ class ReaderController extends ChangeNotifier {
       return path;
     } catch (exception) {
       clock.stop();
+      if (_isClosed) return null;
       _recentFailures += 1;
       // Offline over an uncached page: the surrounding spread still reads, and
       // the tile shows a retry affordance instead of a broken image.
@@ -296,6 +485,7 @@ class ReaderController extends ChangeNotifier {
       return null;
     } finally {
       _inFlight.remove(number);
+      completion.complete(resolvedPath);
     }
   }
 
@@ -329,9 +519,12 @@ class ReaderController extends ChangeNotifier {
   /// close together, and the core decides what "close" costs.
   void _noteMove() {
     final now = DateTime.now();
-    final flipping = _lastMove != null && now.difference(_lastMove!) < settleWindow;
+    final flipping =
+        _lastMove != null && now.difference(_lastMove!) < settleWindow;
     _lastMove = now;
-    if (flipping && window != null) unawaited(_reReportDeviceNow(stable: false));
+    if (flipping && window != null) {
+      unawaited(_reReportDeviceNow(stable: false));
+    }
   }
 
   /// The core's answer to the last report, or null when no device was described.
@@ -343,6 +536,7 @@ class ReaderController extends ChangeNotifier {
   Future<void> _reportDevice() => _reReportDeviceNow(stable: !isFlipping);
 
   Future<void> _reReportDeviceNow({required bool stable}) async {
+    if (_isClosed) return;
     final probe = device;
     if (probe == null) return;
     try {
@@ -350,11 +544,15 @@ class ReaderController extends ChangeNotifier {
         network: _networkWords,
         stable: stable,
       );
+      if (_isClosed) return;
       final plan = await api.configureDevice(profile);
+      if (_isClosed) return;
       window = plan;
       // Keep enough paths for the whole window plus what is on screen, and no
       // more: this is the number that used to be "forever".
-      final span = (plan.forward + plan.back + 1).toInt() * plan.pagesPerSpread.toInt() * 2;
+      final span = (plan.forward + plan.back + 1).toInt() *
+          plan.pagesPerSpread.toInt() *
+          2;
       _memoLimit = span < 32 ? 32 : (span > 256 ? 256 : span);
       while (_paths.length > _memoLimit) {
         _paths.remove(_paths.keys.first);
@@ -362,11 +560,7 @@ class ReaderController extends ChangeNotifier {
       ImageCacheBudget.apply(plan);
       notifyListeners();
     } catch (exception) {
-      // A device that cannot be described leaves the core's defaults alone, which
-      // are the conservative ones, and this must never break the page. It is still
-      // recorded: swallowing it whole is what made a failing plan update on device
-      // invisible — the reader believed `offline`, sent nothing, and nothing said
-      // why the number never changed.
+      if (_isClosed) return;
       _deviceReportError = '$exception';
       notifyListeners();
     }
@@ -380,13 +574,15 @@ class ReaderController extends ChangeNotifier {
   /// Re-plan only when the inferred link state actually moved: re-reporting on
   /// every failure would turn an outage into a request storm of a different kind.
   Future<void> _reReportIfLinkChanged() async {
+    if (_isClosed) return;
     final before = _networkWords;
     _networkWords = NetworkWords.infer(
       recentFailures: _recentFailures,
       recentSlowResponses: _recentSlowResponses,
     );
-    if (_networkWords == before) return;
+    if (_networkWords == before || _isClosed) return;
     await _reReportDeviceNow(stable: !isFlipping);
+    if (_isClosed) return;
     await _warmWindow();
   }
 
@@ -412,6 +608,7 @@ class ReaderController extends ChangeNotifier {
   int _pressureAfter = 0;
 
   Future<void> onMemoryPressure() async {
+    if (_isClosed) return;
     _memoryPressureEvents += 1;
     _pressureBefore = PaintingBinding.instance.imageCache.currentSizeBytes;
     PaintingBinding.instance.imageCache.clear();
@@ -423,6 +620,7 @@ class ReaderController extends ChangeNotifier {
       // Nothing to free, or nothing reachable; either way the pages on screen
       // are unaffected, which is the property that matters.
     }
+    if (_isClosed) return;
     await _reReportDeviceNow(stable: true);
   }
 
@@ -438,12 +636,13 @@ class ReaderController extends ChangeNotifier {
   /// 118 ms p95 per turn against 32 ms for this guard. Skipping is free: the
   /// next turn re-plans from wherever the reader has actually got to.
   Future<void> _warmWindow() async {
-    if (pageCount == 0 || _prefetchInFlight) return;
+    if (_isClosed || pageCount == 0 || _prefetchInFlight) return;
     _prefetchInFlight = true;
     try {
       // `inFlight` from the plan is the concurrency the link can take; the core
       // enforces it, the UI only passes the spread index.
       final landed = await api.prefetch(spread);
+      if (_isClosed) return;
       // Only a prefetch that actually pulled something is evidence about the
       // link. A pass that found nothing to fetch returns 0 in perfect health *and*
       // returns 0 through a dead radio, so treating it as proof of life cleared the
@@ -451,6 +650,7 @@ class ReaderController extends ChangeNotifier {
       if (landed > 0 && _recentFailures > 0) _recentFailures = 0;
       unawaited(_reReportIfLinkChanged());
     } catch (_) {
+      if (_isClosed) return;
       // Prefetch stays advisory — a cold neighbour must never surface as a
       // failure. But it is also the only thing that keeps asking when the reader
       // has stopped asking, so it is what the link verdict has to be built on:
@@ -483,9 +683,13 @@ class ReaderController extends ChangeNotifier {
   void _startTicker() {
     _ticker?.cancel();
     _ticker = Timer.periodic(tickInterval, (_) async {
+      if (_isClosed) return;
       try {
-        if (await api.tick()) _uploadPending = true;
-        if (_uploadPending) {
+        if (await api.tick()) {
+          if (_isClosed) return;
+          _uploadPending = true;
+        }
+        if (_uploadPending && !_isClosed) {
           await api.flushOutbox();
           _uploadPending = false;
         }
@@ -496,20 +700,32 @@ class ReaderController extends ChangeNotifier {
   }
 
   Future<void> markRead() async {
+    if (_isClosed) return;
     try {
-      if (await api.markRead()) await api.flushOutbox();
+      if (await api.markRead()) {
+        if (_isClosed) return;
+        await api.flushOutbox();
+      }
+      if (_isClosed) return;
       notifyListeners();
     } catch (exception) {
+      if (_isClosed) return;
       error = '$exception';
       notifyListeners();
     }
   }
 
   Future<void> markUnread() async {
+    if (_isClosed) return;
     try {
-      if (await api.markUnread()) await api.flushOutbox();
+      if (await api.markUnread()) {
+        if (_isClosed) return;
+        await api.flushOutbox();
+      }
+      if (_isClosed) return;
       notifyListeners();
     } catch (exception) {
+      if (_isClosed) return;
       error = '$exception';
       notifyListeners();
     }
@@ -519,10 +735,16 @@ class ReaderController extends ChangeNotifier {
   /// hand back the decoded bitmaps — a backgrounded reader has no business
   /// holding a screenful of 4K images against a system that may reclaim them.
   Future<void> paused() async {
+    if (_isClosed) return;
     _pauses += 1;
     PaintingBinding.instance.imageCache.clearLiveImages();
     try {
-      if (await api.background()) await api.flushOutbox();
+      await flushPageOffset();
+      if (_isClosed) return;
+      if (await api.background()) {
+        if (_isClosed) return;
+        await api.flushOutbox();
+      }
     } catch (_) {
       // Durable in SQLite; retried on resume or on the next beat.
     }
@@ -532,39 +754,56 @@ class ReaderController extends ChangeNotifier {
   /// phone slept), the window may have to shrink, and the pages on screen have to
   /// be re-resolved. Nothing here re-downloads what the cache still holds.
   Future<void> resumed() async {
+    if (_isClosed) return;
     _resumes += 1;
     _recentFailures = 0;
     _recentSlowResponses = 0;
     _networkWords = NetworkWords.wifi;
     _lastMove = null;
     await _reportDevice();
+    if (_isClosed) return;
     await _warmWindow();
+    if (_isClosed) return;
     notifyListeners();
   }
 
   @override
+  void notifyListeners() {
+    if (_isClosed) return;
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    if (_isClosed) return;
     _ticker?.cancel();
+    _ticker = null;
     // The reader's limits belong to the reader. Leaving them in place would make
     // the library screens cache like a comic viewer.
     ImageCacheBudget.restore();
     // Fire-and-forget: the write itself is already durable, and a closing
     // screen must not wait on a network round-trip.
-    unawaited(() async {
+    final closing = flushPageOffset();
+    _isClosed = true;
+    _closedFuture = () async {
       try {
+        // Order matters: the scroll position lives in the session, and closing
+        // the session is what writes it down. Close first and the last position
+        // is the one from the previous write.
+        await closing;
         if (await api.close()) await api.flushOutbox();
       } catch (_) {
         // The queue outlives this screen either way.
       }
-    }());
+    }();
     if (_keepAwakeApplied) {
-      unawaited(systemControls?.setKeepScreenAwake(false) ?? Future<bool>.value(false));
+      unawaited(systemControls?.setKeepScreenAwake(false) ??
+          Future<bool>.value(false));
     }
     unawaited(systemControls?.setBrightness(null) ?? Future<bool>.value(false));
     super.dispose();
   }
 }
-
 
 // flutter_rust_bridge generates plain data classes, so the copy helpers the
 // controller needs live here rather than in the generated tree (which is
@@ -614,6 +853,7 @@ extension ReaderSettingsDtoX on ReaderSettingsDto {
     int? prefetchForward,
     int? prefetchBack,
     int? prefetchCap,
+    bool? volumeKeysEnabled,
   }) =>
       ReaderSettingsDto(
         mode: mode ?? this.mode,
@@ -627,5 +867,6 @@ extension ReaderSettingsDtoX on ReaderSettingsDto {
         prefetchForward: prefetchForward ?? this.prefetchForward,
         prefetchBack: prefetchBack ?? this.prefetchBack,
         prefetchCap: prefetchCap ?? this.prefetchCap,
+        volumeKeysEnabled: volumeKeysEnabled ?? this.volumeKeysEnabled,
       );
 }

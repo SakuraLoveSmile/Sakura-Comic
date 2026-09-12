@@ -1555,7 +1555,7 @@ mod tests {
             [downloaded.to_string_lossy().as_ref()],
         )
         .unwrap();
-        assert!(!ledger::get(&conn, "anything").unwrap().is_some());
+        assert!(ledger::get(&conn, "anything").unwrap().is_none());
 
         let report = harness.cache.reconcile(&conn, "t1").unwrap();
         assert_eq!(

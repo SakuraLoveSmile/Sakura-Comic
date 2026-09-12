@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ChangeNotifier;
+
 import 'downloads_api.dart';
 import 'rust/ffi/application.dart';
 
@@ -21,26 +23,29 @@ import 'rust/ffi/application.dart';
 ///   * [stop] on backgrounding leaves nothing polling. A download resumes on the next
 ///     foreground, which is the deliberate cost of not running an Android service —
 ///     the queue is durable, the transfer is not.
-class DownloadController {
+///
+/// A [ChangeNotifier] rather than a hand-rolled callback so listeners can be scoped
+/// (`ListenableBuilder` around one badge) instead of forcing a whole-screen rebuild.
+/// The ticker fires every second whether or not anything moved, so notifications are
+/// gated on an actual state change — see [_notifyIfChanged].
+class DownloadController extends ChangeNotifier {
   DownloadController(
     this._api, {
     required Future<String> Function() link,
     required Future<int> Function() freeBytes,
-    this.onUpdate,
     this.interval = const Duration(seconds: 1),
     this.maxInterval = const Duration(seconds: 30),
     this.passesPerTurn = 8,
   })  : _link = link,
-        _freeBytes = freeBytes;
+        _freeBytes = freeBytes {
+    // Seed the fingerprint with the state the controller is born with, so an
+    // idle queue never notifies — not even on its first tick.
+    _revision = _computeRevision();
+  }
 
   final DownloadsApi _api;
   final Future<String> Function() _link;
   final Future<int> Function() _freeBytes;
-
-  /// The screen's repaint hook. Settable rather than final because the Downloads
-  /// screen installs it on open and clears it on dispose, and a controller that kept
-  /// a dead widget's callback would throw on the next tick.
-  void Function()? onUpdate;
 
   /// How often the ticker fires when the queue is simply progressing.
   final Duration interval;
@@ -67,10 +72,34 @@ class DownloadController {
 
   bool get pumping => _busy;
 
-  bool get hasWork =>
-      books.any((book) => book.state == 'waiting' || book.state == 'downloading');
+  bool get hasWork => books
+      .any((book) => book.state == 'waiting' || book.state == 'downloading');
 
   bool get isActive => _running;
+
+  /// Fingerprint of everything a listener can observe. The ticker fires every
+  /// second even on an idle queue, and `notifyListeners()` unconditionally would
+  /// rebuild every listener once a second forever — on the shelf that meant the
+  /// whole tile wall. An empty queue produces an identical string each tick, so
+  /// nothing is notified and nothing rebuilds.
+  ///
+  /// `stopReason` and `_error` are in here because the Downloads screen's status
+  /// line has to update when only the *reason* changes, with no row moving.
+  String _revision = '';
+  String _computeRevision() {
+    final queue = books
+        .map((b) => '${b.bookId}:${b.state}:${b.bytesDone}:${b.lastError}')
+        .join(',');
+    return '$queue|${storage?.downloadDiskBytes}|${lastPump?.stopReason}|'
+        '${lastPump?.nextInMs}|$_error';
+  }
+
+  void _notifyIfChanged() {
+    final next = _computeRevision();
+    if (next == _revision) return;
+    _revision = next;
+    notifyListeners();
+  }
 
   /// The state of one book, for a detail screen's button label. `''` when the book
   /// is not in the queue, which is the 下载 case.
@@ -126,13 +155,14 @@ class DownloadController {
       // five seconds of a timer that outlives the thing that started it.
       books = await _api.list();
       if (!hasWork) {
-        onUpdate?.call();
+        _notifyIfChanged();
         return;
       }
       final link = await _link();
       final free = await _freeBytes();
       for (var pass = 0; pass < passesPerTurn; pass += 1) {
-        final report = await _api.pump(maxPages: 0, maxBytes: 0, freeBytes: free, link: link);
+        final report = await _api.pump(
+            maxPages: 0, maxBytes: 0, freeBytes: free, link: link);
         // `null` is not a failure: another turn holds the database, and that one is
         // making the progress. Reporting the last known state is the honest answer.
         if (report == null) break;
@@ -148,7 +178,7 @@ class DownloadController {
       _error = '$error';
     } finally {
       _busy = false;
-      onUpdate?.call();
+      _notifyIfChanged();
       if (_running) {
         _ticker?.cancel();
         _ticker = Timer(periodicDelay, _tick);
@@ -168,7 +198,7 @@ class DownloadController {
     if (withStorage) {
       storage = await _api.storage(await _freeBytes());
     }
-    onUpdate?.call();
+    _notifyIfChanged();
   }
 
   // ------------------------------------------------------- user gestures
@@ -221,7 +251,7 @@ class DownloadController {
 
   Future<StorageDto> loadStorage() async {
     storage = await _api.storage(await _freeBytes());
-    onUpdate?.call();
+    _notifyIfChanged();
     return storage!;
   }
 

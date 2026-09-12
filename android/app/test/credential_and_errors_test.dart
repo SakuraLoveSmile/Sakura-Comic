@@ -20,7 +20,8 @@ import 'package:flutter_test/flutter_test.dart';
 /// a code it means to act on.
 Map<String, dynamic> loadCodeContract() {
   final file = File('../../specs/contracts/fixtures/errors/codes.json');
-  expect(file.existsSync(), isTrue, reason: 'fixture must be read from the repo, not copied');
+  expect(file.existsSync(), isTrue,
+      reason: 'fixture must be read from the repo, not copied');
   return jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
 }
 
@@ -30,7 +31,8 @@ List<Map<String, dynamic>> get contractCodes =>
 void main() {
   group('the shared error-code contract', () {
     test('the generated Dart enum is exactly the fixture list, in order', () {
-      final fixture = contractCodes.map((entry) => entry['code'] as String).toList();
+      final fixture =
+          contractCodes.map((entry) => entry['code'] as String).toList();
       // `describeEnum`-style naming on purpose: the wire name is the generated
       // enum's own name, so a rename on either side shows up here as a diff.
       final dart = ErrorCode.values.map((code) => code.name).toList();
@@ -39,7 +41,8 @@ void main() {
 
     test('each code\'s two policy bits match the fixture', () {
       for (final entry in contractCodes) {
-        final code = ErrorCode.values.firstWhere((c) => c.name == entry['code']);
+        final code =
+            ErrorCode.values.firstWhere((c) => c.name == entry['code']);
         final error = CoreError(
           code: code,
           message: 'from the fixture',
@@ -47,8 +50,10 @@ void main() {
           needsUser: entry['needsUser'] as bool,
         );
         final view = FailurePresentation.from(error);
-        expect(view.retryable, entry['retryable'], reason: '${code.name} retryable');
-        expect(view.needsReauth, entry['needsUser'], reason: '${code.name} needsUser');
+        expect(view.retryable, entry['retryable'],
+            reason: '${code.name} retryable');
+        expect(view.needsReauth, entry['needsUser'],
+            reason: '${code.name} needsUser');
       }
     });
 
@@ -70,16 +75,19 @@ void main() {
       }
     });
 
-    test('every code has its own headline, and unknown does not borrow one', () {
+    test('every code has its own headline, and unknown does not borrow one',
+        () {
       final headlines = ErrorCode.values.map(failureHeadline).toList();
       expect(headlines.toSet().length, ErrorCode.values.length,
-          reason: 'two codes sharing a sentence means one of them is unlabelled');
+          reason:
+              'two codes sharing a sentence means one of them is unlabelled');
       expect(failureHeadline(ErrorCode.unknown), isNot(contains('登录')));
     });
   });
 
   group('a failure that is not a CoreError', () {
-    test('is rendered honestly and never sends the user to re-authenticate', () {
+    test('is rendered honestly and never sends the user to re-authenticate',
+        () {
       // A platform-channel error or a Dart bug says nothing about a credential.
       final view = FailurePresentation.from(StateError('bad state'));
       expect(view.code, isNull);
@@ -102,12 +110,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
 
-    testWidgets('is absent when the server was never contacted', (tester) async {
+    testWidgets('is absent when the server was never contacted',
+        (tester) async {
       await showShelf(tester, null);
       expect(find.byKey(const ValueKey('credential-banner')), findsNothing);
     });
 
-    testWidgets('is absent for unknown, which is not the same as being wrong', (tester) async {
+    testWidgets('is absent for unknown, which is not the same as being wrong',
+        (tester) async {
       await showShelf(tester, 'unknown');
       expect(find.byKey(const ValueKey('credential-banner')), findsNothing);
     });
@@ -117,11 +127,14 @@ void main() {
       expect(find.byKey(const ValueKey('credential-banner')), findsNothing);
     });
 
-    testWidgets('appears for a rejected credential, naming the fix', (tester) async {
+    testWidgets('appears for a rejected credential, naming the fix',
+        (tester) async {
       await showShelf(tester, 'expired');
       expect(find.byKey(const ValueKey('credential-banner')), findsOneWidget);
       expect(
-        tester.widget<Text>(find.byKey(const ValueKey('credential-headline'))).data,
+        tester
+            .widget<Text>(find.byKey(const ValueKey('credential-headline')))
+            .data,
         contains('API Key'),
       );
       // No ServerManager on this device means no way to edit a credential, so
@@ -129,7 +142,8 @@ void main() {
       expect(find.byKey(const ValueKey('credential-reauth')), findsNothing);
     });
 
-    testWidgets('a credential read that fails outright leaves the wall standing',
+    testWidgets(
+        'a credential read that fails outright leaves the wall standing',
         (tester) async {
       await tester.pumpWidget(MaterialApp(
         home: SeriesGridScreen(repository: _BrokenCredentialRepository()),
@@ -151,10 +165,12 @@ class _CredentialRepository extends LibraryRepository {
   @override
   Future<AuthStateDto?> fetchCredentialState() async => state == null
       ? null
-      : AuthStateDto(serverId: 's1', state: state!, at: '2026-08-31T12:04:00.000Z');
+      : AuthStateDto(
+          serverId: 's1', state: state!, at: '2026-08-31T12:04:00.000Z');
 
   @override
-  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => const [];
+  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async =>
+      const [];
 
   @override
   Future<PagedSeries> querySeries({
@@ -171,10 +187,14 @@ class _CredentialRepository extends LibraryRepository {
       const PagedSeries(items: [], total: 0);
 
   @override
-  Future<Map<String, String>> fetchCoverPaths() async => const {};
+  Future<Map<String, String>> fetchCoverPaths({
+    required List<String> seriesIds,
+  }) async =>
+      const {};
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async => null;
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async =>
+      null;
 
   @override
   Future<int> syncCovers() async => 0;
@@ -184,9 +204,6 @@ class _CredentialRepository extends LibraryRepository {
 
   @override
   Future<BootstrapSummary> loadDemo() async => throw UnimplementedError();
-
-  @override
-  Stream<List<Series>> observeSeries() => Stream.value(const []);
 }
 
 /// A repository whose credential read fails outright — the shelf must survive it.

@@ -13,12 +13,15 @@ jobs:
         working-directory: android/komga_core
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.85.0"
           components: rustfmt, clippy
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      - name: Assert Real Native Core startup and acceptance
+        run: bash ../../scripts/e2e_stage10_core.sh --skip-swift
 
   # Stage 1: proves the FFI cdylib cross-compiles for every Android ABI.
   # The .so files are build artifacts (gitignored) — this job rebuilds them.
@@ -29,9 +32,11 @@ jobs:
         working-directory: android/komga_core
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
       - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-      - run: cargo install cargo-ndk
+      - run: cargo install cargo-ndk --locked
       - name: Cross-compile komga_core (features frb) into jniLibs
         run: |
           NDK_ROOT="${ANDROID_NDK_HOME:-$(ls -d ${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/* | head -1)}"
@@ -42,9 +47,22 @@ jobs:
             -o ../app/android/app/src/main/jniLibs \
             build --release --features frb
       - name: Verify .so outputs
-        run: find ../app/android/app/src/main/jniLibs -name 'libkomga_core.so' -exec ls -la {} \;
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -f "../app/android/app/src/main/jniLibs/$abi/libkomga_core.so" || {
+              echo "::error::Missing libkomga_core.so for ABI $abi" >&2
+              exit 1
+            }
+          done
+      - name: Upload jniLibs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jniLibs
+          path: android/app/android/app/src/main/jniLibs
+          if-no-files-found: error
 
   flutter-app:
+    needs: [android-core-ndk]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,11 +76,42 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.29.0'
+          cache: true
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+      - name: Install flutter_rust_bridge_codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+      - name: Verify FRB bindings are not drifted
+        run: bash ../../scripts/check_frb_drift.sh
+      - name: Download jniLibs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jniLibs
+          path: android/app/android/app/src/main/jniLibs
+      - name: Verify 3-ABI native libraries in jniLibs
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -f "android/app/src/main/jniLibs/$abi/libkomga_core.so" || {
+              echo "::error::Missing libkomga_core.so for ABI $abi" >&2
+              exit 1
+            }
+          done
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - name: Build debug APK
+      - name: Build debug APK with bundled native core
         run: flutter build apk --debug
+      - name: Verify APK bundles all 3 ABI native libraries
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep "lib/$abi/libkomga_core.so" || {
+              echo "::error::APK does not bundle libkomga_core.so for ABI $abi" >&2
+              exit 1
+            }
+          done
+          echo "APK successfully packages all 3 ABI native libraries."
 
   swift-package:
     runs-on: macos-15
@@ -109,3 +158,22 @@ jobs:
           xcrun simctl launch "$DEVICE" com.example.comic.ios
           sleep 5
           xcrun simctl spawn "$DEVICE" launchctl list | grep com.example.comic.ios && echo "iOS APP LAUNCHED OK"
+
+  # Builds the macOS app (with multi-window architecture) and validates build.
+  macos-app:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apple/ComicApp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build for macOS
+        run: |
+          xcodebuild -project ComicApp.xcodeproj -scheme ComicApp_macOS \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath build build CODE_SIGNING_ALLOWED=NO

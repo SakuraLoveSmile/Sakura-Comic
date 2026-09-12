@@ -260,7 +260,7 @@ pub fn page_file_name(number: u32, extension: &str) -> String {
     } else {
         extension
     };
-    format!("{number:0width$}.{extension}", width = width)
+    format!("{number:0width$}.{extension}")
 }
 
 /// The page number a file name in this tree stands for, if it is one at all.

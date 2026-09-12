@@ -4,7 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/painting.dart' show PaintingBinding;
 import 'package:flutter/services.dart' show MethodChannel;
 
-import 'rust/ffi/application.dart' show CacheStatsDto, DeviceProfileDto, ReaderWindowDto;
+import 'rust/ffi/application.dart'
+    show CacheStatsDto, DeviceProfileDto, ReaderWindowDto;
 
 /// Stage 8 device facts, and the memory bounds the reader applies from them.
 ///
@@ -181,7 +182,8 @@ class ImageCacheBudget {
 
   /// 0 when the platform gave no answer, meaning the tier stays whatever the
   /// core decided is safe.
-  static int currentBytes() => PaintingBinding.instance.imageCache.maximumSizeBytes;
+  static int currentBytes() =>
+      PaintingBinding.instance.imageCache.maximumSizeBytes;
   static int currentSlots() => PaintingBinding.instance.imageCache.maximumSize;
 
   /// Flutter's documented defaults, from ` PaintingBinding`.
@@ -200,7 +202,8 @@ abstract final class NetworkWords {
   /// The state inferred from what requests actually did. The reader has no
   /// connectivity permission and needs none: a page that failed to arrive twice
   /// says the link is down better than any broadcast listener could.
-  static String infer({required int recentFailures, required int recentSlowResponses}) {
+  static String infer(
+      {required int recentFailures, required int recentSlowResponses}) {
     if (recentFailures >= 2) return offline;
     if (recentSlowResponses >= 3) return weak;
     return wifi;

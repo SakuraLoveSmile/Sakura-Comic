@@ -89,6 +89,47 @@ pub fn list_thumbnails(conn: &Connection, server_id: &str) -> rusqlite::Result<V
     rows.collect()
 }
 
+/// Cover paths for a *set* of entities — what the wall and a series' book list
+/// actually need, instead of the server's whole thumbnail table.
+///
+/// `list_thumbnails` returns every row of the server (both variants) and leaves
+/// the caller to filter, which at 20,000 books is 20,000 rows decoded plus a
+/// `stat()` per row on every screen load. The primary key
+/// `(server_id, remote_id, variant)` covers this lookup, so asking for one page
+/// costs one probe per id instead of a full scan.
+///
+/// Returns `(remote_id, local_path)` for the ids that have a record. The caller
+/// decides what to do about files that have since vanished.
+pub fn cover_paths(
+    conn: &Connection,
+    server_id: &str,
+    variant: &str,
+    remote_ids: &[String],
+) -> rusqlite::Result<Vec<(String, String)>> {
+    if remote_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // One placeholder per id: a page is tens of ids, far inside SQLite's
+    // parameter limit, and it keeps the primary key visible to the planner.
+    let placeholders = (0..remote_ids.len())
+        .map(|i| format!("?{}", i + 3))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT remote_id, local_path FROM thumbnails
+          WHERE server_id = ?1 AND variant = ?2 AND remote_id IN ({placeholders})"
+    );
+    let mut values: Vec<&dyn rusqlite::ToSql> = vec![&server_id, &variant];
+    for id in remote_ids {
+        values.push(id);
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(values), |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    rows.collect()
+}
+
 /// Remove every cover record for a server (profile deletion cascade).
 /// Returns the number of rows removed.
 pub fn delete_for_server(conn: &Connection, server_id: &str) -> rusqlite::Result<usize> {
@@ -183,6 +224,39 @@ mod tests {
         assert!(get_thumbnail(&conn, "srv-1", "nope", VARIANT_SERIES)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn cover_paths_answers_only_the_ids_it_was_asked_for() {
+        let conn = open_in_memory().unwrap();
+        for id in ["s1", "s2", "s3"] {
+            record_thumbnail(&conn, "srv-1", id, VARIANT_SERIES, &format!("/c/{id}"), 1).unwrap();
+        }
+        // Same remote id, other variant: must not leak into a series answer.
+        record_thumbnail(&conn, "srv-1", "s1", VARIANT_BOOK, "/c/book-s1", 1).unwrap();
+        // Other server: must not leak either.
+        record_thumbnail(&conn, "srv-2", "s2", VARIANT_SERIES, "/other/s2", 1).unwrap();
+
+        let asked = vec!["s1".to_string(), "s3".to_string()];
+        let mut found = cover_paths(&conn, "srv-1", VARIANT_SERIES, &asked).unwrap();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("s1".to_string(), "/c/s1".to_string()),
+                ("s3".to_string(), "/c/s3".to_string()),
+            ],
+            "unasked ids (s2) must not be returned, and neither must the other variant or server"
+        );
+
+        // An empty page asks nothing and gets nothing, rather than everything.
+        assert!(cover_paths(&conn, "srv-1", VARIANT_SERIES, &[])
+            .unwrap()
+            .is_empty());
+
+        // Ids with no record are simply absent, not an error.
+        let none = cover_paths(&conn, "srv-1", VARIANT_SERIES, &["ghost".to_string()]).unwrap();
+        assert!(none.is_empty());
     }
 
     #[test]

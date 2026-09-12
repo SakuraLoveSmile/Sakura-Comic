@@ -17,7 +17,7 @@ public struct URLSessionCoverFetcher: CoverFetching {
     public let auth: AuthMethod
     public let session: URLSession
 
-    public init(auth: AuthMethod, session: URLSession = .shared) {
+    public init(auth: AuthMethod, session: URLSession = KomgaTransport.makeDefaultSession()) {
         self.auth = auth
         self.session = session
     }

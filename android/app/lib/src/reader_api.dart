@@ -13,7 +13,8 @@ import 'rust/ffi/bridge.dart' as frb;
 /// the network kept strictly on the core side of this boundary.
 abstract class ReaderApi {
   /// Mirror-or-fetch the page manifest, restore the position, return the layout.
-  Future<ReaderBookDto> open({String mode = '', String direction = '', bool? firstPageSingle});
+  Future<ReaderBookDto> open(
+      {String mode = '', String direction = '', bool? firstPageSingle});
 
   /// Where a page already is on disk, without touching the network.
   Future<String?> pagePath(int page);
@@ -48,7 +49,15 @@ abstract class ReaderApi {
   /// One spread forward (>= 0) or backward (< 0).
   Future<ReaderTurnDto> step(int delta);
 
-  Future<ReaderLayoutDto> setLayout({required String mode, required String direction});
+  /// Record how far into the current page a webtoon reader has scrolled.
+  ///
+  /// Separate from [turn] on purpose: scrolling inside one page is not a page
+  /// change, and routing it through `turn` would make the reader re-plan its
+  /// prefetch window on every scroll frame. `null` means "top of the page".
+  Future<void> setPageOffset(double? ratio);
+
+  Future<ReaderLayoutDto> setLayout(
+      {required String mode, required String direction});
 
   /// The three statements the reader can make. Mark-read / mark-unread are the
   /// user's own, so they are never held back by the throttle.
@@ -163,6 +172,14 @@ class FrbReaderApi implements ReaderApi {
       );
 
   @override
+  Future<void> setPageOffset(double? ratio) => frb.readerSetPageOffset(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        ratio: ratio,
+      );
+
+  @override
   Future<ReaderTurnDto> step(int delta) => frb.readerStep(
         dbPath: dbPath,
         serverId: serverId,
@@ -229,7 +246,15 @@ class FrbReaderApi implements ReaderApi {
 /// builds assert directly against that file. This class exists to exercise the
 /// widget, not to re-prove the contract.
 class InMemoryReaderApi implements ReaderApi {
-  InMemoryReaderApi({this.pageCount = 12, int startPage = 1}) : _page = startPage;
+  InMemoryReaderApi({
+    this.pageCount = 12,
+    int startPage = 1,
+    this.startPageOffsetRatio,
+  }) : _page = startPage;
+
+  /// What the core would report as the restored in-page position. `null` means
+  /// "top of the page", which is also what every non-webtoon reader gets.
+  final double? startPageOffsetRatio;
 
   final int pageCount;
   int _page;
@@ -246,14 +271,17 @@ class InMemoryReaderApi implements ReaderApi {
   /// Make prefetch calls fail as well. The reader notices an outage through the
   /// prefetcher, so a test of that needs a fake that fails there too.
   bool failPrefetch = false;
+
   /// Whether the fake claims pages are already on disk. False models a cold
   /// cache, which is the only state in which a fetch (and therefore a failure)
   /// can happen at all.
   bool pagesOnDisk = true;
+
   /// Make every uncached page fetch fail. This is how a test puts the reader on
   /// a dead link: the controller infers the state from what requests actually
   /// did, because it has no connectivity permission to consult.
   bool failPages = false;
+
   /// How long a page fetch appears to take, for the slow-link verdict.
   Duration pageDelay = Duration.zero;
   ReaderSettingsDto settingsDto = const ReaderSettingsDto(
@@ -267,6 +295,8 @@ class InMemoryReaderApi implements ReaderApi {
     prefetchForward: 2,
     prefetchBack: 1,
     prefetchCap: 12,
+    // Off by default, exactly as the milestone requires.
+    volumeKeysEnabled: false,
   );
 
   @override
@@ -277,7 +307,8 @@ class InMemoryReaderApi implements ReaderApi {
   }) async {
     if (mode.isNotEmpty) this.mode = mode;
     if (direction.isNotEmpty) this.direction = direction;
-    final spreads = spreadsFor(pageCount, this.mode, settingsDto.firstPageSingle);
+    final spreads =
+        spreadsFor(pageCount, this.mode, settingsDto.firstPageSingle);
     _spread = spreads.indexWhere((spread) => spread.contains(_page));
     if (_spread < 0) _spread = 0;
     return ReaderBookDto(
@@ -288,19 +319,24 @@ class InMemoryReaderApi implements ReaderApi {
       reflowable: false,
       fromMirror: false,
       startPage: _page,
+      startPageOffsetRatio: startPageOffsetRatio,
       layout: _layout(spreads),
     );
   }
 
+  /// Where each page's bytes live. Overridden by a test that needs decodable
+  /// images rather than the placeholder paths below.
+  Map<int, String> pagePaths = const {};
+
   @override
   Future<String?> pagePath(int page) async =>
-      pagesOnDisk ? '/tmp/stub-page-$page.png' : null;
+      pagePaths[page] ?? (pagesOnDisk ? '/tmp/stub-page-$page.png' : null);
 
   @override
   Future<String> page(int page) async {
     if (pageDelay > Duration.zero) await Future<void>.delayed(pageDelay);
     if (failPages) throw StateError('connection refused');
-    return '/tmp/stub-page-$page.png';
+    return pagePaths[page] ?? '/tmp/stub-page-$page.png';
   }
 
   @override
@@ -375,6 +411,15 @@ class InMemoryReaderApi implements ReaderApi {
     return 0;
   }
 
+  /// What the reader last reported as its scroll position, exposed so a test can
+  /// assert that reading halfway down a webtoon is actually recorded.
+  double? reportedPageOffset;
+
+  @override
+  Future<void> setPageOffset(double? ratio) async {
+    reportedPageOffset = ratio;
+  }
+
   @override
   Future<ReaderTurnDto> turn(int page) async {
     final clamped = page.clamp(1, pageCount).toInt();
@@ -388,7 +433,8 @@ class InMemoryReaderApi implements ReaderApi {
   @override
   Future<ReaderTurnDto> step(int delta) async {
     final spreads = spreadsFor(pageCount, mode, settingsDto.firstPageSingle);
-    final moved = (_spread + (delta >= 0 ? 1 : -1)).clamp(0, spreads.length - 1);
+    final moved =
+        (_spread + (delta >= 0 ? 1 : -1)).clamp(0, spreads.length - 1);
     _spread = moved;
     _page = spreads[moved].first;
     progressWritten = true;
@@ -450,12 +496,24 @@ class InMemoryReaderApi implements ReaderApi {
         ],
         spread: _spread,
         page: _page,
-        axis: (mode == 'webtoon' || direction == 'vertical') ? 'vertical' : 'horizontal',
+        axis: (mode == 'webtoon' || direction == 'vertical')
+            ? 'vertical'
+            : 'horizontal',
         reversed: direction == 'rtl' && mode != 'webtoon',
-        advanceSwipe: direction == 'rtl' && mode != 'webtoon' ? 'right' : (mode == 'webtoon' || direction == 'vertical' ? 'up' : 'left'),
-        retreatSwipe: direction == 'rtl' && mode != 'webtoon' ? 'left' : (mode == 'webtoon' || direction == 'vertical' ? 'down' : 'right'),
-        tapNext: direction == 'rtl' && mode != 'webtoon' ? 'left' : (mode == 'webtoon' || direction == 'vertical' ? 'bottom' : 'right'),
-        tapPrev: direction == 'rtl' && mode != 'webtoon' ? 'right' : (mode == 'webtoon' || direction == 'vertical' ? 'top' : 'left'),
+        advanceSwipe: direction == 'rtl' && mode != 'webtoon'
+            ? 'right'
+            : (mode == 'webtoon' || direction == 'vertical' ? 'up' : 'left'),
+        retreatSwipe: direction == 'rtl' && mode != 'webtoon'
+            ? 'left'
+            : (mode == 'webtoon' || direction == 'vertical' ? 'down' : 'right'),
+        tapNext: direction == 'rtl' && mode != 'webtoon'
+            ? 'left'
+            : (mode == 'webtoon' || direction == 'vertical'
+                ? 'bottom'
+                : 'right'),
+        tapPrev: direction == 'rtl' && mode != 'webtoon'
+            ? 'right'
+            : (mode == 'webtoon' || direction == 'vertical' ? 'top' : 'left'),
         mode: mode,
         direction: direction,
         pageGap: settingsDto.pageGap,
@@ -495,7 +553,6 @@ List<List<int>> spreadsFor(int pageCount, String mode, bool firstPageSingle) {
   }
   return spreads;
 }
-
 
 /// `Vec<Vec<u32>>` crosses the bridge as `List<Uint32List>`; the widgets want
 /// ordinary int lists, and this is the one place that translates.

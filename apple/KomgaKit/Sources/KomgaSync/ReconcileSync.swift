@@ -35,7 +35,7 @@ public enum ReconcileTrigger: String, Sendable, CaseIterable {
 
     /// Launch / foreground triggers can fire often; the explicit ones mean
     /// "the user (or the reconnecting stream) wants current data now".
-    var isBackground: Bool {
+    public var isBackground: Bool {
         self == .appLaunch || self == .didBecomeActive
     }
 }
@@ -329,20 +329,12 @@ public enum ReconcileSync {
         store: KomgaStore,
         serverID: String
     ) async throws -> ReconcileStepTally {
-        let seeded: Set<String>
-        if try store.resumeCursor(serverID: serverID, entityType: SyncEntity.series) != nil {
-            // Resuming: pages before the cursor were already committed locally.
-            seeded = Set(try store.localIDs(serverID: serverID, entityType: SyncEntity.series))
-        } else {
-            seeded = []
-        }
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.series) {
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.series)
             let projected = try store.localSeriesProjection(serverID: serverID)
-            var remote = seeded
+            var remote: Set<String> = []
             var tally = ReconcileStepTally()
-            var page = try store.resumeCursor(serverID: serverID, entityType: SyncEntity.series)
-                .map(FullSync.parsePage) ?? 0
+            var page = 0
             while true {
                 let response = try await fetcher.fetchSeriesPage(
                     PageRequest(page: page, size: fullSyncPageSize)
@@ -370,13 +362,6 @@ public enum ReconcileSync {
                 // The delete diff still sees every id the sweep scanned, dirty or not.
                 remote.formUnion(ids)
                 tally.pagesSwept += 1
-                if !last {
-                    try store.checkpointEntity(
-                        serverID: serverID,
-                        entityType: SyncEntity.series,
-                        cursor: FullSync.pageCursor(page + 1)
-                    )
-                }
                 if last { break }
                 page += 1
             }
@@ -491,19 +476,12 @@ public enum ReconcileSync {
         store: KomgaStore,
         serverID: String
     ) async throws -> ReconcileStepTally {
-        let seeded: Set<String>
-        if try store.resumeCursor(serverID: serverID, entityType: SyncEntity.collections) != nil {
-            seeded = Set(try store.localIDs(serverID: serverID, entityType: SyncEntity.collections))
-        } else {
-            seeded = []
-        }
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.collections) {
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.collections)
             let members = try store.localCollectionMembers(serverID: serverID)
-            var remote = seeded
+            var remote: Set<String> = []
             var tally = ReconcileStepTally()
-            var page = try store.resumeCursor(serverID: serverID, entityType: SyncEntity.collections)
-                .map(FullSync.parsePage) ?? 0
+            var page = 0
             while true {
                 let response = try await fetcher.fetchCollectionsPage(
                     request: PageRequest(page: page, size: fullSyncPageSize)
@@ -533,13 +511,6 @@ public enum ReconcileSync {
                 )
                 remote.formUnion(ids)
                 tally.pagesSwept += 1
-                if !last {
-                    try store.checkpointEntity(
-                        serverID: serverID,
-                        entityType: SyncEntity.collections,
-                        cursor: FullSync.pageCursor(page + 1)
-                    )
-                }
                 if last { break }
                 page += 1
             }
@@ -558,19 +529,12 @@ public enum ReconcileSync {
         store: KomgaStore,
         serverID: String
     ) async throws -> ReconcileStepTally {
-        let seeded: Set<String>
-        if try store.resumeCursor(serverID: serverID, entityType: SyncEntity.readlists) != nil {
-            seeded = Set(try store.localIDs(serverID: serverID, entityType: SyncEntity.readlists))
-        } else {
-            seeded = []
-        }
         return try await FullSync.runStep(store: store, serverID: serverID, entity: SyncEntity.readlists) {
             let known = try store.localStamps(serverID: serverID, entityType: SyncEntity.readlists)
             let storedBooks = try store.localReadlistBooks(serverID: serverID)
-            var remote = seeded
+            var remote: Set<String> = []
             var tally = ReconcileStepTally()
-            var page = try store.resumeCursor(serverID: serverID, entityType: SyncEntity.readlists)
-                .map(FullSync.parsePage) ?? 0
+            var page = 0
             while true {
                 let response = try await fetcher.fetchReadlistsPage(
                     request: PageRequest(page: page, size: fullSyncPageSize)
@@ -602,13 +566,6 @@ public enum ReconcileSync {
                 )
                 remote.formUnion(ids)
                 tally.pagesSwept += 1
-                if !last {
-                    try store.checkpointEntity(
-                        serverID: serverID,
-                        entityType: SyncEntity.readlists,
-                        cursor: FullSync.pageCursor(page + 1)
-                    )
-                }
                 if last { break }
                 page += 1
             }

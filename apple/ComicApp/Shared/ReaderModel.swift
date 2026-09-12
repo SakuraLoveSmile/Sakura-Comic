@@ -49,12 +49,13 @@ final class ReaderModel: ObservableObject {
     /// by this screen at all (Stage 6 rule R8).
     @Published private(set) var isPaged = false
     @Published private(set) var fallback: Fallback?
+    private(set) var isClosed = false
 
     let bookID: String
     let title: String
 
     private let store: KomgaStore
-    private let serverID: String
+    let serverID: String
     private var loader: PageLoader?
     private var session: ReaderSession?
     private var ticker: Task<Void, Never>?
@@ -72,6 +73,7 @@ final class ReaderModel: ObservableObject {
         baseURL: String,
         auth: AuthMethod,
         disk: DiskImageCache,
+        cacheBudgetBytes: Int64? = nil,
         flush: @escaping () async -> Void = {}
     ) {
         self.store = store
@@ -81,7 +83,11 @@ final class ReaderModel: ObservableObject {
         self.flush = flush
         self.pendingMediaType = bookMediaType
         self.pendingSource = RemotePageSource(baseURL: baseURL, auth: auth)
-        self.pendingCache = PageCache(store: store, disk: disk)
+        let cache = PageCache(store: store, disk: disk)
+        if let cacheBudgetBytes, cacheBudgetBytes > 0 {
+            cache.budgetBytes = cacheBudgetBytes
+        }
+        self.pendingCache = cache
     }
 
     private let pendingMediaType: String?
@@ -91,6 +97,7 @@ final class ReaderModel: ObservableObject {
     // MARK: - Open
 
     func open() async {
+        isClosed = false
         isBusy = true
         defer { isBusy = false }
         do {
@@ -138,6 +145,7 @@ final class ReaderModel: ObservableObject {
     }
 
     func close() async {
+        isClosed = true
         ticker?.cancel()
         ticker = nil
         guard let session else { return }
@@ -449,4 +457,8 @@ extension ReaderSettingsDocument {
         copy.restorePosition = enabled
         return copy
     }
+}
+
+extension ReaderModel: Identifiable {
+    public var id: String { "\(serverID)/\(bookID)" }
 }

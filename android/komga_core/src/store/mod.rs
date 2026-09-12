@@ -258,6 +258,81 @@ mod tests {
         assert_eq!(version, schema::SCHEMA_VERSION);
     }
 
+    /// The Outbox table exactly as v6 created it — before the retry/scheduling
+    /// columns `V7_ALTER_STATEMENTS` adds. Written out rather than derived,
+    /// because the test is about what a database written *before* v7 looks like.
+    const V6_PENDING_MUTATIONS: &str = "CREATE TABLE pending_mutations (
+        id TEXT PRIMARY KEY,
+        server_id TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        mutation_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+    )";
+
+    /// An index over an ALTER-added column has to be created *after* the ALTER
+    /// loop, not in `CREATE_STATEMENTS` — which runs first, and on a database
+    /// that has not been altered yet simply fails to parse.
+    ///
+    /// This is not hypothetical: `pending_mutations_due` indexes `state` and
+    /// `next_retry_at`, both added by `V7_ALTER_STATEMENTS`, and it sat in
+    /// `CREATE_STATEMENTS`. A v6 database could not be opened at all
+    /// (`no such column: state`) — the user's queued offline edits would have
+    /// been stuck behind a database that refuses to open.
+    #[test]
+    fn a_v6_outbox_row_survives_the_migration_and_gains_its_retry_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::migrate(&conn).unwrap();
+        // Become a v6 database: the Outbox exists, but without its v7 columns.
+        conn.pragma_update(None, "user_version", 6_i64).unwrap();
+        conn.execute("DROP TABLE pending_mutations", []).unwrap();
+        conn.execute(V6_PENDING_MUTATIONS, []).unwrap();
+        conn.execute(
+            "INSERT INTO pending_mutations
+               (id, server_id, entity_id, mutation_type, payload, created_at, retry_count, last_error)
+             VALUES ('m1', 's1', 'b1', 'markRead', '{}', '2026-01-01T00:00:00Z', 2, 'timed out')",
+            [],
+        )
+        .unwrap();
+
+        schema::migrate(&conn).expect("a pre-v7 database must still be openable");
+
+        let row: (String, i64, String, Option<String>) = conn
+            .query_row(
+                "SELECT mutation_type, retry_count, state, next_retry_at
+                   FROM pending_mutations WHERE id = 'm1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            ("markRead".to_string(), 2, "pending".to_string(), None),
+            "the queued mutation and its retry count must survive; the new columns default"
+        );
+
+        // And the index the bug was about now exists, over columns that do.
+        let indexed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                  WHERE type = 'index' AND name = 'pending_mutations_due'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            indexed, 1,
+            "the due-scan index has to exist after the upgrade"
+        );
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, schema::SCHEMA_VERSION);
+    }
+
     fn table_shape(conn: &Connection, table: &str) -> Vec<(String, String, i64, String)> {
         let mut stmt = conn
             .prepare(&format!(
@@ -301,5 +376,103 @@ mod tests {
                 "{table}: a v8 database converged on a different shape than a fresh one"
             );
         }
+    }
+
+    /// `reader_position` exactly as v9 created it — no `page_offset_ratio`.
+    /// Written out rather than derived from `CREATE_STATEMENTS`, because the
+    /// point is what a database written *before* Stage 10 looks like.
+    const V9_READER_POSITION: &str = "CREATE TABLE reader_position (
+        server_id TEXT NOT NULL,
+        book_id TEXT NOT NULL,
+        page INTEGER NOT NULL,
+        mode TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (server_id, book_id)
+    )";
+
+    /// The v10 migration is the one that cannot lose anything: a nullable column
+    /// on a table whose other columns are untouched. The row that was there
+    /// before must come back as it was, and the new column must be NULL — not
+    /// `0.0`, which would claim "top of the page" and silently move a webtoon
+    /// reader who had scrolled deep into one.
+    #[test]
+    fn a_v9_reader_position_row_survives_the_v10_migration_untouched() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::migrate(&conn).unwrap();
+        conn.pragma_update(None, "user_version", 9_i64).unwrap();
+        conn.execute("DROP TABLE reader_position", []).unwrap();
+        conn.execute(V9_READER_POSITION, []).unwrap();
+        conn.execute(
+            "INSERT INTO reader_position (server_id, book_id, page, mode, direction, updated_at)
+             VALUES ('s1', 'b1', 62, 'webtoon', 'vertical', '2026-03-04T05:06:07.000Z')",
+            [],
+        )
+        .unwrap();
+
+        schema::migrate(&conn).unwrap();
+
+        let row: (i64, String, String, Option<f64>, String) = conn
+            .query_row(
+                "SELECT page, mode, direction, page_offset_ratio, updated_at
+                 FROM reader_position WHERE server_id = 's1' AND book_id = 'b1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row.0, 62,
+            "the display page is the one thing that must survive"
+        );
+        assert_eq!(row.1, "webtoon");
+        assert_eq!(row.2, "vertical");
+        assert_eq!(
+            row.3, None,
+            "a pre-v10 row has no offset, which is not zero"
+        );
+        assert_eq!(row.4, "2026-03-04T05:06:07.000Z");
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, schema::SCHEMA_VERSION);
+    }
+
+    /// The guarded-ALTER route and the `CREATE_STATEMENTS` route must land on one
+    /// shape, or an upgrading user's `reader_position` query names a column that
+    /// is not there.
+    #[test]
+    fn a_migrated_v9_reader_position_has_the_fresh_shape() {
+        let upgraded = Connection::open_in_memory().unwrap();
+        schema::migrate(&upgraded).unwrap();
+        upgraded.pragma_update(None, "user_version", 9_i64).unwrap();
+        upgraded.execute("DROP TABLE reader_position", []).unwrap();
+        upgraded.execute(V9_READER_POSITION, []).unwrap();
+        schema::migrate(&upgraded).unwrap();
+
+        let fresh = open_in_memory().unwrap();
+        assert_eq!(
+            table_shape(&upgraded, "reader_position"),
+            table_shape(&fresh, "reader_position"),
+            "a v9 database converged on a different reader_position than a fresh one"
+        );
+
+        // Recovery scenario B: a v10 file opened by v9 code still reads and
+        // writes the columns v9 knows about.
+        upgraded
+            .execute(
+                "INSERT INTO reader_position (server_id, book_id, page, mode, direction, updated_at)
+                 VALUES ('s1', 'b2', 3, 'single', 'ltr', 't')",
+                [],
+            )
+            .unwrap();
+        let page: i64 = upgraded
+            .query_row(
+                "SELECT page FROM reader_position WHERE book_id = 'b2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(page, 3);
     }
 }

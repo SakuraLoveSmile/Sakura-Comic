@@ -500,6 +500,8 @@ pub async fn full_sync_from(
     fetcher: &(impl LibraryFetcher + Sync),
     start: StartAt,
 ) -> Result<FullSyncSummary> {
+    let mutex = crate::sync::reconcile::sync_lock(db_path, server_id);
+    let _lock = mutex.lock().await;
     let mut summary = FullSyncSummary {
         server_id: server_id.to_string(),
         ..Default::default()
@@ -554,6 +556,21 @@ pub async fn full_sync_from(
 
     let conn = store::open(db_path).map_err(db_err)?;
     sync_state::record_full_sync(&conn, server_id).map_err(db_err)?;
+    // `PRAGMA optimize`: SQLite's own heuristic for "has this table changed
+    // enough to be worth re-sampling". It has to run *after* the mirror has
+    // rows. `migrate()` also runs it, but on a fresh install that is an empty
+    // database, where it collects nothing for `series` or `books` — measured:
+    // only the FTS config tables get a `sqlite_stat1` row. With no row counts
+    // the planner drives `library_counts` from all of `books` even though the
+    // v11 indexes are present. On a 1,200-series / 12,000-book seed the
+    // refreshed plan costs 119,068 VM steps against 1,539,860 without (12.9x).
+    //
+    // It returns a row per action taken, so it must be queried rather than
+    // executed (`execute` fails with "Execute returned results").
+    {
+        let mut optimize = conn.prepare("PRAGMA optimize").map_err(db_err)?;
+        let _ = optimize.query_row([], |_| Ok(()));
+    }
     Ok(summary)
 }
 

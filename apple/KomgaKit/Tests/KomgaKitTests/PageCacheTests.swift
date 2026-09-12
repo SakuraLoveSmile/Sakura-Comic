@@ -3,6 +3,7 @@ import XCTest
 import GRDB
 @testable import KomgaReader
 @testable import KomgaStore
+@testable import KomgaDownloads
 
 // MARK: - Mirror of `reader/cache.rs`'s unit tests
 //

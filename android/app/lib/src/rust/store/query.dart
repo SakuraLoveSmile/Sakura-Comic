@@ -73,6 +73,46 @@ class LibraryCountRow {
           readCount == other.readCount;
 }
 
+/// One flat row for the FFI: the read target plus the series facts the UI needs
+/// to draw it honestly ("no next book" vs "we cannot prove there is no next
+/// book" are different sentences, so the completeness flag travels with it).
+class ReadTargetRow {
+  final BookRow book;
+  final String intent;
+
+  /// 1-based position in [`ordered_books`]; 0 when there is no target.
+  final PlatformInt64 position;
+  final PlatformInt64? bookCount;
+  final bool complete;
+
+  const ReadTargetRow({
+    required this.book,
+    required this.intent,
+    required this.position,
+    this.bookCount,
+    required this.complete,
+  });
+
+  @override
+  int get hashCode =>
+      book.hashCode ^
+      intent.hashCode ^
+      position.hashCode ^
+      bookCount.hashCode ^
+      complete.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReadTargetRow &&
+          runtimeType == other.runtimeType &&
+          book == other.book &&
+          intent == other.intent &&
+          position == other.position &&
+          bookCount == other.bookCount &&
+          complete == other.complete;
+}
+
 class SeriesPageResult {
   final List<SeriesRow> items;
   final PlatformInt64 total;

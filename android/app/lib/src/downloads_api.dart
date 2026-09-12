@@ -64,8 +64,8 @@ class FrbDownloadsApi implements DownloadsApi {
   final String apiKey;
 
   @override
-  Future<DownloadBookDto> enqueue(String bookId) => frb.downloadEnqueue(
-      dbPath: dbPath, serverId: serverId, bookId: bookId);
+  Future<DownloadBookDto> enqueue(String bookId) =>
+      frb.downloadEnqueue(dbPath: dbPath, serverId: serverId, bookId: bookId);
 
   @override
   Future<DownloadBookDto> pause(String bookId) =>
@@ -85,8 +85,8 @@ class FrbDownloadsApi implements DownloadsApi {
           dbPath: dbPath, serverId: serverId, bookId: bookId, allow: allow);
 
   @override
-  Future<DownloadDeleteDto> remove(String bookId) => frb.downloadDelete(
-      dbPath: dbPath, serverId: serverId, bookId: bookId);
+  Future<DownloadDeleteDto> remove(String bookId) =>
+      frb.downloadDelete(dbPath: dbPath, serverId: serverId, bookId: bookId);
 
   @override
   Future<DownloadDeleteDto> removeAll() =>
@@ -148,7 +148,8 @@ class FakeDownload {
   /// Bytes the fake claims are already on disk. Derived, exactly as the core derives
   /// it from page rows: a stored total that could drift from the page count would let
   /// a test pass on a number nothing computes.
-  int get bytesDone => pagesTotal <= 0 ? 0 : bytesTotal * pagesDone ~/ pagesTotal;
+  int get bytesDone =>
+      pagesTotal <= 0 ? 0 : bytesTotal * pagesDone ~/ pagesTotal;
 
   DownloadBookDto toDto() => DownloadBookDto(
         serverId: 's1',
@@ -172,7 +173,9 @@ class FakeDownload {
 /// The fake the tests and any build without the native library use.
 class InMemoryDownloadsApi implements DownloadsApi {
   InMemoryDownloadsApi({List<FakeDownload>? books})
-      : books = {for (final book in books ?? <FakeDownload>[]) book.bookId: book};
+      : books = {
+          for (final book in books ?? <FakeDownload>[]) book.bookId: book
+        };
 
   final Map<String, FakeDownload> books;
 
@@ -208,7 +211,8 @@ class InMemoryDownloadsApi implements DownloadsApi {
     final existing = _need(bookId);
     if (existing != null) {
       if (existing.state == 'downloading') {
-        throw StateError('illegal download transition downloading -> waiting by user');
+        throw StateError(
+            'illegal download transition downloading -> waiting by user');
       }
       existing
         ..state = 'waiting'
@@ -293,7 +297,8 @@ class InMemoryDownloadsApi implements DownloadsApi {
     final bytes = books.values.fold(0, (sum, book) => sum + book.bytesDone);
     return StorageDto(
       downloadBytes: bytes,
-      downloadPageCount: books.values.fold(0, (sum, book) => sum + book.pagesDone),
+      downloadPageCount:
+          books.values.fold(0, (sum, book) => sum + book.pagesDone),
       bookCount: books.length,
       perBook: books.values
           .map((book) => StorageBookDto(
@@ -310,7 +315,8 @@ class InMemoryDownloadsApi implements DownloadsApi {
               ))
           .toList(),
       downloadDiskBytes: bytes,
-      downloadDiskFiles: books.values.fold(0, (sum, book) => sum + book.pagesDone),
+      downloadDiskFiles:
+          books.values.fold(0, (sum, book) => sum + book.pagesDone),
       unownedBooks: 0,
       unownedBytes: 0,
       cachePageBytes: 4096,
@@ -398,13 +404,14 @@ class InMemoryDownloadsApi implements DownloadsApi {
       );
     }
     final book = running.first;
-    final step = (maxPages > 0 ? maxPages : pumpPages).clamp(1, book.pagesTotal);
+    final step =
+        (maxPages > 0 ? maxPages : pumpPages).clamp(1, book.pagesTotal);
     book
       ..state = 'downloading'
       ..pagesDone = (book.pagesDone + step).clamp(0, book.pagesTotal);
     if (book.pagesDone >= book.pagesTotal) book.state = 'completed';
-    final left = books.values.any((other) =>
-        other.state == 'waiting' || other.state == 'downloading');
+    final left = books.values.any(
+        (other) => other.state == 'waiting' || other.state == 'downloading');
     return DownloadPumpDto(
       book: book.bookId,
       state: book.state,

@@ -271,7 +271,7 @@ mod tests {
                 u32::from_be_bytes(bytes[pos + 8 + len..pos + 12 + len].try_into().unwrap());
             let mut crc_input = kind.to_vec();
             crc_input.extend_from_slice(data);
-            assert_eq!(crc32(&crc_input), expected_crc, "CRC of chunk {:?}", kind);
+            assert_eq!(crc32(&crc_input), expected_crc, "CRC of chunk {kind:?}");
             match kind {
                 b"IHDR" => {
                     assert!(!seen_ihdr);
@@ -311,7 +311,7 @@ mod tests {
                 u32::from_be_bytes(bytes[pos + 8 + len..pos + 12 + len].try_into().unwrap());
             let mut crc_input = kind.to_vec();
             crc_input.extend_from_slice(data);
-            assert_eq!(crc32(&crc_input), expected, "CRC of {:?}", kind);
+            assert_eq!(crc32(&crc_input), expected, "CRC of {kind:?}");
             match kind {
                 b"IHDR" => {
                     width = u32::from_be_bytes(data[0..4].try_into().unwrap());

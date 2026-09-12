@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -16,7 +18,11 @@ void main() {
     test('a reconnect sweeps before releasing its held-back events', () async {
       final repo = _LiveFakeRepository()
         ..polls = [
-          _poll(state: 's1', action: 'reconcile', reconcile: true, phase: 'reconciling'),
+          _poll(
+              state: 's1',
+              action: 'reconcile',
+              reconcile: true,
+              phase: 'reconciling'),
         ];
       final controller = LiveSyncController(
         repo,
@@ -29,8 +35,14 @@ void main() {
       expect(outcome.reconciled, isTrue);
       expect(
         repo.log,
-        ['ssePoll:', 'reconcile:sse_reconnected', 'sseReconciled:s1', 'refresh'],
-        reason: 'the sweep must run before the core is told it may release events',
+        [
+          'ssePoll:',
+          'reconcile:sse_reconnected',
+          'sseReconciled:s1',
+          'refresh'
+        ],
+        reason:
+            'the sweep must run before the core is told it may release events',
       );
     });
 
@@ -55,7 +67,8 @@ void main() {
           reason: 'each poll must carry the last state back');
     });
 
-    test('a dirty hint refreshes from SQLite and sends nothing itself', () async {
+    test('a dirty hint refreshes from SQLite and sends nothing itself',
+        () async {
       final repo = _LiveFakeRepository()
         ..polls = [
           _poll(
@@ -154,7 +167,8 @@ void main() {
       await controller.tick();
 
       expect(status, '/sse/v1/events 不存在');
-      expect(repo.log, ['ssePoll:'], reason: 'a parked stream must not sweep on its own');
+      expect(repo.log, ['ssePoll:'],
+          reason: 'a parked stream must not sweep on its own');
     });
   });
 
@@ -175,7 +189,8 @@ void main() {
       expect(controller.isRunning, isFalse);
       final seenAfterStop = repo.pollCount;
       await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(repo.pollCount, seenAfterStop, reason: 'a stopped controller must not poll');
+      expect(repo.pollCount, seenAfterStop,
+          reason: 'a stopped controller must not poll');
     });
 
     test('resume retries the stream now and drains the queue', () async {
@@ -192,7 +207,8 @@ void main() {
       expect(repo.log, contains('uploadOutbox'));
     });
 
-    test('dispose parks the core session so no socket outlives the screen', () async {
+    test('dispose parks the core session so no socket outlives the screen',
+        () async {
       final repo = _LiveFakeRepository()..polls = [];
       final controller = LiveSyncController(
         repo,
@@ -204,6 +220,61 @@ void main() {
 
       expect(repo.log, contains('sseStop'));
       expect(controller.isRunning, isFalse);
+    });
+
+    test('dispose invalidates pending poll, reconcile, and upload work',
+        () async {
+      final repo = _LiveFakeRepository()
+        ..pollCompleter = Completer<SsePollResult?>()
+        ..uploadCompleter = Completer<UploadOutcomeDto>();
+      final reconcileCompleter = Completer<void>();
+      var refreshes = 0;
+      var statuses = 0;
+      final controller = LiveSyncController(
+        repo,
+        reconcile: (_) => reconcileCompleter.future,
+        refresh: () async => refreshes++,
+        onOutbox: (_) => statuses++,
+      );
+
+      final poll = controller.tick();
+      final upload = controller.flush();
+      repo.pollCompleter!.complete(_poll(
+          state: 's1',
+          action: 'reconcile',
+          reconcile: true,
+          phase: 'reconciling'));
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.log, contains('ssePoll:'));
+
+      await controller.dispose();
+      reconcileCompleter.complete();
+      repo.uploadCompleter!.complete(_outcome(uploaded: 1));
+      await Future.wait([poll, upload]);
+
+      expect(repo.log, isNot(contains('sseReconciled:s1')));
+      expect(repo.log, isNot(contains('outboxStatus')));
+      expect(refreshes, 0);
+      expect(statuses, 0);
+      expect(controller.isRunning, isFalse);
+    });
+
+    test('start after dispose does not rearm callbacks', () async {
+      final repo = _LiveFakeRepository();
+      final controller = LiveSyncController(
+        repo,
+        reconcile: (_) async {},
+        refresh: () async {},
+        pollInterval: const Duration(milliseconds: 1),
+        uploadInterval: const Duration(milliseconds: 1),
+      );
+
+      await controller.dispose();
+      controller.start();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(repo.pollCount, 0);
+      expect(repo.log, ['sseStop']);
     });
   });
 
@@ -231,7 +302,8 @@ void main() {
 
       expect(outcome.uploaded, 2);
       expect(published?.total, 1);
-      expect(repo.log, containsAllInOrder(['uploadOutbox', 'outboxStatus', 'refresh']));
+      expect(repo.log,
+          containsAllInOrder(['uploadOutbox', 'outboxStatus', 'refresh']));
     });
 
     test('a run that uploaded nothing leaves the view alone', () async {
@@ -290,11 +362,13 @@ void main() {
       expect(status, contains('503'));
 
       expect(await controller.retryFailed(), 1);
-      expect(repo.log, contains('uploadOutbox'), reason: 'a retry must be followed by a drain');
+      expect(repo.log, contains('uploadOutbox'),
+          reason: 'a retry must be followed by a drain');
     });
   });
 
-  testWidgets('the shelf shows a queued-upload badge from SQLite', (tester) async {
+  testWidgets('the shelf shows a queued-upload badge from SQLite',
+      (tester) async {
     final repo = _BadgeFakeRepository()
       ..status = const OutboxStatusDto(
         serverId: 'A',
@@ -304,7 +378,8 @@ void main() {
         total: 3,
         failedEntries: [],
       );
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(find.byIcon(Icons.cloud_upload_outlined), findsOneWidget);
@@ -353,6 +428,8 @@ class _LiveFakeRepository extends StubLibraryRepository {
   final List<String> polledStates = [];
   List<SsePollResult> polls = [];
   Duration? pollDelay;
+  Completer<SsePollResult?>? pollCompleter;
+  Completer<UploadOutcomeDto>? uploadCompleter;
   UploadOutcomeDto upload = _outcome();
   OutboxStatusDto status = emptyOutboxStatus('A');
   int retries = 0;
@@ -363,6 +440,7 @@ class _LiveFakeRepository extends StubLibraryRepository {
     polledStates.add(stateJson);
     log.add('ssePoll:$stateJson');
     pollCount++;
+    if (pollCompleter != null) return pollCompleter!.future;
     if (pollDelay != null) await Future<void>.delayed(pollDelay!);
     if (polls.isEmpty) return null;
     return polls.removeAt(0);
@@ -386,6 +464,7 @@ class _LiveFakeRepository extends StubLibraryRepository {
   @override
   Future<UploadOutcomeDto> uploadOutbox() async {
     log.add('uploadOutbox');
+    if (uploadCompleter != null) return uploadCompleter!.future;
     return upload;
   }
 

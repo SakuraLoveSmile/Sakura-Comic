@@ -463,10 +463,242 @@ pub fn library_detail(
         .optional()
 }
 
+// MARK: - Read target (统一阅读入口)
+
+/// Why [`series_read_target`] points where it does. The UI needs this: "继续阅读"
+/// and "开始阅读" are different words on the same button, and "重新阅读" only
+/// appears when every book is finished.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadIntent {
+    /// An unfinished book with real progress — the button says 继续阅读.
+    Continue,
+    /// Nothing started yet — 开始阅读.
+    Start,
+    /// Everything finished — 重新阅读.
+    Reread,
+    /// No readable book at all — the button is disabled.
+    Empty,
+}
+
+impl ReadIntent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Continue => "continue",
+            Self::Start => "start",
+            Self::Reread => "reread",
+            Self::Empty => "empty",
+        }
+    }
+}
+
+/// The one book a "start or continue reading" tap should open, with the reason.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadTarget {
+    pub book: BookRow,
+    /// The book's 1-based position in [`ordered_books`].
+    pub position: i64,
+    pub intent: ReadIntent,
+}
+
+/// The series order, and whether the local catalog can be trusted for "next".
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderedBooks {
+    pub books: Vec<BookRow>,
+    /// `books_count` the server reported for this series, when it was synced.
+    pub book_count: Option<i64>,
+    /// The local mirror has every book the server says the series has.
+    ///
+    /// This is what gates "下一册". A series whose books are still streaming in
+    /// can end on an unfinished-looking page while missing the very next volume:
+    /// offering "下一册" there is offering a book that may not exist yet.
+    pub complete: bool,
+}
+
+/// The book after `book_id`, or `None` when this really is the last one.
+pub fn next_book_in_series(
+    conn: &Connection,
+    server_id: &str,
+    series_id: &str,
+    book_id: &str,
+) -> rusqlite::Result<Option<BookRow>> {
+    let ordered = ordered_books(conn, server_id, series_id)?;
+    if !ordered.complete {
+        return Ok(None);
+    }
+    let position = ordered
+        .books
+        .iter()
+        .position(|row| row.remote_id == book_id);
+    Ok(position.and_then(|index| ordered.books.get(index + 1).cloned()))
+}
+
+/// Which book a "start or continue reading" tap should open.
+///
+/// The rule, in one place so the shelf and the series detail cannot disagree:
+///
+/// 1. the unfinished book with the newest local progress — you were reading it;
+/// 2. otherwise the first unread book in series order — you start at the start;
+/// 3. otherwise, when every book is finished, the first book — 重新阅读;
+/// 4. nothing readable → [`ReadIntent::Empty`] and the caller disables the button.
+pub fn series_read_target(
+    conn: &Connection,
+    server_id: &str,
+    series_id: &str,
+) -> rusqlite::Result<Option<ReadTarget>> {
+    let ordered = ordered_books(conn, server_id, series_id)?;
+    if ordered.books.is_empty() {
+        return Ok(None);
+    }
+
+    // (1) In progress, newest first. `read_progress.page > 0` is the same test
+    // the reader itself uses: a row a sync created with page 0 is "unread".
+    let in_progress = conn
+        .query_row(
+            &format!(
+                "{BOOK_SELECT} WHERE b.server_id = ?1 AND b.series_id = ?2
+                   AND rp.completed = 0 AND rp.page IS NOT NULL AND rp.page > 0
+                 ORDER BY COALESCE(rp.local_updated_at, rp.server_updated_at) DESC
+                 LIMIT 1"
+            ),
+            params![server_id, series_id],
+            row_to_book,
+        )
+        .optional()?;
+
+    if let Some(book) = in_progress {
+        let position = ordered
+            .books
+            .iter()
+            .position(|row| row.remote_id == book.remote_id)
+            .map(|index| index as i64 + 1)
+            .unwrap_or(1);
+        return Ok(Some(ReadTarget {
+            book,
+            position,
+            intent: ReadIntent::Continue,
+        }));
+    }
+
+    // (2) Nothing started: the first unread book in *series order*, which is the
+    // order the user sees, not the order SQLite happens to return.
+    let first_unread = ordered
+        .books
+        .iter()
+        .position(|row| !row.progress_completed && row.progress_page.unwrap_or(0) == 0);
+
+    let (index, intent) = match first_unread {
+        Some(index) => (index, ReadIntent::Start),
+        // (3) Every book finished → 重新阅读 from the top.
+        None => (0, ReadIntent::Reread),
+    };
+    Ok(Some(ReadTarget {
+        book: ordered.books[index].clone(),
+        position: index as i64 + 1,
+        intent,
+    }))
+}
+
+/// Every book of one series in the order the user sees it.
+///
+/// The order is a product rule, not a detail: numbered books first in ascending
+/// `number_sort`, then case-insensitively by title, with `remote_id` last so two
+/// runs of the same library can never disagree. Books with no number (extras,
+/// one-shots) sort last — they are side stories, not volume 0.
+pub fn ordered_books(
+    conn: &Connection,
+    server_id: &str,
+    series_id: &str,
+) -> rusqlite::Result<OrderedBooks> {
+    let mut stmt = conn.prepare(&format!(
+        "{BOOK_SELECT} WHERE b.server_id = ?1 AND b.series_id = ?2
+         ORDER BY b.number_sort IS NULL, b.number_sort ASC,
+                  b.title COLLATE NOCASE ASC, b.remote_id ASC"
+    ))?;
+    let rows = stmt.query_map(params![server_id, series_id], row_to_book)?;
+    let books: Vec<BookRow> = rows.collect::<rusqlite::Result<_>>()?;
+
+    let book_count: Option<i64> = conn
+        .query_row(
+            "SELECT books_count FROM series WHERE server_id = ?1 AND remote_id = ?2",
+            params![server_id, series_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    // A missing `books_count` means the series row itself is not mirrored yet,
+    // which is exactly the case where "the next book" cannot be promised either.
+    let complete = matches!(book_count, Some(count) if count == books.len() as i64);
+    Ok(OrderedBooks {
+        books,
+        book_count,
+        complete,
+    })
+}
+
+/// One flat row for the FFI: the read target plus the series facts the UI needs
+/// to draw it honestly ("no next book" vs "we cannot prove there is no next
+/// book" are different sentences, so the completeness flag travels with it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadTargetRow {
+    pub book: BookRow,
+    pub intent: String,
+    /// 1-based position in [`ordered_books`]; 0 when there is no target.
+    pub position: i64,
+    pub book_count: Option<i64>,
+    pub complete: bool,
+}
+
+/// [`series_read_target`] as the FFI sees it.
+///
+/// Returns a row with an empty-`remote_id` book and `intent == "empty"` when the
+/// series has nothing readable, rather than `None`: a nullable struct is one
+/// more shape for the Dart side to get wrong, and the UI needs the completeness
+/// answer either way.
+pub fn series_read_target_row(
+    conn: &Connection,
+    server_id: &str,
+    series_id: &str,
+) -> rusqlite::Result<ReadTargetRow> {
+    let ordered = ordered_books(conn, server_id, series_id)?;
+    let (book, intent, position) = match series_read_target(conn, server_id, series_id)? {
+        Some(target) => (target.book, target.intent.as_str(), target.position),
+        None => (
+            BookRow {
+                server_id: server_id.to_string(),
+                remote_id: String::new(),
+                series_id: series_id.to_string(),
+                series_title: None,
+                title: String::new(),
+                number: None,
+                number_sort: None,
+                file_size: None,
+                media_type: None,
+                pages_count: None,
+                created_at: None,
+                last_modified: None,
+                progress_page: None,
+                progress_completed: false,
+                fts_rowid: None,
+            },
+            ReadIntent::Empty.as_str(),
+            0,
+        ),
+    };
+    Ok(ReadTargetRow {
+        book,
+        intent: intent.to_string(),
+        position,
+        book_count: ordered.book_count,
+        complete: ordered.complete,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::author::Author;
+    use crate::model::book::{Book, Media};
     use crate::model::series::{Series, SeriesMetadata};
     use crate::store::open_in_memory;
 
@@ -845,6 +1077,269 @@ mod tests {
             .is_none());
     }
 
+    // MARK: read target
+
+    /// A series with an explicit `books_count` — the mirror-completeness signal
+    /// "下一册" depends on. Built by hand so nothing about the fixture's page
+    /// count is implicit.
+    fn seed_read_series(conn: &Connection, series_id: &str, book_count: i64, books: &[Book]) {
+        let mut row = series(
+            series_id,
+            "Reading Order",
+            "lib-1",
+            "ONGOING",
+            "2025-01-01T00:00:00Z",
+            Vec::new(),
+            Vec::new(),
+        );
+        row.books_count = Some(book_count);
+        crate::store::series::save_series_batch(conn, "server-1", &[row]).unwrap();
+        crate::store::books::save_books_batch(conn, "server-1", books).unwrap();
+    }
+
+    fn reading_book(id: &str, series_id: &str, title: &str, number: Option<i64>) -> Book {
+        Book {
+            id: id.into(),
+            series_id: series_id.into(),
+            series_title: Some("Reading Order".into()),
+            name: title.into(),
+            number,
+            oneshot: false,
+            media: Some(Media {
+                media_type: Some("image".into()),
+                pages_count: Some(100),
+            }),
+            metadata: None,
+            read_progress: None,
+            created: Some("2025-01-01T00:00:00Z".into()),
+            last_modified: None,
+            size_bytes: None,
+        }
+    }
+
+    #[test]
+    fn ordered_books_puts_numbered_first_then_title_then_id() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(
+            &conn,
+            "s-order",
+            4,
+            &[
+                reading_book("b-null", "s-order", "附录", None),
+                reading_book("b-two-b", "s-order", "Extra B", Some(2)),
+                reading_book("b-two-a", "s-order", "extra a", Some(2)),
+                reading_book("b-one", "s-order", "第一卷", Some(1)),
+            ],
+        );
+
+        let ordered = ordered_books(&conn, "server-1", "s-order").unwrap();
+        let ids: Vec<&str> = ordered.books.iter().map(|b| b.remote_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["b-one", "b-two-a", "b-two-b", "b-null"],
+            "numbered ascending; equal numbers case-insensitive by title; unnumbered last"
+        );
+        assert!(ordered.complete);
+        assert_eq!(ordered.book_count, Some(4));
+    }
+
+    #[test]
+    fn a_short_of_the_server_count_mirror_is_not_complete() {
+        let conn = open_in_memory().unwrap();
+        // The server says 5, the mirror holds 2: books are still streaming in.
+        seed_read_series(
+            &conn,
+            "s-partial",
+            5,
+            &[
+                reading_book("p1", "s-partial", "1", Some(1)),
+                reading_book("p2", "s-partial", "2", Some(2)),
+            ],
+        );
+        let ordered = ordered_books(&conn, "server-1", "s-partial").unwrap();
+        assert!(!ordered.complete);
+        assert_eq!(ordered.book_count, Some(5));
+
+        // The last mirrored book is NOT the last book — so there is no next one.
+        assert!(next_book_in_series(&conn, "server-1", "s-partial", "p2")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn next_book_is_the_following_book_in_series_order() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(
+            &conn,
+            "s-next",
+            3,
+            &[
+                reading_book("n1", "s-next", "1", Some(1)),
+                reading_book("n2", "s-next", "2", Some(2)),
+                reading_book("n3", "s-next", "3", Some(3)),
+            ],
+        );
+        assert_eq!(
+            next_book_in_series(&conn, "server-1", "s-next", "n1")
+                .unwrap()
+                .unwrap()
+                .remote_id,
+            "n2"
+        );
+        assert!(
+            next_book_in_series(&conn, "server-1", "s-next", "n3")
+                .unwrap()
+                .is_none(),
+            "the last book of a complete series has no next"
+        );
+        assert!(next_book_in_series(&conn, "server-1", "s-next", "not-here")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn read_target_prefers_the_newest_unfinished_book() {
+        let conn = open_in_memory().unwrap();
+        let mut older = reading_book("r1", "s-read", "1", Some(1));
+        older.read_progress = None;
+        seed_read_series(
+            &conn,
+            "s-read",
+            3,
+            &[
+                older,
+                reading_book("r2", "s-read", "2", Some(2)),
+                reading_book("r3", "s-read", "3", Some(3)),
+            ],
+        );
+        crate::store::read_progress::upsert_local_read_progress(&conn, "server-1", "r1", 10, false)
+            .unwrap();
+        crate::store::read_progress::upsert_local_read_progress(&conn, "server-1", "r3", 40, false)
+            .unwrap();
+        conn.execute(
+            "UPDATE read_progress SET local_updated_at = ?1 WHERE book_id = ?2",
+            params!["2025-02-01T00:00:00Z", "r1"],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE read_progress SET local_updated_at = ?1 WHERE book_id = ?2",
+            params!["2025-03-01T00:00:00Z", "r3"],
+        )
+        .unwrap();
+
+        let target = series_read_target(&conn, "server-1", "s-read")
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.intent, ReadIntent::Continue);
+        assert_eq!(target.book.remote_id, "r3", "the newest progress wins");
+        assert_eq!(target.position, 3);
+    }
+
+    #[test]
+    fn read_target_starts_at_the_first_unread_book_not_the_first_row() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(
+            &conn,
+            "s-fresh",
+            3,
+            &[
+                reading_book("f1", "s-fresh", "1", Some(1)),
+                reading_book("f2", "s-fresh", "2", Some(2)),
+                reading_book("f3", "s-fresh", "3", Some(3)),
+            ],
+        );
+        crate::store::read_progress::mark_read(&conn, "server-1", "f1").unwrap();
+
+        let target = series_read_target(&conn, "server-1", "s-fresh")
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.intent, ReadIntent::Start);
+        assert_eq!(target.book.remote_id, "f2", "volume 1 is finished");
+        assert_eq!(target.position, 2);
+    }
+
+    #[test]
+    fn an_all_read_series_offers_a_reread_of_the_first_book() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(
+            &conn,
+            "s-done",
+            2,
+            &[
+                reading_book("d1", "s-done", "1", Some(1)),
+                reading_book("d2", "s-done", "2", Some(2)),
+            ],
+        );
+        crate::store::read_progress::mark_read(&conn, "server-1", "d1").unwrap();
+        crate::store::read_progress::mark_read(&conn, "server-1", "d2").unwrap();
+
+        let target = series_read_target(&conn, "server-1", "s-done")
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.intent, ReadIntent::Reread);
+        assert_eq!(target.book.remote_id, "d1");
+        assert_eq!(target.position, 1);
+    }
+
+    #[test]
+    fn a_series_with_no_books_has_no_read_target() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(&conn, "s-none", 0, &[]);
+        assert!(series_read_target(&conn, "server-1", "s-none")
+            .unwrap()
+            .is_none());
+        assert!(ordered_books(&conn, "server-1", "s-none")
+            .unwrap()
+            .books
+            .is_empty());
+    }
+
+    #[test]
+    fn read_target_reads_only_the_named_server() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(
+            &conn,
+            "s-srv",
+            1,
+            &[reading_book("m1", "s-srv", "1", Some(1))],
+        );
+        assert!(series_read_target(&conn, "server-2", "s-srv")
+            .unwrap()
+            .is_none());
+        assert!(ordered_books(&conn, "server-2", "s-srv")
+            .unwrap()
+            .books
+            .is_empty());
+    }
+
+    #[test]
+    fn the_ffi_row_carries_the_completeness_answer_even_with_no_target() {
+        let conn = open_in_memory().unwrap();
+        seed_read_series(&conn, "s-ffi", 2, &[]);
+
+        // An empty series still answers the completeness question: the UI has to
+        // say "this series is empty", not "we don't know yet".
+        let row = series_read_target_row(&conn, "server-1", "s-ffi").unwrap();
+        assert_eq!(row.intent, "empty");
+        assert_eq!(row.position, 0);
+        assert!(row.book.remote_id.is_empty());
+        assert_eq!(row.book_count, Some(2));
+        assert!(!row.complete, "the server says 2 books and we hold none");
+
+        // And a real target carries its book plus the same flags.
+        seed_read_series(
+            &conn,
+            "s-ffi2",
+            1,
+            &[reading_book("f1", "s-ffi2", "1", Some(1))],
+        );
+        let row = series_read_target_row(&conn, "server-1", "s-ffi2").unwrap();
+        assert_eq!(row.intent, "start");
+        assert_eq!(row.book.remote_id, "f1");
+        assert_eq!(row.position, 1);
+        assert!(row.complete);
+    }
+
     #[test]
     fn library_detail_counts_read_books_from_progress() {
         use crate::model::book::{Book, Media};
@@ -888,5 +1383,344 @@ mod tests {
             .expect("lib-1");
         assert_eq!(detail.book_count, 2);
         assert_eq!(detail.read_count, 1);
+    }
+
+    // MARK: v11 indexes — the plan, not a stopwatch
+
+    /// Seed a library big enough that the planner has to make a real decision.
+    /// Raw inserts rather than the store writers: this is about table
+    /// cardinality and shape, and 1,200 model objects would only slow the test.
+    fn seed_scale(conn: &Connection, series_count: i64, books_per: i64) {
+        conn.execute_batch("BEGIN").unwrap();
+        {
+            let mut s = conn
+                .prepare(
+                    "INSERT INTO series (server_id, remote_id, library_id, name, sort_name,
+                                         status, created_at, last_modified, books_count,
+                                         books_read_count, books_unread_count,
+                                         books_in_progress_count)
+                     VALUES ('server-1', ?1, ?2, ?3, ?4, 'ONGOING', ?5, ?5, ?6, 0, ?6, 0)",
+                )
+                .unwrap();
+            for i in 0..series_count {
+                s.execute(rusqlite::params![
+                    format!("s{i:06}"),
+                    format!("lib-{}", i % 4),
+                    format!("Series {i:06}"),
+                    format!("zzz {i:06}"),
+                    format!("2026-01-{:02}T00:00:00Z", 1 + i % 28),
+                    books_per,
+                ])
+                .unwrap();
+            }
+        }
+        {
+            let mut b = conn
+                .prepare(
+                    "INSERT INTO books (server_id, remote_id, series_id, series_title, title,
+                                        number, number_sort, pages_count)
+                     VALUES ('server-1', ?1, ?2, ?3, ?4, ?5, ?6, 20)",
+                )
+                .unwrap();
+            for i in 0..series_count {
+                for k in 0..books_per {
+                    b.execute(rusqlite::params![
+                        format!("b{i:06}-{k:03}"),
+                        format!("s{i:06}"),
+                        format!("Series {i:06}"),
+                        format!("Vol {k}"),
+                        format!("{k}"),
+                        k as f64,
+                    ])
+                    .unwrap();
+                }
+            }
+        }
+        conn.execute_batch("COMMIT").unwrap();
+    }
+
+    /// The plan SQLite chose, one line per row, for the failure message. The
+    /// parameters are bound because SQLite plans against their values too.
+    fn plan_of(conn: &Connection, sql: &str, params: Vec<Value>) -> String {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let rows: Vec<String> = stmt
+            .query_map(params_from_iter(params), |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        rows.join(" | ")
+    }
+
+    /// Run a statement to completion and report `(Sort, VmStep)`.
+    ///
+    /// `StatementStatus::Sort` counts the temporary B-trees SQLite opened for
+    /// this statement. Zero means it never needed one — a deterministic integer,
+    /// unlike a millisecond reading that depends on the machine.
+    fn plan_counters(conn: &Connection, sql: &str, params: Vec<Value>) -> (i32, i32) {
+        let mut stmt = conn.prepare(sql).unwrap();
+        let rows: Vec<i64> = stmt
+            .query_map(params_from_iter(params), |_| Ok(0i64))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        // Keep the rows alive so the counters describe the execution, not a plan.
+        assert!(rows.len() <= 1000);
+        (
+            stmt.get_status(rusqlite::StatementStatus::Sort),
+            stmt.get_status(rusqlite::StatementStatus::VmStep),
+        )
+    }
+
+    /// Every one of the wall's five sorts must come off an index.
+    ///
+    /// Without the v11 indexes each of these opened a temp B-tree over all
+    /// 1,200 series (and a second one for the `COUNT(*)` beside it), on every
+    /// page — so scrolling the wall was quadratic in the library.
+    #[test]
+    fn a_series_wall_page_never_sorts_in_a_temp_btree() {
+        let conn = open_in_memory().unwrap();
+        seed_scale(&conn, 1_200, 10);
+
+        for sort in [
+            SeriesSort::Name,
+            SeriesSort::SortName,
+            SeriesSort::DateAdded,
+            SeriesSort::DateUpdated,
+            SeriesSort::BooksCount,
+        ] {
+            for ascending in [true, false] {
+                let query = SeriesQuery {
+                    sort,
+                    ascending,
+                    ..SeriesQuery::default()
+                };
+                let (where_sql, mut params) = series_where(&query, "server-1");
+                params.push(Value::Integer(50));
+                params.push(Value::Integer(0));
+                // The same SQL `query_series` builds, with its parameters bound.
+                let sql = format!(
+                    "SELECT * FROM series s WHERE {where_sql} ORDER BY {} LIMIT ?{} OFFSET ?{}",
+                    query.sort.order_expr(query.ascending),
+                    params.len() - 1,
+                    params.len()
+                );
+
+                let bound = {
+                    let mut stmt = conn.prepare(&sql).unwrap();
+                    let rows: Vec<i64> = stmt
+                        .query_map(params_from_iter(params.clone()), |_| Ok(0i64))
+                        .unwrap()
+                        .collect::<rusqlite::Result<_>>()
+                        .unwrap();
+                    assert!(rows.len() <= 50);
+                    stmt.get_status(rusqlite::StatementStatus::Sort)
+                };
+
+                assert_eq!(
+                    bound,
+                    0,
+                    "sort {:?} ascending={ascending} still sorts in a temp B-tree; plan: {}",
+                    sort,
+                    plan_of(&conn, &sql, params.clone())
+                );
+            }
+        }
+    }
+
+    /// The sort-name index is an expression index, and SQLite only uses it while
+    /// the query's ORDER BY is *the same expression*. This test is the tripwire
+    /// for an edit to `SeriesSort::order_expr` that silently reintroduces the
+    /// filesort that index exists to remove.
+    #[test]
+    fn the_sort_name_expression_index_still_matches_the_order_expression() {
+        let conn = open_in_memory().unwrap();
+        seed_scale(&conn, 1_200, 10);
+
+        let query = SeriesQuery {
+            sort: SeriesSort::SortName,
+            ascending: true,
+            ..SeriesQuery::default()
+        };
+        let (where_sql, params) = series_where(&query, "server-1");
+        let sql = format!(
+            "SELECT * FROM series s WHERE {where_sql} ORDER BY {} LIMIT 50 OFFSET 0",
+            query.sort.order_expr(query.ascending)
+        );
+
+        let (sort, _) = plan_counters(&conn, &sql, params.clone());
+        let plan = plan_of(&conn, &sql, params);
+        assert_eq!(
+            sort, 0,
+            "sort_name fell back to a temp B-tree; plan: {plan}"
+        );
+        assert!(
+            plan.contains("series_sort_name_nocase"),
+            "the expression index exists but the query stopped matching it; plan: {plan}"
+        );
+    }
+
+    /// Listing one series' books must not scan the whole library's books.
+    ///
+    /// `books` is keyed `(server_id, remote_id)`, so before
+    /// `books_series_order` this query had no way to reach one series' rows
+    /// other than reading every book of the server.
+    #[test]
+    fn a_series_book_page_reads_one_series_not_the_whole_library() {
+        let conn = open_in_memory().unwrap();
+        seed_scale(&conn, 1_200, 10); // 12,000 books
+
+        let query = BookQuery {
+            sort: BookSort::Number,
+            ascending: true,
+            ..BookQuery::default()
+        };
+        let (where_sql, mut params) = book_where(&query, "server-1", "s000500");
+        params.push(Value::Integer(100));
+        params.push(Value::Integer(0));
+        let sql = format!(
+            "{} WHERE {where_sql} ORDER BY {} LIMIT ?{} OFFSET ?{}",
+            BOOK_SELECT,
+            query.sort.order_expr(query.ascending),
+            params.len() - 1,
+            params.len()
+        );
+
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<i64> = stmt
+            .query_map(params_from_iter(params.clone()), |_| Ok(0i64))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows.len(), 10, "one series' ten books");
+        let vm_steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
+
+        // Ten books in, ten rows out. A full scan of 12,000 books would be
+        // three orders of magnitude more work; the bound leaves room for the
+        // join and the sort but not for another series' rows.
+        assert!(
+            vm_steps < 2_000,
+            "books-of-a-series visited {vm_steps} rows for a ten-book series; plan: {}",
+            plan_of(&conn, &sql, params)
+        );
+    }
+
+    /// Seed `libraries` rows too, so `library_counts` has something to count into.
+    fn seed_libraries(conn: &Connection, count: i64) {
+        conn.execute_batch("BEGIN").unwrap();
+        {
+            let mut l = conn
+                .prepare(
+                    "INSERT INTO libraries (server_id, remote_id, name, root, unavailable)
+                     VALUES ('server-1', ?1, ?2, ?3, 0)",
+                )
+                .unwrap();
+            for i in 0..count {
+                l.execute(rusqlite::params![
+                    format!("lib-{i}"),
+                    format!("Library {i}"),
+                    format!("/root/{i}"),
+                ])
+                .unwrap();
+            }
+        }
+        conn.execute_batch("COMMIT").unwrap();
+    }
+
+    /// Statistics are what makes the planner pick the library-first join order.
+    ///
+    /// The v11 indexes alone are not enough, and this is the measurement that
+    /// says so: `library_counts` counts books per library with a correlated
+    /// subquery. With no `sqlite_stat1` SQLite does not know how many series a
+    /// library holds and drives from `books` — every book of the server, once per
+    /// library. After statistics it drives from `series_library` into
+    /// `books_series_order`. `PRAGMA optimize` is where those statistics come
+    /// from, and it has to run *after* the mirror has rows: on an empty database
+    /// `ANALYZE` writes no `sqlite_stat1` rows at all.
+    #[test]
+    fn library_counts_drives_from_the_library_when_statistics_exist() {
+        let conn = open_in_memory().unwrap();
+        seed_libraries(&conn, 4);
+        // Series are spread round-robin over the libraries, so each library owns
+        // a few hundred series and a few thousand books.
+        seed_scale(&conn, 1_200, 10);
+
+        let sql =
+            format!("{LIBRARY_STATS_SQL} WHERE l.server_id = ?1 ORDER BY l.name COLLATE NOCASE");
+        let params = vec![Value::Text("server-1".to_string())];
+
+        let (_, before) = plan_counters(&conn, &sql, params.clone());
+
+        conn.execute_batch("PRAGMA optimize").unwrap();
+        let stat_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_stat1", [], |r| r.get(0))
+            .unwrap();
+
+        let (_, after) = plan_counters(&conn, &sql, params.clone());
+        let plan = plan_of(&conn, &sql, params);
+
+        assert!(
+            stat_rows > 0,
+            "PRAGMA optimize collected nothing; plan: {plan}"
+        );
+        assert!(
+            plan.contains("series_library") && plan.contains("books_series_order"),
+            "the planner is not using the library-driven order; plan: {plan}"
+        );
+        assert!(
+            after < before,
+            "statistics did not help: {before} rows visited before, {after} after; plan: {plan}"
+        );
+        // The substantive claim, as a ratio rather than a magic number. Measured
+        // on this seed: 1,539,860 VM steps without statistics, 119,068 with — a
+        // 12.9x cut. A 5x floor has ample headroom for a planner tweak on a
+        // different SQLite build, and still fails loudly if the plan reverts to
+        // books-first (ratio 1).
+        assert!(
+            before > after * 5,
+            "statistics barely moved the plan: {before} steps before, {after} after; plan: {plan}"
+        );
+    }
+
+    /// `PRAGMA optimize` on an empty database collects nothing for the tables
+    /// the plan actually turns on.
+    ///
+    /// Measured, and the measurement is the point: it does write a couple of
+    /// `sqlite_stat1` rows (for the FTS config tables), so a bare "is stat1
+    /// non-empty?" check would pass and tell you nothing. What it never does is
+    /// collect statistics for `series` or `books`, which is why the planner has
+    /// no row counts and why the refresh at the end of a bootstrap is
+    /// load-bearing rather than belt-and-braces.
+    #[test]
+    fn optimize_on_an_empty_database_collects_nothing_for_the_library_tables() {
+        let conn = open_in_memory().unwrap();
+        // migrate() ran `PRAGMA optimize` on an empty database.
+        let library_stats: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl IN ('series', 'books')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            library_stats, 0,
+            "an empty database cannot describe tables that have no rows; if this \
+             changes, re-measure before trusting the bootstrap hook's necessity"
+        );
+
+        seed_libraries(&conn, 4);
+        seed_scale(&conn, 1_200, 10);
+        conn.execute_batch("PRAGMA optimize").unwrap();
+
+        let after: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl IN ('series', 'books')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            after > 0,
+            "the refresh has to produce statistics for the tables the library queries read"
+        );
     }
 }

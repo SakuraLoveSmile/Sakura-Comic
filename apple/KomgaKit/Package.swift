@@ -29,18 +29,16 @@ let package = Package(
             dependencies: ["KomgaAPI", "KomgaDiagnostics", .product(name: "GRDB", package: "GRDB.swift")]
         ),
         .target(name: "KomgaSync", dependencies: ["KomgaAPI", "KomgaStore"]),
-        .target(name: "KomgaReader", dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync"]),
+        .target(name: "KomgaDownloads", dependencies: [
+            "KomgaAPI",
+            "KomgaStore",
+            "KomgaDiagnostics",
+            .product(name: "GRDB", package: "GRDB.swift"),
+        ]),
+        .target(name: "KomgaReader", dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaDownloads"]),
         .target(
             name: "KomgaFeatures",
-            dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaReader"]
-        ),
-        // Stage 9's offline download system, ported. The queue policy is pure and
-        // depends on nothing; the store speaks GRDB directly (mirror of
-        // `downloads/store.rs`), the tree is filesystem-only, and the engine will
-        // pull in KomgaAPI / KomgaReader when it lands.
-        .target(
-            name: "KomgaDownloads",
-            dependencies: [.product(name: "GRDB", package: "GRDB.swift")]
+            dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaReader", "KomgaDownloads"]
         ),
         .testTarget(name: "KomgaKitTests", dependencies: ["KomgaAPI", "KomgaStore", "KomgaSync", "KomgaReader", "KomgaDiagnostics", "KomgaDownloads"])
     ]

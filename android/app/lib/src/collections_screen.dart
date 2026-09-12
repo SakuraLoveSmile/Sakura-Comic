@@ -13,12 +13,10 @@ class CollectionsScreen extends StatelessWidget {
     super.key,
     required this.repository,
     this.collections = const [],
-    this.coverPaths = const {},
   });
 
   final LibraryRepository repository;
   final List<CollectionItem> collections;
-  final Map<String, String> coverPaths;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +41,6 @@ class CollectionsScreen extends StatelessWidget {
                     repository: repository,
                     collectionId: item.remoteId,
                     name: item.name,
-                    coverPaths: coverPaths,
                   ),
                 ),
               );
@@ -62,13 +59,11 @@ class CollectionDetailScreen extends StatefulWidget {
     required this.repository,
     required this.collectionId,
     required this.name,
-    this.coverPaths = const {},
   });
 
   final LibraryRepository repository;
   final String collectionId;
   final String name;
-  final Map<String, String> coverPaths;
 
   @override
   State<CollectionDetailScreen> createState() => _CollectionDetailScreenState();
@@ -76,6 +71,7 @@ class CollectionDetailScreen extends StatefulWidget {
 
 class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   List<Series> _members = const [];
+  Map<String, String> _coverPaths = const {};
 
   @override
   void initState() {
@@ -84,10 +80,20 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   }
 
   Future<void> _load() async {
-    final detail =
-        await widget.repository.collectionDetail(collectionId: widget.collectionId);
-    if (!mounted || detail == null) return;
-    setState(() => _members = detail.members.items);
+    final detail = await widget.repository
+        .collectionDetail(collectionId: widget.collectionId);
+    if (detail == null) return;
+    // Its own page-scoped lookup: a member series is not necessarily on the
+    // shelf's loaded pages, so inheriting the shelf's cover map would leave
+    // holes where the collection is the only place the series appears.
+    final covers = await widget.repository.fetchCoverPaths(
+      seriesIds: detail.members.items.map((s) => s.remoteId).toList(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _members = detail.members.items;
+      _coverPaths = covers;
+    });
   }
 
   @override
@@ -105,7 +111,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
         itemCount: _members.length,
         itemBuilder: (context, index) {
           final item = _members[index];
-          final path = widget.coverPaths[item.remoteId];
+          final path = _coverPaths[item.remoteId];
           return InkWell(
             onTap: () {
               Navigator.of(context).push(
@@ -149,4 +155,3 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     );
   }
 }
-

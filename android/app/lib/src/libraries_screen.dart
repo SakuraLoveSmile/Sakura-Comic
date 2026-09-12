@@ -53,7 +53,8 @@ class _LibrariesScreenState extends State<LibrariesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalSeries = _libraries.fold<int>(0, (sum, l) => sum + l.seriesCount);
+    final totalSeries =
+        _libraries.fold<int>(0, (sum, l) => sum + l.seriesCount);
     final totalBooks = _libraries.fold<int>(0, (sum, l) => sum + l.bookCount);
     return Scaffold(
       appBar: AppBar(title: const Text('图书馆')),
@@ -68,7 +69,8 @@ class _LibrariesScreenState extends State<LibrariesScreen> {
                       child: ListTile(
                         leading: const Icon(Icons.library_books_outlined),
                         title: const Text('全部 Series'),
-                        subtitle: Text('共 $totalSeries 个 Series · $totalBooks 本书'),
+                        subtitle:
+                            Text('共 $totalSeries 个 Series · $totalBooks 本书'),
                         trailing: widget.selectedLibraryId == null
                             ? const Icon(Icons.check_circle, color: Colors.blue)
                             : const Icon(Icons.filter_alt_outlined),
@@ -111,9 +113,12 @@ class _LibrariesScreenState extends State<LibrariesScreen> {
   }
 
   String _subtitle(LibraryCount lib) {
-    final counts = '${lib.seriesCount} Series · ${lib.bookCount} Books · 已读 ${lib.readCount}';
+    final counts =
+        '${lib.seriesCount} Series · ${lib.bookCount} Books · 已读 ${lib.readCount}';
     final root = lib.root;
-    if (root == null || root.isEmpty) return lib.unavailable ? '$counts · 不可用' : counts;
+    if (root == null || root.isEmpty) {
+      return lib.unavailable ? '$counts · 不可用' : counts;
+    }
     return lib.unavailable ? '$counts · $root · 不可用' : '$counts · $root';
   }
 }
@@ -169,12 +174,16 @@ class _LibraryDetailScreenState extends State<LibraryDetailScreen> {
     );
     final results = await Future.wait([
       repository.libraryDetail(libraryId: widget.libraryId),
-      repository.fetchCoverPaths(),
+      // Covers for the page just asked for, not the whole server's thumbnail
+      // table; merged so an appended page keeps the covers already resolved.
+      repository.fetchCoverPaths(
+        seriesIds: page.items.map((s) => s.remoteId).toList(),
+      ),
     ]);
     if (!mounted) return;
     setState(() {
       _library = results[0] as LibraryCount?;
-      _covers = results[1] as Map<String, String>;
+      _covers = {..._covers, ...(results[1] as Map<String, String>)};
       _items = append ? [..._items, ...page.items] : page.items;
       _total = page.total;
       _loading = false;
@@ -223,7 +232,8 @@ class _LibraryDetailScreenState extends State<LibraryDetailScreen> {
                 Expanded(
                   child: GridView.builder(
                     padding: const EdgeInsets.all(12),
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
                       maxCrossAxisExtent: 140,
                       mainAxisSpacing: 12,
                       crossAxisSpacing: 12,
@@ -283,7 +293,10 @@ class _LibraryDetailScreenState extends State<LibraryDetailScreen> {
             if (library.unavailable)
               Text(
                 '服务端标记为不可用',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.red),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.red),
               ),
           ],
         ),
@@ -327,7 +340,8 @@ class _LibraryDetailScreenState extends State<LibraryDetailScreen> {
                     child: Image.file(
                       File(path),
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.menu_book_outlined),
+                      errorBuilder: (_, __, ___) =>
+                          const Icon(Icons.menu_book_outlined),
                     ),
                   )
                 : const Icon(Icons.menu_book_outlined),

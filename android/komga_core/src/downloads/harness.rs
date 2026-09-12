@@ -6,9 +6,6 @@
 //! test. `requests` is the record of what the transport was actually asked for: every
 //! claim in this stage about duplicate or missing fetches is checked against it, and
 //! not against a self-reported counter elsewhere.
-
-#![cfg(test)]
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;

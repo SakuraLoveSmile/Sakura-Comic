@@ -107,7 +107,7 @@ public struct SnapshotAuth: Codable, Equatable, Sendable {
 }
 
 public extension KomgaStore {
-    func diagnosticsSnapshot(serverID: String) throws -> DiagnosticsSnapshot {
+    public func diagnosticsSnapshot(serverID: String) throws -> DiagnosticsSnapshot {
         try dbQueue.read { db in
             let report = try Self.credentialState(db: db, serverID: serverID)
             let syncRows = try SnapshotSyncRow.fetchAll(

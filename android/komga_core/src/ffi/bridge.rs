@@ -24,12 +24,13 @@ use crate::ffi::application::{
 use crate::ffi::error::CoreError;
 use crate::model::server_profile::ServerProfile;
 use crate::store::prune::Tombstone;
-use crate::store::query::{BookPageResult, LibraryCountRow, SeriesPageResult};
+use crate::store::query::{BookPageResult, LibraryCountRow, ReadTargetRow, SeriesPageResult};
 use crate::store::read_progress::ContinueReadingRow;
 use crate::store::series::SeriesRow;
 use crate::store::sync_state::EntitySyncState;
 use crate::store::thumbnails::ThumbnailRow;
 use crate::sync::{BootstrapSummary, FullSyncSummary, ReconcileSummary};
+use std::collections::HashMap;
 
 /// BootstrapSync (API Key auth) — mirrors the first page of series.
 pub async fn bootstrap(
@@ -127,6 +128,23 @@ pub fn cover_path(
 pub fn list_thumbnails(db_path: String, server_id: String) -> Result<Vec<ThumbnailRow>, CoreError> {
     let app = crate::ffi::application::App::new(db_path);
     app.list_thumbnails(&server_id).map_err(CoreError::from)
+}
+
+/// Cover paths for a page of series or books.
+///
+/// `list_thumbnails` stays for the backfill paths, but a wall or a book list
+/// should ask for the ids it is about to paint: at 20,000 books the whole-server
+/// answer cost 20,000 decoded rows plus a `stat()` each, on every screen load.
+/// `variant` is `"series"` or `"book"`.
+pub fn cover_paths(
+    db_path: String,
+    server_id: String,
+    variant: String,
+    remote_ids: Vec<String>,
+) -> Result<HashMap<String, String>, CoreError> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.cover_paths(&server_id, &variant, &remote_ids)
+        .map_err(CoreError::from)
 }
 
 /// Backfill one series cover (cache miss → download → disk → SQLite row),
@@ -295,6 +313,19 @@ pub fn query_books(
         offset,
     )
     .map_err(CoreError::from)
+}
+
+/// Which book a "start or continue reading" tap should open for this series
+/// (本地查询). `intent` is one of continue / start / reread / empty; an empty
+/// `book.remoteId` with intent "empty" means the series has nothing readable.
+pub fn series_read_target(
+    db_path: String,
+    server_id: String,
+    series_id: String,
+) -> Result<ReadTargetRow, CoreError> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.series_read_target(&server_id, &series_id)
+        .map_err(CoreError::from)
 }
 
 /// Full series detail: row + metadata + genres + tags + authors +
@@ -679,6 +710,44 @@ pub fn reader_turn(
 ) -> Result<ReaderTurnDto, CoreError> {
     let app = crate::ffi::application::App::new(db_path);
     app.reader_turn(server_id, book_id, page)
+        .map_err(CoreError::from)
+}
+
+/// The reader mode / direction this series overrides, as JSON, or `None` when
+/// the series follows the global preference.
+pub fn series_read_override(
+    db_path: String,
+    server_id: String,
+    series_id: String,
+) -> Result<Option<String>, CoreError> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.series_read_override(&server_id, &series_id)
+        .map_err(CoreError::from)
+}
+
+/// Record what this series should read like, or clear it when neither dimension
+/// is set.
+pub fn set_series_read_override(
+    db_path: String,
+    server_id: String,
+    series_id: String,
+    mode: Option<String>,
+    direction: Option<String>,
+) -> Result<Option<String>, CoreError> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.set_series_read_override(&server_id, &series_id, mode, direction)
+        .map_err(CoreError::from)
+}
+
+/// Report how far into the current page a webtoon reader has scrolled (0..1).
+pub fn reader_set_page_offset(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    ratio: Option<f64>,
+) -> Result<(), CoreError> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.reader_set_page_offset(server_id, book_id, ratio)
         .map_err(CoreError::from)
 }
 

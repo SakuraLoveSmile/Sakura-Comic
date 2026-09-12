@@ -71,6 +71,12 @@ pub struct ReaderSettings {
     /// When off, every book starts at page 1 and nothing is written back.
     pub restore_position: bool,
     pub prefetch: Window,
+    /// Whether the hardware volume keys turn pages.
+    ///
+    /// Off by default and deliberately so: stealing the volume keys means the
+    /// user can no longer change the volume while reading, and that is a trade
+    /// each person has to make for themselves — never a default the app picks.
+    pub volume_keys_enabled: bool,
 }
 
 impl Default for ReaderSettings {
@@ -85,6 +91,7 @@ impl Default for ReaderSettings {
             brightness: None,
             restore_position: true,
             prefetch: Window::default(),
+            volume_keys_enabled: false,
         }
     }
 }
@@ -157,6 +164,54 @@ pub fn recommended_direction(series_reading_direction: Option<&str>) -> Option<D
 mod tests {
     use super::*;
     use crate::store::open_in_memory;
+
+    #[test]
+    fn volume_keys_are_off_by_default_and_a_pre_existing_row_keeps_them_off() {
+        let conn = open_in_memory().unwrap();
+        assert!(!ReaderSettings::default().volume_keys_enabled);
+        assert!(!ReaderSettings::load(&conn).unwrap().volume_keys_enabled);
+
+        // A settings document written before this knob existed must not turn it
+        // on, and must not fail to parse: `#[serde(default)]` is the whole
+        // reason adding a knob is not a migration.
+        app_state::put_value(
+            &conn,
+            SETTINGS_KEY,
+            r#"{"mode":"double","direction":"rtl","firstPageSingle":true,"pageGap":8,
+                "background":"gray","keepScreenAwake":true,"brightness":null,
+                "restorePosition":true,
+                "prefetch":{"forward":4,"back":2,"cap":12}}"#,
+        )
+        .unwrap();
+        let loaded = ReaderSettings::load(&conn).unwrap();
+        assert_eq!(loaded.mode, ReadMode::Double);
+        assert_eq!(loaded.background, Background::Gray);
+        assert!(
+            !loaded.volume_keys_enabled,
+            "an older document means the user never opted in"
+        );
+    }
+
+    #[test]
+    fn volume_keys_round_trip_through_the_document() {
+        let conn = open_in_memory().unwrap();
+        let settings = ReaderSettings {
+            volume_keys_enabled: true,
+            ..ReaderSettings::default()
+        };
+        ReaderSettings::save(&conn, &settings).unwrap();
+        assert!(ReaderSettings::load(&conn).unwrap().volume_keys_enabled);
+        // And back off again.
+        ReaderSettings::save(
+            &conn,
+            &ReaderSettings {
+                volume_keys_enabled: false,
+                ..settings
+            },
+        )
+        .unwrap();
+        assert!(!ReaderSettings::load(&conn).unwrap().volume_keys_enabled);
+    }
 
     #[test]
     fn defaults_round_trip_through_sqlite() {
