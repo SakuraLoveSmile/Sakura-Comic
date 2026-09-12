@@ -67,6 +67,8 @@ class LiveSyncController {
   Timer? _uploader;
   bool _busy = false;
   bool _uploading = false;
+  bool _disposed = false;
+  int _generation = 0;
   OutboxStatusDto? _outbox;
   String? _streamStatus;
 
@@ -80,14 +82,19 @@ class LiveSyncController {
   /// only "recovered" once it is actually on its way out — waiting for the
   /// first tick would leave a restart looking like a lost operation.
   void start() {
-    _ticker ??= Timer.periodic(pollInterval, (_) => tick());
-    _uploader ??= Timer.periodic(uploadInterval, (_) => flush());
-    unawaited(tick());
-    unawaited(flush());
+    if (_disposed || _ticker != null) return;
+    final generation = ++_generation;
+    _ticker =
+        Timer.periodic(pollInterval, (_) => unawaited(_runTick(generation)));
+    _uploader =
+        Timer.periodic(uploadInterval, (_) => unawaited(_runFlush(generation)));
+    unawaited(_runTick(generation));
+    unawaited(_runFlush(generation));
   }
 
   /// Background: stop the loops. [resume] re-arms them immediately.
   void stop() {
+    ++_generation;
     _ticker?.cancel();
     _ticker = null;
     _uploader?.cancel();
@@ -96,24 +103,34 @@ class LiveSyncController {
 
   /// Screen gone: also park the core's session so no socket outlives its owner.
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     stop();
     await _repo.sseStop();
   }
 
   /// Network came back (or the app returned): retry now, then drain the queue.
   Future<void> resume() async {
-    _state = await _repo.sseResume(stateJson: _state);
+    if (_disposed) return;
+    final generation = _generation;
+    final state = await _repo.sseResume(stateJson: _state);
+    if (!_isActive(generation)) return;
+    _state = state;
     await tick();
+    if (!_isActive(generation)) return;
     await flush();
   }
 
   /// One bounded stream step. Overlapping calls are dropped: a slow sweep must
   /// not queue a second one behind it.
   Future<LiveTickOutcome> tick() async {
+    if (_disposed) return const LiveTickOutcome(skipped: true);
     if (_busy) return const LiveTickOutcome(skipped: true);
+    final generation = _generation;
     _busy = true;
     try {
       final result = await _repo.ssePoll(stateJson: _state);
+      if (!_isActive(generation)) return const LiveTickOutcome(skipped: true);
       if (result == null) {
         _publishStatus(null);
         return const LiveTickOutcome();
@@ -124,12 +141,15 @@ class LiveSyncController {
         // Order matters: the sweep closes whatever the gap hid, and only then
         // may the core release the events it held back.
         await reconcile('sse_reconnected');
+        if (!_isActive(generation)) return const LiveTickOutcome(skipped: true);
         state = await _repo.sseReconciled(stateJson: state);
+        if (!_isActive(generation)) return const LiveTickOutcome(skipped: true);
         reconciled = true;
       }
       _state = state;
       if (reconciled || result.dirtyBooks.isNotEmpty) {
         await refresh();
+        if (!_isActive(generation)) return const LiveTickOutcome(skipped: true);
       }
       _publishStatus(_describe(result));
       return LiveTickOutcome(
@@ -146,17 +166,22 @@ class LiveSyncController {
   /// One Outbox drain. Safe to call after every local write: rows not yet due
   /// are left alone, so this never fights the backoff schedule stored in SQLite.
   Future<UploadOutcomeDto> flush() async {
+    if (_disposed) return emptyUploadOutcome('');
     if (_uploading) return emptyUploadOutcome('');
+    final generation = _generation;
     _uploading = true;
     try {
       final outcome = await _repo.uploadOutbox();
+      if (!_isActive(generation)) return emptyUploadOutcome('');
       await refreshBadge();
+      if (!_isActive(generation)) return emptyUploadOutcome('');
       if (outcome.uploaded > 0 ||
           outcome.alreadyApplied > 0 ||
           outcome.gone > 0 ||
           outcome.remoteWins > 0) {
         // Whatever the server just settled is what the local view must re-read.
         await refresh();
+        if (!_isActive(generation)) return emptyUploadOutcome('');
       }
       return outcome;
     } finally {
@@ -166,28 +191,60 @@ class LiveSyncController {
 
   /// Re-read the badge (SQLite only, so it works with the network down).
   Future<void> refreshBadge() async {
+    if (_disposed) return;
+    final generation = _generation;
     final status = await _repo.outboxStatus();
+    if (!_isActive(generation)) return;
     _outbox = status;
     onOutbox?.call(status);
     if (status.failed > 0) {
-      final first =
-          status.failedEntries.isEmpty ? null : status.failedEntries.first.lastError;
+      final first = status.failedEntries.isEmpty
+          ? null
+          : status.failedEntries.first.lastError;
       // Failed rows are terminal on purpose, so the reason has to be visible.
-      _publishStatus('有 ${status.failed} 项上传已放弃${first == null ? '' : '：$first'}');
+      _publishStatus(
+          '有 ${status.failed} 项上传已放弃${first == null ? '' : '：$first'}');
     }
   }
 
   /// Give every given-up row back to the retry machine (user tapped 重试).
   Future<int> retryFailed() async {
+    if (_disposed) return 0;
+    final generation = _generation;
     final count = await _repo.retryFailedMutations();
-    if (count > 0) await flush();
+    if (!_isActive(generation)) return 0;
+    if (count > 0) {
+      await flush();
+      if (!_isActive(generation)) return 0;
+    }
     return count;
   }
 
   void _publishStatus(String? status) {
+    if (_disposed) return;
     if (_streamStatus == status) return;
     _streamStatus = status;
     onStreamStatus?.call(status);
+  }
+
+  bool _isActive(int generation) => !_disposed && generation == _generation;
+
+  Future<void> _runTick(int generation) async {
+    if (!_isActive(generation)) return;
+    try {
+      await tick();
+    } catch (error) {
+      if (_isActive(generation)) _publishStatus('同步失败：$error');
+    }
+  }
+
+  Future<void> _runFlush(int generation) async {
+    if (!_isActive(generation)) return;
+    try {
+      await flush();
+    } catch (error) {
+      if (_isActive(generation)) _publishStatus('上传失败：$error');
+    }
   }
 
   String? _describe(SsePollResult result) {

@@ -16,7 +16,7 @@ log = "0.4"
 # NOTE: reqwest 0.12 removed the `sse` feature (SSE lands in Phase 2).
 # No TLS backend is enabled here on purpose — http:// works as-is for Phase 0;
 # the TLS decision (native-tls vs rustls) is deferred to Phase 0 step 02.
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-webpki-roots"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -28,7 +28,7 @@ uuid = { version = "1", features = ["v4"] }
 # FRB codegen (Phase 0 step 02) enables the `frb` feature and runs
 # flutter_rust_bridge_codegen; only src/ffi/bridge.rs + generated code
 # depend on this crate while it is disabled.
-flutter_rust_bridge = { version = "=2.13.0", optional = true }
+flutter_rust_bridge = { version = "=2.13.0", default-features = false, features = ["anyhow", "dart-opaque", "log", "portable-atomic", "rust-async", "thread-pool"], optional = true }
 
 [features]
 default = []

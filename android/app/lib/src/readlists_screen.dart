@@ -31,7 +31,8 @@ class ReadlistsScreen extends StatelessWidget {
             title: Text(item.name),
             subtitle: item.summary == null || item.summary!.isEmpty
                 ? null
-                : Text(item.summary!, maxLines: 2, overflow: TextOverflow.ellipsis),
+                : Text(item.summary!,
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.of(context).push(
@@ -78,7 +79,8 @@ class _ReadlistDetailScreenState extends State<ReadlistDetailScreen> {
   }
 
   Future<void> _load() async {
-    final detail = await widget.repository.readlistDetail(readlistId: widget.readlistId);
+    final detail =
+        await widget.repository.readlistDetail(readlistId: widget.readlistId);
     if (!mounted || detail == null) return;
     setState(() => _books = detail.books.items);
   }
@@ -108,7 +110,8 @@ class _ReadlistDetailScreenState extends State<ReadlistDetailScreen> {
             title: Text(book.title),
             subtitle: book.seriesTitle == null
                 ? null
-                : Text(book.seriesTitle!, style: Theme.of(context).textTheme.bodySmall),
+                : Text(book.seriesTitle!,
+                    style: Theme.of(context).textTheme.bodySmall),
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -125,4 +128,3 @@ class _ReadlistDetailScreenState extends State<ReadlistDetailScreen> {
     );
   }
 }
-

@@ -16,13 +16,17 @@ import 'rust/store/sync_state.dart';
 // generated model library, where names like `FilterOptions` collide with the
 // app's own view models.
 export 'rust/diagnostics/log.dart' show LogRecord;
+export 'rust/diagnostics/snapshot.dart' show DbHealth, TableRows;
 export 'rust/ffi/application.dart'
     show
         AuthStateDto,
+        CacheCleanupDto,
+        CacheStatsDto,
         DiagnosticsDto,
         OutboxEntryDto,
         OutboxStatusDto,
         SsePollResult,
+        StorageDto,
         UploadOutcomeDto;
 
 /// In-memory stub so tests and the fallback UI path can run without FFI.
@@ -65,10 +69,12 @@ class StubRustCoreApi extends RustCoreApi {
       const [];
 
   @override
-  Future<List<ServerProfile>> listServers({required String dbPath}) async => const [];
+  Future<List<ServerProfile>> listServers({required String dbPath}) async =>
+      const [];
 
   @override
-  Future<void> saveServer({required String dbPath, required ServerProfile profile}) async {}
+  Future<void> saveServer(
+      {required String dbPath, required ServerProfile profile}) async {}
 
   @override
   Future<ServerProfile?> getServer({
@@ -78,7 +84,9 @@ class StubRustCoreApi extends RustCoreApi {
       null;
 
   @override
-  Future<bool> deleteServer({required String dbPath, required String serverId}) async => false;
+  Future<bool> deleteServer(
+          {required String dbPath, required String serverId}) async =>
+      false;
 
   @override
   Future<void> saveLibraries({
@@ -88,7 +96,8 @@ class StubRustCoreApi extends RustCoreApi {
   }) async {}
 
   @override
-  Future<void> setActiveServer({required String dbPath, required String serverId}) async {}
+  Future<void> setActiveServer(
+      {required String dbPath, required String serverId}) async {}
 
   @override
   Future<String?> getActiveServer({required String dbPath}) async => null;
@@ -107,6 +116,15 @@ class StubRustCoreApi extends RustCoreApi {
     required String serverId,
   }) async =>
       const [];
+
+  @override
+  Future<Map<String, String>> coverPaths({
+    required String dbPath,
+    required String serverId,
+    required String variant,
+    required List<String> remoteIds,
+  }) async =>
+      const {};
 
   @override
   Future<String> ensureCover({
@@ -138,12 +156,11 @@ class StubRustCoreApi extends RustCoreApi {
         totalElements: 0,
         hasMorePages: false,
       );
-
-
 }
 
 /// A zero Reconcile summary: test doubles and the no-server path use it.
-ReconcileSummary emptyReconcileSummary(String serverId, String trigger) => ReconcileSummary(
+ReconcileSummary emptyReconcileSummary(String serverId, String trigger) =>
+    ReconcileSummary(
       serverId: serverId,
       trigger: trigger,
       seriesUpserted: BigInt.zero,
@@ -205,7 +222,8 @@ abstract class RustCoreApi {
 
   Future<List<ServerProfile>> listServers({required String dbPath});
 
-  Future<void> saveServer({required String dbPath, required ServerProfile profile});
+  Future<void> saveServer(
+      {required String dbPath, required ServerProfile profile});
 
   Future<ServerProfile?> getServer({
     required String dbPath,
@@ -222,7 +240,8 @@ abstract class RustCoreApi {
     required List<Library> libraries,
   });
 
-  Future<void> setActiveServer({required String dbPath, required String serverId});
+  Future<void> setActiveServer(
+      {required String dbPath, required String serverId});
 
   Future<String?> getActiveServer({required String dbPath});
 
@@ -239,6 +258,16 @@ abstract class RustCoreApi {
   Future<List<ThumbnailRow>> listThumbnails({
     required String dbPath,
     required String serverId,
+  });
+
+  /// Cover paths for a page of series or books. `variant` is `"series"` or
+  /// `"book"`. Asking only for the ids on screen is what keeps a 20,000-book
+  /// mirror from decoding 20,000 thumbnail rows on every load.
+  Future<Map<String, String>> coverPaths({
+    required String dbPath,
+    required String serverId,
+    required String variant,
+    required List<String> remoteIds,
   });
 
   /// Backfill one series cover (cache miss → download → disk → SQLite row),
@@ -301,7 +330,8 @@ abstract class RustCoreApi {
     required String apiKey,
     required bool resume,
   }) =>
-      fullSync(dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+      fullSync(
+          dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
 
   /// Stage 5 Reconcile Sync: remote id sweep → Added / Changed / Deleted.
   Future<ReconcileSummary> reconcile({
@@ -345,6 +375,24 @@ abstract class RustCoreApi {
   }) async =>
       const [];
 
+  /// Current cache occupancy across memory and disk tiers.
+  Future<CacheStatsDto?> readerCacheStats({
+    required String dbPath,
+  }) async =>
+      null;
+
+  /// Sweep and reconcile cache, removing orphans, corrupt files and stale parts.
+  Future<CacheCleanupDto?> readerReconcileCache({
+    required String dbPath,
+  }) async =>
+      null;
+
+  /// Drop prefetched pages without touching displayed or downloaded pages.
+  Future<int> readerClearPrefetch({
+    required String dbPath,
+  }) async =>
+      0;
+
   /// Whether this trigger should sweep now (background triggers are throttled).
   Future<bool> shouldReconcile({
     required String dbPath,
@@ -386,6 +434,34 @@ abstract class RustCoreApi {
 
   /// Full series detail (all local).
   Future<SeriesDetailRow?> seriesDetail({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) async =>
+      null;
+
+  /// The reader mode / direction this series overrides, as the core's JSON, or
+  /// `null` when the series follows the global preference.
+  Future<String?> seriesReadOverride({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) async =>
+      null;
+
+  /// Record (or clear) what this series reads like. Returns the stored JSON.
+  Future<String?> setSeriesReadOverride({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    String? mode,
+    String? direction,
+  }) async =>
+      null;
+
+  /// `null` means the core cannot answer — a wrong target is worse than no
+  /// target, so the caller keeps its own fallback instead of opening volume 1.
+  Future<ReadTargetRow?> seriesReadTarget({
     required String dbPath,
     required String serverId,
     required String seriesId,

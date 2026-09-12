@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import 'rust/ffi/application.dart';
 import 'rust/ffi/bridge.dart' as frb;
 import 'rust/frb_generated.dart';
@@ -22,7 +24,11 @@ Future<bool> initRustCore() async {
   try {
     await RustLib.init();
     return true;
-  } catch (_) {
+  } catch (e, st) {
+    // The reason matters: "no .so in the APK" and "the .so is stale" look
+    // identical from the caller and need different fixes.
+    debugPrint('[RustCore] native library load failed: $e');
+    debugPrint('$st');
     return false;
   }
 }
@@ -132,7 +138,8 @@ class FrbRustCoreApi extends RustCoreApi {
     required String serverId,
     required String seriesId,
   }) {
-    return frb.coverPath(dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+    return frb.coverPath(
+        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
   }
 
   @override
@@ -141,6 +148,21 @@ class FrbRustCoreApi extends RustCoreApi {
     required String serverId,
   }) {
     return frb.listThumbnails(dbPath: dbPath, serverId: serverId);
+  }
+
+  @override
+  Future<Map<String, String>> coverPaths({
+    required String dbPath,
+    required String serverId,
+    required String variant,
+    required List<String> remoteIds,
+  }) {
+    return frb.coverPaths(
+      dbPath: dbPath,
+      serverId: serverId,
+      variant: variant,
+      remoteIds: remoteIds,
+    );
   }
 
   @override
@@ -312,6 +334,49 @@ class FrbRustCoreApi extends RustCoreApi {
   }
 
   @override
+  Future<String?> seriesReadOverride({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) {
+    return frb.seriesReadOverride(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+    );
+  }
+
+  @override
+  Future<String?> setSeriesReadOverride({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+    String? mode,
+    String? direction,
+  }) {
+    return frb.setSeriesReadOverride(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+      mode: mode,
+      direction: direction,
+    );
+  }
+
+  @override
+  Future<ReadTargetRow?> seriesReadTarget({
+    required String dbPath,
+    required String serverId,
+    required String seriesId,
+  }) {
+    return frb.seriesReadTarget(
+      dbPath: dbPath,
+      serverId: serverId,
+      seriesId: seriesId,
+    );
+  }
+
+  @override
   Future<SeriesDetailRow?> seriesDetail({
     required String dbPath,
     required String serverId,
@@ -436,7 +501,8 @@ class FrbRustCoreApi extends RustCoreApi {
     required String serverId,
     required String libraryId,
   }) {
-    return frb.libraryDetail(dbPath: dbPath, serverId: serverId, libraryId: libraryId);
+    return frb.libraryDetail(
+        dbPath: dbPath, serverId: serverId, libraryId: libraryId);
   }
 
   @override
@@ -480,7 +546,8 @@ class FrbRustCoreApi extends RustCoreApi {
     required String serverId,
     required String bookId,
   }) {
-    return frb.bookCoverPath(dbPath: dbPath, serverId: serverId, bookId: bookId);
+    return frb.bookCoverPath(
+        dbPath: dbPath, serverId: serverId, bookId: bookId);
   }
 
   @override
@@ -612,5 +679,27 @@ class FrbRustCoreApi extends RustCoreApi {
     String minLevel = '',
   }) {
     return frb.diagnosticsLogs(limit: limit, minLevel: minLevel);
+  }
+
+  @override
+  Future<CacheStatsDto?> readerCacheStats({
+    required String dbPath,
+  }) {
+    return frb.readerCacheStats(dbPath: dbPath);
+  }
+
+  @override
+  Future<CacheCleanupDto?> readerReconcileCache({
+    required String dbPath,
+  }) {
+    return frb.readerReconcileCache(dbPath: dbPath);
+  }
+
+  @override
+  Future<int> readerClearPrefetch({
+    required String dbPath,
+  }) async {
+    final count = await frb.readerClearPrefetch(dbPath: dbPath);
+    return count.toInt();
   }
 }

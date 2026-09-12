@@ -36,6 +36,9 @@ class SeriesDetailScreen extends StatefulWidget {
 class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
   SeriesDetail? _detail;
   List<Book> _books = const [];
+
+  /// Which book the read button opens, straight from the core (统一阅读入口).
+  ReadTarget? _readTarget;
   Map<String, String> _bookCoverPaths = const {};
   int _booksTotal = 0;
   String? _readFilter;
@@ -51,14 +54,22 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
     final results = await Future.wait([
       widget.repository.seriesDetail(seriesId: widget.seriesId),
       _queryBooks(reset: true),
-      widget.repository.fetchBookCoverPaths(),
+      widget.repository.readTarget(seriesId: widget.seriesId),
     ]);
+    final page = results[1] as PagedBooks;
+    // Covers come after the books, because the query is what says which books
+    // to ask about. A page-scoped lookup replaces what used to be the server's
+    // entire book-thumbnail table, fetched in order to render ten rows.
+    final covers = await widget.repository.fetchBookCoverPaths(
+      bookIds: page.items.map((b) => b.remoteId).toList(),
+    );
     if (!mounted) return;
     setState(() {
       _detail = results[0] as SeriesDetail?;
-      _books = (results[1] as PagedBooks).items;
-      _booksTotal = (results[1] as PagedBooks).total;
-      _bookCoverPaths = results[2] as Map<String, String>;
+      _books = page.items;
+      _booksTotal = page.total;
+      _bookCoverPaths = covers;
+      _readTarget = results[2] as ReadTarget?;
     });
   }
 
@@ -74,17 +85,26 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
 
   Future<void> _reloadBooks() async {
     final page = await _queryBooks(reset: true);
+    final covers = await widget.repository.fetchBookCoverPaths(
+      bookIds: page.items.map((b) => b.remoteId).toList(),
+    );
     if (!mounted) return;
     setState(() {
       _books = page.items;
       _booksTotal = page.total;
+      _bookCoverPaths = covers;
     });
   }
 
-  void _loadMoreBooks() {
-    _queryBooks(reset: false).then((page) {
-      if (!mounted) return;
-      setState(() => _books = [..._books, ...page.items]);
+  Future<void> _loadMoreBooks() async {
+    final page = await _queryBooks(reset: false);
+    final covers = await widget.repository.fetchBookCoverPaths(
+      bookIds: page.items.map((b) => b.remoteId).toList(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _books = [..._books, ...page.items];
+      _bookCoverPaths = {..._bookCoverPaths, ...covers};
     });
   }
 
@@ -109,15 +129,18 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
               padding: const EdgeInsets.all(12),
               children: [
                 _header(detail),
+                _readAction(detail),
                 if (detail.summary != null && detail.summary!.isNotEmpty) ...[
                   _sectionTitle('简介'),
-                  Text(detail.summary!, style: Theme.of(context).textTheme.bodyMedium),
+                  Text(detail.summary!,
+                      style: Theme.of(context).textTheme.bodyMedium),
                 ],
                 if (detail.authors.isNotEmpty) ...[
                   _sectionTitle('作者'),
                   Text(
                     detail.authors
-                        .map((a) => a.role.isEmpty ? a.name : '${a.name}（${a.role}）')
+                        .map((a) =>
+                            a.role.isEmpty ? a.name : '${a.name}（${a.role}）')
                         .join('、'),
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
@@ -127,10 +150,12 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                   children: [
                     if (detail.publisher != null)
                       _infoCell('出版社', detail.publisher!),
-                    if (detail.language != null) _infoCell('语言', detail.language!),
+                    if (detail.language != null)
+                      _infoCell('语言', detail.language!),
                     if (detail.readingDirection != null)
                       _infoCell('阅读方向', detail.readingDirection!),
-                    if (detail.ageRating != null) _infoCell('分级', detail.ageRating!),
+                    if (detail.ageRating != null)
+                      _infoCell('分级', detail.ageRating!),
                   ],
                 ),
                 if (detail.tags.isNotEmpty) _chipRow('标签', detail.tags),
@@ -162,7 +187,8 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
               const SizedBox(height: 4),
               if (detail.status != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(10),
@@ -181,6 +207,92 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
         ),
       ],
     );
+  }
+
+  /// The one button a reader taps without thinking, so what it says has to be
+  /// true: the label, the line under it and the book it opens all come from the
+  /// same core answer (`series_read_target`), which is also what the shelf's
+  /// rail uses. When the core cannot answer, the button disappears rather than
+  /// guessing — opening the wrong volume is worse than asking for a sync.
+  Widget _readAction(SeriesDetail detail) {
+    final target = _readTarget;
+    if (target == null) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final opens = target.opensBook;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('series-read-action'),
+              onPressed: opens ? () => _openReader(context, target.book) : null,
+              icon: Icon(
+                switch (target.intent) {
+                  ReadIntent.continueReading => Icons.play_arrow,
+                  ReadIntent.startReading => Icons.menu_book,
+                  ReadIntent.reread => Icons.restart_alt,
+                  ReadIntent.empty => Icons.block,
+                },
+              ),
+              label: Text(target.intent.label),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            target.detail,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          // "No next book" and "we cannot prove there is no next book" are
+          // different facts, and only one of them may be stated as an ending.
+          if (!target.catalogComplete && detail.booksCount != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '本地目录尚未完整同步（已镜像 ${target.bookCount ?? 0} / ${detail.booksCount} 册）',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: scheme.error),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Opens one book in the reader. Everything the reader needs — the page
+  /// manifest, the cached files, the reading position — comes from the core
+  /// through ReaderApi; the widget never sees a URL.
+  Future<void> _openReader(BuildContext context, Book book) async {
+    final mediaType = book.mediaType?.toLowerCase() ?? '';
+    if (mediaType.contains('epub') || mediaType.contains('pdf')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '当前版本暂不支持 ${mediaType.contains("epub") ? "EPUB" : "PDF"} 格式漫画的直接阅读，请使用外部阅读器。',
+          ),
+        ),
+      );
+      return;
+    }
+    final api = await widget.repository.readerApi(bookId: book.remoteId);
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ReaderScreen(
+          title: book.title,
+          controller: ReaderController(
+            api: api,
+            systemControls: ReaderSystemControls(),
+          ),
+        ),
+      ),
+    );
+    widget.onChanged?.call();
   }
 
   Widget _sectionTitle(String title) {
@@ -299,7 +411,8 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                     Text('第 ${book.number} 册',
                         style: Theme.of(context).textTheme.bodySmall),
                   if (book.progressPage != null && !book.progressCompleted)
-                    Text('读到 ${book.progressPage} / ${book.pagesCount ?? '?'} 页',
+                    Text(
+                        '读到 ${book.progressPage} / ${book.pagesCount ?? '?'} 页',
                         style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
@@ -352,7 +465,8 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
       return const Icon(Icons.check_circle, size: 18, color: Colors.green);
     }
     if ((book.progressPage ?? 0) > 0) {
-      return const Icon(Icons.panorama_fish_eye, size: 18, color: Colors.orange);
+      return const Icon(Icons.panorama_fish_eye,
+          size: 18, color: Colors.orange);
     }
     return Icon(Icons.circle_outlined, size: 18, color: Colors.grey.shade500);
   }
@@ -394,6 +508,7 @@ class _BookDetailSheet extends StatefulWidget {
 
 class _BookDetailSheetState extends State<_BookDetailSheet> {
   BookDetail? _detail;
+  bool _isDownloadingAction = false;
 
   /// The button's label follows the queue's state and nothing else. The five words
   /// are the contract's five states
@@ -402,12 +517,12 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
   String get _downloadLabel {
     final state = widget.downloads?.stateOf(widget.book.remoteId) ?? '';
     return const {
-      'waiting': '排队中',
-      'downloading': '下载中',
-      'paused': '已暂停',
-      'completed': '已下载',
-      'failed': '重试下载',
-    }[state] ??
+          'waiting': '排队中',
+          'downloading': '下载中',
+          'paused': '已暂停',
+          'completed': '已下载',
+          'failed': '重试下载',
+        }[state] ??
         '下载';
   }
 
@@ -417,27 +532,39 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
   /// asks first.
   Future<void> _toggleDownload() async {
     final controller = widget.downloads;
-    if (controller == null) return;
+    if (controller == null || _isDownloadingAction) return;
     final bookId = widget.book.remoteId;
-    switch (controller.stateOf(bookId)) {
-      case 'waiting':
-      case 'downloading':
-        await controller.pause(bookId);
-        break;
-      case 'paused':
-        await controller.resumeBook(bookId);
-        break;
-      case 'failed':
-        await controller.retry(bookId);
-        break;
-      case 'completed':
-        // Already on the device. Re-downloading means deleting it first, which is a
-        // decision worth more than a stray tap.
-        break;
-      default:
-        await controller.enqueue(bookId);
+    setState(() => _isDownloadingAction = true);
+    try {
+      switch (controller.stateOf(bookId)) {
+        case 'waiting':
+        case 'downloading':
+          await controller.pause(bookId);
+          break;
+        case 'paused':
+          await controller.resumeBook(bookId);
+          break;
+        case 'failed':
+          await controller.retry(bookId);
+          break;
+        case 'completed':
+          // Already on the device. Re-downloading means deleting it first, which is a
+          // decision worth more than a stray tap.
+          break;
+        default:
+          await controller.enqueue(bookId);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('下载操作失败: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDownloadingAction = false);
+      }
     }
-    if (mounted) setState(() {});
   }
 
   @override
@@ -462,7 +589,8 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
           children: [
             Text(book.title, style: Theme.of(context).textTheme.titleMedium),
             if (book.seriesTitle != null)
-              Text(book.seriesTitle!, style: Theme.of(context).textTheme.bodySmall),
+              Text(book.seriesTitle!,
+                  style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
             Wrap(
               spacing: 16,
@@ -473,7 +601,8 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(_statusText(book), style: Theme.of(context).textTheme.bodyMedium),
+            Text(_statusText(book),
+                style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -495,8 +624,14 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
                   const SizedBox(width: 12),
                   OutlinedButton.icon(
                     key: Key('download-${book.remoteId}'),
-                    onPressed: _toggleDownload,
-                    icon: const Icon(Icons.download_outlined, size: 18),
+                    onPressed: _isDownloadingAction ? null : _toggleDownload,
+                    icon: _isDownloadingAction
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_outlined, size: 18),
                     label: Text(_downloadLabel),
                   ),
                 ],
@@ -511,15 +646,19 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
                 ),
               ],
             ),
-            if (detail != null && detail.summary != null && detail.summary!.isNotEmpty) ...[
+            if (detail != null &&
+                detail.summary != null &&
+                detail.summary!.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text('简介', style: Theme.of(context).textTheme.titleSmall),
-              Text(detail.summary!, style: Theme.of(context).textTheme.bodyMedium),
+              Text(detail.summary!,
+                  style: Theme.of(context).textTheme.bodyMedium),
             ],
             if (detail != null && detail.tags.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text('标签', style: Theme.of(context).textTheme.bodySmall),
-              Text(detail.tags.join('、'), style: Theme.of(context).textTheme.bodyMedium),
+              Text(detail.tags.join('、'),
+                  style: Theme.of(context).textTheme.bodyMedium),
             ],
           ],
         ),
@@ -541,8 +680,20 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
   /// page manifest, the cached files, the reading position — comes from the
   /// core through ReaderApi; the widget never sees a URL.
   Future<void> _openReader(BuildContext context, Book book) async {
+    final mediaType = book.mediaType?.toLowerCase() ?? '';
+    if (mediaType.contains('epub') || mediaType.contains('pdf')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '当前版本暂不支持 ${mediaType.contains("epub") ? "EPUB" : "PDF"} 格式漫画的直接阅读，请使用外部阅读器。',
+          ),
+        ),
+      );
+      return;
+    }
     final api = await widget.repository.readerApi(bookId: book.remoteId);
     if (!context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => ReaderScreen(
@@ -550,11 +701,60 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
           controller: ReaderController(
             api: api,
             systemControls: ReaderSystemControls(),
+            seriesId: book.seriesId,
+            onSeriesLayoutChanged: (mode, direction) => _rememberSeriesLayout(
+                messenger, book.seriesId, mode, direction),
           ),
         ),
       ),
     );
     widget.onChanged?.call();
+  }
+
+  /// A mode or direction chosen inside the reader belongs to the *series*.
+  ///
+  /// Writing it to the global preference is the bug this replaces: tap 双页 once
+  /// in volume 3 and every other book opened as a spread. The user is told which
+  /// of the two levels their tap just changed, so "跟随全局" stays a statement
+  /// they can trust.
+  Future<void> _rememberSeriesLayout(
+    ScaffoldMessengerState messenger,
+    String seriesId,
+    String mode,
+    String direction,
+  ) async {
+    try {
+      await widget.repository.setSeriesOverride(
+        seriesId: seriesId,
+        mode: mode,
+        direction: direction,
+      );
+    } catch (exception) {
+      // The reading session is unaffected either way — this is a preference
+      // write, and losing it must not interrupt a page turn.
+      debugPrint('[Reader] series override not saved: $exception');
+      return;
+    }
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('已把此系列设为${_layoutWords(mode, direction)}'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  String _layoutWords(String mode, String direction) {
+    const modes = {
+      'single': '单页',
+      'double': '双页',
+      'webtoon': '条漫',
+    };
+    const directions = {
+      'ltr': '左→右',
+      'rtl': '右→左',
+      'vertical': '上下滚动',
+    };
+    return '${modes[mode] ?? mode}・${directions[direction] ?? direction}';
   }
 
   Widget _cell(String label, String value) {

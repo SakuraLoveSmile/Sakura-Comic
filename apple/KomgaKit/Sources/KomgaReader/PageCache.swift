@@ -1,6 +1,7 @@
 import Foundation
 import KomgaDiagnostics
 import KomgaStore
+import KomgaDownloads
 
 // MARK: - Page cache (mirror of `reader/cache.rs`)
 //

@@ -57,6 +57,24 @@ pub fn outbox_counts(
     outbox::counts(conn, server_id, now)
 }
 
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Mutex;
+
+fn upload_lock(conn: &Connection, server_id: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let map = LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let key = match conn.path() {
+        Some(p) => format!("file:{p}:{server_id}"),
+        None => format!("mem:{conn:p}:{server_id}"),
+    };
+    let mut guard = map.lock().unwrap();
+    guard
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
 /// One pass over everything due right now. `now` is injected so the backoff
 /// schedule is testable (and so a restart cannot reschedule anything).
 pub async fn upload_outbox<W: ProgressWriter + Sync>(
@@ -65,6 +83,9 @@ pub async fn upload_outbox<W: ProgressWriter + Sync>(
     writer: &W,
     now: &str,
 ) -> rusqlite::Result<UploadSummary> {
+    let lock = upload_lock(conn, server_id);
+    let _guard = lock.lock().await;
+
     let due = outbox::due_entries(conn, server_id, now);
     let due = due?;
     let waiting = outbox::counts(conn, server_id, now)?.waiting;
@@ -83,13 +104,28 @@ pub async fn upload_outbox<W: ProgressWriter + Sync>(
         };
         let local_action_at = local_action_time(conn, server_id, &entry)?;
         let refetch = writer.refetch(&entry.entity_id).await;
+
+        // F03: Check if entry still exists before proceeding with upload or decision
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_mutations WHERE id = ?1",
+                params![entry.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+        if !exists {
+            // Stale entry: superseded by coalesce or deleted while refetching
+            continue;
+        }
+
         match outbox::decide(&entry.entity_id, &intent, &local_action_at, &refetch) {
             Decision::DropGone => {
-                outbox::forget(conn, server_id, &entry.entity_id)?;
+                outbox::complete_mutation(conn, server_id, &entry.entity_id, &entry.id)?;
                 summary.gone += 1;
             }
             Decision::DropNoOp => {
-                outbox::forget(conn, server_id, &entry.entity_id)?;
+                outbox::complete_mutation(conn, server_id, &entry.entity_id, &entry.id)?;
                 summary.no_op += 1;
             }
             Decision::UnsupportedFormat { reason } => {
@@ -99,13 +135,13 @@ pub async fn upload_outbox<W: ProgressWriter + Sync>(
                 summary.unsupported_format += 1;
             }
             Decision::DropSuccess => {
-                outbox::forget(conn, server_id, &entry.entity_id)?;
+                outbox::complete_mutation(conn, server_id, &entry.entity_id, &entry.id)?;
                 summary.already_applied += 1;
             }
             Decision::DropRemoteWins => {
                 // Our intent loses on purpose. Clearing the queue lets the next
                 // mirror sweep take the server value, so both sides converge.
-                outbox::forget(conn, server_id, &entry.entity_id)?;
+                outbox::complete_mutation(conn, server_id, &entry.entity_id, &entry.id)?;
                 summary.remote_wins += 1;
             }
             Decision::Defer { penalised } => {
@@ -128,8 +164,12 @@ pub async fn upload_outbox<W: ProgressWriter + Sync>(
                 let attempt = writer.apply(&request).await;
                 match attempt {
                     Attempt::Succeeded => {
-                        outbox::forget(conn, server_id, &entry.entity_id)?;
+                        outbox::complete_mutation(conn, server_id, &entry.entity_id, &entry.id)?;
                         summary.uploaded += 1;
+                    }
+                    Attempt::Gone => {
+                        outbox::complete_mutation(conn, server_id, &entry.entity_id, &entry.id)?;
+                        summary.gone += 1;
                     }
                     Attempt::BlockedAuthentication => {
                         summary.blocked_authentication += 1;
@@ -651,5 +691,134 @@ mod tests {
         };
         assert_eq!(remote_of(&book), at(None));
         assert_eq!(remote_of(&book).last_modified, None);
+    }
+
+    #[tokio::test]
+    async fn f01_concurrent_page_turn_during_upload_is_not_cleared_by_complete_mutation() {
+        let path = std::env::temp_dir().join(format!("komga-f01-{}.sqlite", uuid::Uuid::new_v4()));
+        let conn = crate::store::open(&path).unwrap();
+        read_progress::upsert_local_read_progress(&conn, "A", "b1", 10, false).unwrap();
+        assert_eq!(
+            outbox::counts(&conn, "A", "2026-08-28T12:00:00Z")
+                .unwrap()
+                .total(),
+            1
+        );
+
+        struct InFlightWriter {
+            path: std::path::PathBuf,
+        }
+        impl ProgressWriter for InFlightWriter {
+            async fn refetch(&self, _book_id: &str) -> Refetch {
+                remote(5, false, "2026-08-28T09:00:00Z")
+            }
+            async fn apply(&self, _request: &WireRequest) -> Attempt {
+                // User turns page to 11 while upload is in flight!
+                let conn = crate::store::open(&self.path).unwrap();
+                read_progress::upsert_local_read_progress(&conn, "A", "b1", 11, false).unwrap();
+                Attempt::Succeeded
+            }
+            async fn book(&self, _book_id: &str) -> std::result::Result<Option<Book>, ApiError> {
+                Ok(None)
+            }
+        }
+
+        let writer = InFlightWriter { path: path.clone() };
+        let summary = upload_outbox(&conn, "A", &writer, "2026-08-28T12:00:00Z")
+            .await
+            .unwrap();
+        assert_eq!(summary.uploaded, 1);
+
+        // After pass 1, the new mutation (page 11) must NOT be deleted, and mutation_pending must STILL be 1!
+        let counts = outbox::counts(&conn, "A", "2026-08-28T12:00:00Z").unwrap();
+        assert_eq!(counts.total(), 1, "page 11 mutation must survive");
+        let (pending, page): (i64, i64) = conn
+            .query_row(
+                "SELECT mutation_pending, page FROM read_progress WHERE server_id = 'A' AND book_id = 'b1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            pending, 1,
+            "mutation_pending must stay 1 because page 11 is waiting"
+        );
+        assert_eq!(page, 11);
+
+        // Pass 2: plain server accepts page 11
+        let server = ScriptedServer::default();
+        server.serve("b1", vec![remote(10, false, "2026-08-28T12:00:00Z")]);
+        server.then(vec![Attempt::Succeeded]);
+        let summary2 = upload_outbox(&conn, "A", &server, "2026-08-28T12:01:00Z")
+            .await
+            .unwrap();
+        assert_eq!(summary2.uploaded, 1);
+        assert_eq!(
+            outbox::counts(&conn, "A", "2026-08-28T12:01:00Z")
+                .unwrap()
+                .total(),
+            0
+        );
+        let pending_after: i64 = conn
+            .query_row(
+                "SELECT mutation_pending FROM read_progress WHERE server_id = 'A' AND book_id = 'b1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            pending_after, 0,
+            "now that all mutations are uploaded, mutation_pending is 0"
+        );
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn f03_stale_entry_superseded_during_refetch_is_skipped() {
+        let path = std::env::temp_dir().join(format!("komga-f03-{}.sqlite", uuid::Uuid::new_v4()));
+        let conn = crate::store::open(&path).unwrap();
+        read_progress::upsert_local_read_progress(&conn, "A", "b1", 10, false).unwrap();
+
+        struct SupersedingWriter {
+            path: std::path::PathBuf,
+            applied: std::sync::atomic::AtomicBool,
+        }
+        impl ProgressWriter for SupersedingWriter {
+            async fn refetch(&self, _book_id: &str) -> Refetch {
+                // While refetch is happening, user turns to page 20, which coalesces (deletes old entry)
+                let conn = crate::store::open(&self.path).unwrap();
+                read_progress::upsert_local_read_progress(&conn, "A", "b1", 20, false).unwrap();
+                remote(5, false, "2026-08-28T09:00:00Z")
+            }
+            async fn apply(&self, _request: &WireRequest) -> Attempt {
+                self.applied
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                Attempt::Succeeded
+            }
+            async fn book(&self, _book_id: &str) -> std::result::Result<Option<Book>, ApiError> {
+                Ok(None)
+            }
+        }
+
+        let writer = SupersedingWriter {
+            path: path.clone(),
+            applied: std::sync::atomic::AtomicBool::new(false),
+        };
+        let summary = upload_outbox(&conn, "A", &writer, "2026-08-28T12:00:00Z")
+            .await
+            .unwrap();
+        // The stale entry was skipped!
+        assert_eq!(summary.uploaded, 0);
+        assert!(
+            !writer.applied.load(std::sync::atomic::Ordering::SeqCst),
+            "stale request must not be sent to wire"
+        );
+
+        // The new entry (page 20) is still in the queue!
+        let counts = outbox::counts(&conn, "A", "2026-08-28T12:00:00Z").unwrap();
+        assert_eq!(counts.total(), 1);
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -8,7 +8,21 @@ import KomgaAPI
 /// so observers see consistent snapshots. Credentials are never stored here —
 /// only `credentialRef` references into Keychain.
 public final class KomgaStore: @unchecked Sendable {
-    let dbQueue: DatabaseQueue
+    package let dbQueue: DatabaseQueue
+
+    package var database: DatabaseQueue { dbQueue }
+
+    public func read<T>(_ block: (Database) throws -> T) throws -> T {
+        try dbQueue.read(block)
+    }
+
+    public func write<T>(_ block: (Database) throws -> T) throws -> T {
+        try dbQueue.write(block)
+    }
+
+    public var storageIdentifier: String {
+        dbQueue.path.isEmpty ? String(describing: ObjectIdentifier(self)) : dbQueue.path
+    }
 
     /// Opens (or creates) the database at `path` and applies migrations.
     public init(path: String) throws {
@@ -67,31 +81,44 @@ public final class KomgaStore: @unchecked Sendable {
 
     // MARK: - Server profiles
 
+    public static func upsertServer(db: GRDB.Database, profile: ServerProfile) throws {
+        _ = try db.execute(
+            sql: """
+            INSERT INTO servers (id, display_name, base_url, auth_type, credential_ref, capabilities, last_successful_connection)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              display_name = excluded.display_name,
+              base_url = excluded.base_url,
+              auth_type = excluded.auth_type,
+              credential_ref = excluded.credential_ref,
+              capabilities = excluded.capabilities,
+              last_successful_connection = excluded.last_successful_connection
+            """,
+            arguments: [
+                profile.id,
+                profile.displayName,
+                profile.baseURL,
+                profile.authType.rawValue,
+                profile.credentialRef,
+                encodeCapabilities(profile.capabilities),
+                profile.lastSuccessfulConnection.map(rfc3339),
+            ]
+        )
+    }
+
     /// Insert or update a server profile.
     public func upsertServer(_ profile: ServerProfile) throws {
         try dbQueue.write { db in
-            _ = try db.execute(
-                sql: """
-                INSERT INTO servers (id, display_name, base_url, auth_type, credential_ref, capabilities, last_successful_connection)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                  display_name = excluded.display_name,
-                  base_url = excluded.base_url,
-                  auth_type = excluded.auth_type,
-                  credential_ref = excluded.credential_ref,
-                  capabilities = excluded.capabilities,
-                  last_successful_connection = excluded.last_successful_connection
-                """,
-                arguments: [
-                    profile.id,
-                    profile.displayName,
-                    profile.baseURL,
-                    profile.authType.rawValue,
-                    profile.credentialRef,
-                    Self.encodeCapabilities(profile.capabilities),
-                    profile.lastSuccessfulConnection.map(Self.rfc3339),
-                ]
-            )
+            try Self.upsertServer(db: db, profile: profile)
+        }
+    }
+
+    /// Atomically insert or update a server profile and its libraries in a single transaction.
+    @discardableResult
+    public func upsertServerWithLibraries(profile: ServerProfile, libraries: [LibraryDTO]) throws -> Int {
+        try dbQueue.write { db in
+            try Self.upsertServer(db: db, profile: profile)
+            return try Self.upsertLibraries(db: db, serverID: profile.id, libraries: libraries)
         }
     }
 
@@ -111,6 +138,8 @@ public final class KomgaStore: @unchecked Sendable {
     }
 
     /// Returns true if a row was deleted.
+    /// Note: `downloads` and `download_pages` are intentionally preserved so
+    /// offline downloaded content remains readable after server removal.
     @discardableResult
     public func deleteServer(id: String) throws -> Bool {
         try dbQueue.write { db in
@@ -127,7 +156,7 @@ public final class KomgaStore: @unchecked Sendable {
                 "collections", "collection_series",
                 "readlists", "readlist_books",
                 "read_progress", "libraries", "sync_state", "pending_mutations",
-                "thumbnails", "downloads", "download_pages", "deleted_entities",
+                "thumbnails", "deleted_entities",
             ]
             for table in tables {
                 try db.execute(sql: "DELETE FROM \(table) WHERE server_id = ?", arguments: [id])
@@ -138,6 +167,22 @@ public final class KomgaStore: @unchecked Sendable {
             try db.execute(sql: "DELETE FROM servers WHERE id = ?", arguments: [id])
             return db.changesCount > 0
         }
+    }
+
+    // MARK: - Credential Cleanups Journal
+
+    public static let pendingCredentialCleanupsKey = "pending_credential_cleanups"
+
+    public func pendingCredentialCleanups() throws -> [String] {
+        guard let json = try appStateValue(key: Self.pendingCredentialCleanupsKey),
+              let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    public func setPendingCredentialCleanups(_ cleanups: [String]) throws {
+        let data = try JSONEncoder().encode(cleanups)
+        let json = String(data: data, encoding: .utf8) ?? "[]"
+        try putAppStateValue(key: Self.pendingCredentialCleanupsKey, value: json)
     }
 
     // MARK: - Active server
@@ -176,29 +221,33 @@ public final class KomgaStore: @unchecked Sendable {
 
     // MARK: - Libraries
 
+    public static func upsertLibraries(db: GRDB.Database, serverID: String, libraries: [LibraryDTO]) throws -> Int {
+        var written = 0
+        for library in libraries {
+            let record = LibraryRecord(serverID: serverID, dto: library)
+            _ = try db.execute(
+                sql: """
+                INSERT INTO libraries (server_id, remote_id, name, root, unavailable)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(server_id, remote_id)
+                DO UPDATE SET name = excluded.name, root = excluded.root,
+                              unavailable = excluded.unavailable
+                """,
+                arguments: [
+                    record.serverID, record.remoteID, record.name,
+                    record.root, record.unavailable ? 1 : 0
+                ]
+            )
+            written += 1
+        }
+        return written
+    }
+
     /// Batch upsert remotely fetched libraries (multi-server safe).
     @discardableResult
     public func upsertLibraries(serverID: String, libraries: [LibraryDTO]) throws -> Int {
         try dbQueue.write { db in
-            var written = 0
-            for library in libraries {
-                let record = LibraryRecord(serverID: serverID, dto: library)
-                _ = try db.execute(
-                    sql: """
-                    INSERT INTO libraries (server_id, remote_id, name, root, unavailable)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(server_id, remote_id)
-                    DO UPDATE SET name = excluded.name, root = excluded.root,
-                                  unavailable = excluded.unavailable
-                    """,
-                    arguments: [
-                        record.serverID, record.remoteID, record.name,
-                        record.root, record.unavailable ? 1 : 0
-                    ]
-                )
-                written += 1
-            }
-            return written
+            try Self.upsertLibraries(db: db, serverID: serverID, libraries: libraries)
         }
     }
 

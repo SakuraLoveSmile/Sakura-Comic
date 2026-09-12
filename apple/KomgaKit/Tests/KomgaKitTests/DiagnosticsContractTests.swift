@@ -489,4 +489,29 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         XCTAssertEqual(first, second, "asking the question changed the answer")
         XCTAssertEqual(second.cache.prefetchBytes, 7)
     }
+
+    func testDiagnosticsSanitizerRedactsSyntheticSecrets() {
+        let sensitiveInputs: [(raw: String, forbidden: String)] = [
+            ("Authorization: Bearer my-secret-jwt-token-xyz123", "my-secret-jwt-token-xyz123"),
+            ("Authorization: Basic dXNlcjpwYXNzd29yZDEyMw==", "dXNlcjpwYXNzd29yZDEyMw=="),
+            ("Request failed with X-API-Key: my_super_secret_api_key_456", "my_super_secret_api_key_456"),
+            ("Connecting to https://admin:superSecretPass@komga.example.com:25600/api", "superSecretPass"),
+            ("Fetch error: https://komga.local/v1/page?key=secret_url_key_789&page=1", "secret_url_key_789"),
+            ("Handshake failed: apikey=inline_secret_key_abc", "inline_secret_key_abc"),
+            ("Token error: token=secret_token_val_999", "secret_token_val_999"),
+            ("Password refused: password=my_password_xyz", "my_password_xyz"),
+        ]
+
+        for (raw, forbidden) in sensitiveInputs {
+            let sanitized = DiagnosticsSanitizer.redact(raw)
+            XCTAssertFalse(
+                sanitized.contains(forbidden),
+                "Sanitizer failed to redact sensitive value '\(forbidden)' from: '\(raw)'. Result: '\(sanitized)'"
+            )
+            XCTAssertTrue(sanitized.contains("[REDACTED"), "Expected redaction placeholder in '\(sanitized)'")
+        }
+
+        XCTAssertEqual(DiagnosticsSanitizer.redactServerID("server-123456789"), "server-1***")
+        XCTAssertEqual(DiagnosticsSanitizer.redactServerID("srv-1"), "***")
+    }
 }

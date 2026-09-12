@@ -28,30 +28,33 @@ Komga Server
 
 ```text
 Comic/
-├── apple/          Apple 平台：ComicApp (iOS/macOS/tvOS/visionOS) + KomgaKit Swift Package
+├── apple/          Apple 平台：ComicApp (iOS/macOS) + KomgaKit Swift Package
 ├── android/        Android 平台：Flutter shell (android/app) + Rust Core (android/komga_core)
 ├── specs/          OpenAPI / SSE 事件 / Behavior 契约 / Shared Fixtures
 ├── docs/           架构、同步引擎、数据库、阅读器、离线存储
 └── .github/        CI workflows
 ```
 
-## 阶段路线
+## 路线图
 
-| Phase | 目标 |
-| --- | --- |
-| Phase 0 | Architecture Vertical Slice（真实服务器 → SQLite → 封面墙） |
-| Phase 1 | Media Library（封面墙 / 搜索 / Home / Series Detail） |
-| Phase 2 | Reliable Sync（增量 / SSE / Outbox / 冲突处理）— Stage 5 Bootstrap + Reconcile，Stage 6 SSE + Mutation Outbox |
-| Phase 3 | Reader（单页 / 双页 / Webtoon）— Stage 7 阅读器基础版（Product MVP），**Stage 8 性能与缓存** |
-| Phase 4 | Offline（缓存 / 下载 / 离线浏览）— **Stage 9 离线下载：Full Mobile v1** |
-| Phase 5 | Platform Polish（macOS / tvOS / visionOS） |
+主题式排期，不再使用 Phase / Stage 编号。完整内容见 [docs/roadmap.md](docs/roadmap.md)。
+
+| 主题 | 一句话 | 位置 |
+| --- | --- | --- |
+| **日常可用** | 出错时知道发生了什么，能自查 | 现在 |
+| 离线可用 | iPhone / iPad 上能像 Android 一样管理下载 | 下一棒 |
+| 桌面可用 | macOS 上像原生 App 一样用 | 再下一棒 |
+
+> 下面「已交付能力」各章是历史实现说明的存档，记录当前代码为什么长这样；
+> 它们描述的是既成事实，不作为排期依据。
 
 ## 本期明确不做
 
 Windows / Linux 客户端、全平台 Rust Shared Core、OCR、内容识别、本地图像处理、
-自建转码、云端账户、OPDS Server、Komga 服务端管理。
+自建转码、云端账户、OPDS Server、Komga 服务端管理、
+**tvOS 客户端、visionOS 客户端**。
 
-## Phase 0 验证指南
+## 验证指南
 
 ```bash
 chmod +x scripts/*.sh   # 首次
@@ -85,7 +88,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
 
 验收细节与勾选状态见 [docs/phase0-checklist.md](docs/phase0-checklist.md)。
 
-## Stage 2 — API 契约与服务器管理
+## 已交付能力 — API 契约与服务器管理
 
 双端验收链：`添加服务器 → 登录 → 验证 Komga → 获取服务器信息 → 保存 Server Profile`。
 
@@ -108,7 +111,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage2-checklist.md](docs/stage2-checklist.md)。
 
-## Stage 3 — Local Store 与 Vertical Slice
+## 已交付能力 — Local Store 与 Vertical Slice
 
 首次打通完整核心链路 `Komga → API → SQLite → Cache → UI`，核心原则：
 **网络负责同步，本地数据库负责展示**（UI 只读 SQLite，禁止 View → Komga API）。
@@ -135,7 +138,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage3-checklist.md](docs/stage3-checklist.md)。
 
-## Stage 4 — 完整媒体库
+## 已交付能力 — 完整媒体库
 
 客户端扩展为可离线使用的完整 Komga 媒体库浏览器。核心原则不变：
 **网络负责同步，本地数据库负责展示** — 搜索、筛选、排序、分页全部基于 SQLite（FTS5 + 归一化表）。
@@ -167,7 +170,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage4-checklist.md](docs/stage4-checklist.md)。
 
-## Stage 5 — 同步引擎
+## 已交付能力 — 同步引擎
 
 把「一次性镜像」升级为「长期可靠的同步系统」。本阶段落地 **Bootstrap Sync** 与
 **Reconcile Sync**，目标是：**即使 SSE 完全失效，本地数据库仍能依靠 Reconcile 最终恢复到正确状态。**
@@ -206,7 +209,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage5-checklist.md](docs/stage5-checklist.md)。
 
-## Stage 6 — SSE 与 Mutation Outbox
+## 已交付能力 — SSE 与 Mutation Outbox
 
 补上同步引擎的后两半：**实时刷新**（Event Driven Sync）与**可靠的客户端写操作**
 （Mutation Upload）。完成条件：实时事件丢失不影响最终一致性，客户端写操作在异常退出与
@@ -245,7 +248,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   勾选状态与实现位置见 [docs/stage6-checklist.md](docs/stage6-checklist.md)。
 
-## Stage 7 — 阅读器基础版（Product MVP）
+## 已交付能力 — 阅读器基础版
 
 可以日常使用的漫画阅读器：三种模式 × 三种方向、六项阅读设置、
 `Reader → Page Manifest → Cache → Local File → Decode → Render` 的加载管线、
@@ -279,7 +282,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   勾选状态、已知限制与本阶段顺带修掉的回环服务器路由遮蔽缺陷，见
   [docs/stage7-checklist.md](docs/stage7-checklist.md)。
 
-## Stage 8 — Reader 性能与缓存
+## 已交付能力 — 阅读器性能与缓存
 
 Stage 7 让阅读器能用，这一阶段让它经得起长期日常使用：大图、大页数、长会话三类
 压力场景下的内存、请求数与延迟都有实测数字，缓存坏掉能自愈。
@@ -309,7 +312,7 @@ Stage 7 让阅读器能用，这一阶段让它经得起长期日常使用：大
   `maximumSize` 全部来自核心下发的计划，关书即还原；路径 memo 从「无界」改成按窗口定界。
 - **下载保护是结构不是约定**：`store::cache::protected_paths` 把 `downloads` /
   `download_pages` 两张表与账本里的 download 行一起当作不可删除集合，淘汰、清层、
-  清书、开书清扫四处都问它——因为离线下载（Phase 4）还是空壳，保护若依赖"将来有人会
+  清书、开书清扫四处都问它——因为离线下载当时还是空壳，保护若依赖"将来有人会
   写那行账"，忘记的那一天就是用户书架被清扫删掉的那一天。
 - **对外接口也被走了一遍**：`--phase facade` 用 App 真正暴露的 `reader_*` 入口驱动，
   证明清扫发生在设备档案上报时、预取字节确实镜像进内存、显示预取页会把文件从
@@ -336,11 +339,11 @@ Stage 7 让阅读器能用，这一阶段让它经得起长期日常使用：大
 
 ## 文档入口
 
+- [路线图](docs/roadmap.md)
 - [架构](docs/architecture.md)
 - [同步引擎](docs/sync-engine.md)
 - [数据库 Schema](docs/database-schema.md)
 - [阅读器](docs/reader.md)
 - [离线存储](docs/offline-storage.md)
-- [Stage 7 验收清单](docs/stage7-checklist.md)
-- [Stage 8 验收清单](docs/stage8-checklist.md)
+- [验收存档](docs/) — `stage*-checklist.md` 为历史验收记录，仅存档
 - [Behavior 契约与 Fixtures](specs/behavior.md)

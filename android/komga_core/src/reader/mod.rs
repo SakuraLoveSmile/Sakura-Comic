@@ -37,6 +37,7 @@ pub mod manifest;
 pub mod memory;
 pub mod paging;
 pub mod prefetch;
+pub mod series_override;
 pub mod session;
 pub mod settings;
 pub mod throttle;
@@ -51,6 +52,7 @@ pub use manifest::{extension_for_content_type, PageDescriptor, PageManifest, Raw
 pub use memory::{MemoryCache, Stats as MemoryStats};
 pub use paging::{layout, pair, Axis, Direction, Layout, Nav, ReadMode, Zone};
 pub use prefetch::{plan, Plan, Superseded, Window};
+pub use series_override::{resolve_for_series, SeriesOverride};
 pub use session::{Clock, ReaderSession, Upload, UPLOAD_INTERVAL_MS};
 pub use settings::{resolve_direction, Background, ReaderSettings};
 pub use throttle::{Event, EventKind, PendingIntent, ProgressThrottle, WireCall};

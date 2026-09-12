@@ -502,17 +502,50 @@ pub fn park_unsupported(conn: &Connection, id: &str, reason: &str) -> rusqlite::
     Ok(())
 }
 
+/// Completes a single mutation by its ID.
+///
+/// Deletes only the mutation specified by `mutation_id`. If there are no
+/// remaining mutations for this book on this server, `read_progress.mutation_pending`
+/// is cleared and `server_updated_at` goes NULL. If there are still pending
+/// mutations (e.g. user performed another action while upload was in flight),
+/// `mutation_pending` remains 1.
+pub fn complete_mutation(
+    conn: &Connection,
+    server_id: &str,
+    book_id: &str,
+    mutation_id: &str,
+) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM pending_mutations WHERE id = ?1",
+        params![mutation_id],
+    )?;
+    let remaining: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ?1 AND entity_id = ?2",
+        params![server_id, book_id],
+        |row| row.get(0),
+    )?;
+    if remaining == 0 {
+        apply_uploaded(&tx, server_id, book_id)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Take the row out of the queue and let the mirror own the local value again.
 ///
 /// Used by all three "the server side is settled" outcomes: the write was
 /// confirmed, the server already had it, or rule R4 gave the round to a later
 /// remote action. In every case the local row must stop blocking sweeps.
 pub fn forget(conn: &Connection, server_id: &str, book_id: &str) -> rusqlite::Result<()> {
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "DELETE FROM pending_mutations WHERE server_id = ?1 AND entity_id = ?2",
         params![server_id, book_id],
     )?;
-    apply_uploaded(conn, server_id, book_id)
+    apply_uploaded(&tx, server_id, book_id)?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Queued mutations for one book (UI badge + tests).

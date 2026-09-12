@@ -597,7 +597,7 @@ mod tests {
     use crate::downloads::queue::{page_state, Link, StopReason};
     use crate::downloads::store as downloads;
 
-    fn request<'a>(server: &'a str) -> PassRequest<'a> {
+    fn request(server: &str) -> PassRequest<'_> {
         PassRequest {
             server_id: server,
             free_bytes: 1 << 30,

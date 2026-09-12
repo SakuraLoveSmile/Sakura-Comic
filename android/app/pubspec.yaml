@@ -13,6 +13,14 @@ dependencies:
   # check at runtime). Regenerate with scripts/frb_wire.sh.
   flutter_rust_bridge: 2.13.0
   path_provider: ^2.1.5
+  # 反馈组件（仓库子目录 flutter/feedback）。ref 固定到真实提交 SHA：
+  # 不用分支或可变标签；升级时显式改 SHA 并提交本目录 pubspec.lock。
+  # Git 认证走开发机/CI 的 SSH 配置，URL 内不写访问令牌。
+  feedback_widget:
+    git:
+      url: git@github.com:SakuraLoveSmile/Sakura-Feedback.git
+      path: flutter/feedback
+      ref: 8c66cc07c3ba9e1fa706485b8b0b8ada25635343
 
 dev_dependencies:
   flutter_test:

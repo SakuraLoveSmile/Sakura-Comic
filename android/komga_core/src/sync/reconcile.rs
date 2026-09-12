@@ -20,6 +20,8 @@
 //! throttled (`should_reconcile`); explicit ones always run.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -246,46 +248,58 @@ fn needs_write(
     }
 }
 
-/// The mirrored series columns a sweep can compare against. `booksCount` and
-/// the read counters move without Komga touching `series.lastModified`, so
-/// comparing the stamp alone would miss them.
-type SeriesProjection = (
-    Option<String>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-);
+/// The mirrored series columns a sweep can compare against. `booksCount`,
+/// the read counters and the names all move without Komga touching
+/// `series.lastModified`, so comparing the stamp alone would miss them.
+/// The names are compared as the T1 resolution would render them: an old
+/// mirror that stored a folder name (`cbz`) is repaired even though its
+/// stamp and counters already match the server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SeriesProjection {
+    last_modified: Option<String>,
+    books_count: Option<i64>,
+    books_read_count: Option<i64>,
+    books_unread_count: Option<i64>,
+    books_in_progress_count: Option<i64>,
+    display_name: String,
+    sort_name: String,
+}
 
 fn series_projection(series: &crate::model::series::Series) -> SeriesProjection {
-    (
-        series.last_modified.clone(),
-        series.books_count,
-        series.books_read_count,
-        series.books_unread_count,
-        series.books_in_progress_count,
-    )
+    SeriesProjection {
+        last_modified: series.last_modified.clone(),
+        books_count: series.books_count,
+        books_read_count: series.books_read_count,
+        books_unread_count: series.books_unread_count,
+        books_in_progress_count: series.books_in_progress_count,
+        display_name: store::series::display_name(series),
+        sort_name: store::series::sort_name(series),
+    }
 }
 
 fn local_series_projection(
     conn: &Connection,
     server_id: &str,
 ) -> rusqlite::Result<HashMap<String, SeriesProjection>> {
+    // `COALESCE(sort_name, name)` is the effective local sort value (rows
+    // written before the title fix may carry no sort_name at all).
     let mut stmt = conn.prepare(
         "SELECT remote_id, last_modified, books_count, books_read_count, books_unread_count,
-                books_in_progress_count
+                books_in_progress_count, name, COALESCE(sort_name, name)
          FROM series WHERE server_id = ?1",
     )?;
     let rows = stmt.query_map(rusqlite::params![server_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
-            (
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, Option<i64>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-            ),
+            SeriesProjection {
+                last_modified: row.get(1)?,
+                books_count: row.get(2)?,
+                books_read_count: row.get(3)?,
+                books_unread_count: row.get(4)?,
+                books_in_progress_count: row.get(5)?,
+                display_name: row.get(6)?,
+                sort_name: row.get(7)?,
+            },
         ))
     })?;
     rows.collect()
@@ -349,6 +363,18 @@ fn classify(
     }
 }
 
+/// Mutual exclusion lock per database and server to serialize Bootstrap and Reconcile.
+pub fn sync_lock(db_path: &str, server_id: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let map = LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let key = format!("{db_path}:{server_id}");
+    let mut guard = map.lock().unwrap();
+    guard
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
 /// Reconcile one server against its current remote state.
 pub async fn reconcile(
     db_path: &str,
@@ -356,6 +382,8 @@ pub async fn reconcile(
     fetcher: &(impl LibraryFetcher + Sync),
     trigger: ReconcileTrigger,
 ) -> Result<ReconcileSummary> {
+    let mutex = sync_lock(db_path, server_id);
+    let _lock = mutex.lock().await;
     let mut summary = ReconcileSummary {
         server_id: server_id.to_string(),
         trigger: trigger.as_str().to_string(),
@@ -411,21 +439,13 @@ async fn reconcile_series(
     fetcher: &(impl LibraryFetcher + Sync),
     summary: &mut ReconcileSummary,
 ) -> Result<()> {
-    let seeded: HashSet<String> = match cursor_for(db_path, server_id, sync_state::ENTITY_SERIES)? {
-        // Resuming: pages before the cursor were already committed locally.
-        Some(_) => crate::sync::full::mirrored_ids(db_path, server_id, sync_state::ENTITY_SERIES)?,
-        None => HashSet::new(),
-    };
     run_step(db_path, server_id, sync_state::ENTITY_SERIES, async {
         let conn = store::open(db_path).map_err(db_err)?;
         let known = local_stamps(&conn, server_id, "series", "last_modified").map_err(db_err)?;
         let projected = local_series_projection(&conn, server_id).map_err(db_err)?;
         drop(conn);
-        let mut remote = seeded.clone();
-        let mut page = match cursor_for(db_path, server_id, sync_state::ENTITY_SERIES)? {
-            Some(cursor) => parse_page(&cursor),
-            None => 0,
-        };
+        let mut remote = HashSet::new();
+        let mut page = 0;
         loop {
             let resp = fetcher
                 .series_page(&PageRequest::new(page, PAGE_SIZE))
@@ -440,15 +460,27 @@ async fn reconcile_series(
             remote.extend(ids.iter().cloned());
             let mut dirty: Vec<crate::model::series::Series> = Vec::new();
             for series in &resp.content {
-                let (added, changed) =
+                let (added, stamp_changed) =
                     classify(&known, &series.id, series.last_modified.as_deref());
-                summary.series_added += added as usize;
-                summary.series_changed += changed as usize;
-                let counters_moved = match projected.get(&series.id) {
-                    Some(stored) => *stored != series_projection(series),
+                let remote_projection = series_projection(series);
+                let stored = projected.get(&series.id);
+                let name_moved = match stored {
+                    Some(stored) => {
+                        stored.display_name != remote_projection.display_name
+                            || stored.sort_name != remote_projection.sort_name
+                    }
                     None => true,
                 };
-                if added || changed || counters_moved {
+                // A name-only correction is a change to report, but a newly
+                // added series is already counted as added — never twice.
+                let changed = stamp_changed || (!added && name_moved);
+                summary.series_added += added as usize;
+                summary.series_changed += changed as usize;
+                let projection_moved = match stored {
+                    Some(stored) => *stored != remote_projection,
+                    None => true,
+                };
+                if added || changed || projection_moved {
                     dirty.push(series.clone());
                 }
             }
@@ -460,15 +492,6 @@ async fn reconcile_series(
             prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_SERIES, &ids)
                 .map_err(db_err)?;
             summary.pages_swept += 1;
-            if !last {
-                sync_state::checkpoint_entity(
-                    &conn,
-                    server_id,
-                    sync_state::ENTITY_SERIES,
-                    &page_cursor(page + 1),
-                )
-                .map_err(db_err)?;
-            }
             drop(conn);
             if last {
                 break;
@@ -626,24 +649,14 @@ async fn reconcile_collections(
     fetcher: &(impl LibraryFetcher + Sync),
     summary: &mut ReconcileSummary,
 ) -> Result<()> {
-    let seeded: HashSet<String> =
-        match cursor_for(db_path, server_id, sync_state::ENTITY_COLLECTIONS)? {
-            Some(_) => {
-                crate::sync::full::mirrored_ids(db_path, server_id, sync_state::ENTITY_COLLECTIONS)?
-            }
-            None => HashSet::new(),
-        };
     run_step(db_path, server_id, sync_state::ENTITY_COLLECTIONS, async {
         let conn = store::open(db_path).map_err(db_err)?;
         let known =
             local_stamps(&conn, server_id, "collections", "last_modified_date").map_err(db_err)?;
         let members = local_collection_members(&conn, server_id).map_err(db_err)?;
         drop(conn);
-        let mut remote = seeded.clone();
-        let mut page = match cursor_for(db_path, server_id, sync_state::ENTITY_COLLECTIONS)? {
-            Some(cursor) => parse_page(&cursor),
-            None => 0,
-        };
+        let mut remote = HashSet::new();
+        let mut page = 0;
         loop {
             let resp = fetcher
                 .collections_page(&PageRequest::new(page, PAGE_SIZE))
@@ -679,15 +692,6 @@ async fn reconcile_collections(
             prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_COLLECTIONS, &ids)
                 .map_err(db_err)?;
             summary.pages_swept += 1;
-            if !last {
-                sync_state::checkpoint_entity(
-                    &conn,
-                    server_id,
-                    sync_state::ENTITY_COLLECTIONS,
-                    &page_cursor(page + 1),
-                )
-                .map_err(db_err)?;
-            }
             drop(conn);
             if last {
                 break;
@@ -715,24 +719,14 @@ async fn reconcile_readlists(
     fetcher: &(impl LibraryFetcher + Sync),
     summary: &mut ReconcileSummary,
 ) -> Result<()> {
-    let seeded: HashSet<String> =
-        match cursor_for(db_path, server_id, sync_state::ENTITY_READLISTS)? {
-            Some(_) => {
-                crate::sync::full::mirrored_ids(db_path, server_id, sync_state::ENTITY_READLISTS)?
-            }
-            None => HashSet::new(),
-        };
     run_step(db_path, server_id, sync_state::ENTITY_READLISTS, async {
         let conn = store::open(db_path).map_err(db_err)?;
         let known =
             local_stamps(&conn, server_id, "readlists", "last_modified_date").map_err(db_err)?;
         let stored_books = local_readlist_books(&conn, server_id).map_err(db_err)?;
         drop(conn);
-        let mut remote = seeded.clone();
-        let mut page = match cursor_for(db_path, server_id, sync_state::ENTITY_READLISTS)? {
-            Some(cursor) => parse_page(&cursor),
-            None => 0,
-        };
+        let mut remote = HashSet::new();
+        let mut page = 0;
         loop {
             let resp = fetcher
                 .readlists_page(&PageRequest::new(page, PAGE_SIZE))
@@ -763,15 +757,6 @@ async fn reconcile_readlists(
             prune::clear_tombstones(&conn, server_id, sync_state::ENTITY_READLISTS, &ids)
                 .map_err(db_err)?;
             summary.pages_swept += 1;
-            if !last {
-                sync_state::checkpoint_entity(
-                    &conn,
-                    server_id,
-                    sync_state::ENTITY_READLISTS,
-                    &page_cursor(page + 1),
-                )
-                .map_err(db_err)?;
-            }
             drop(conn);
             if last {
                 break;
@@ -1246,6 +1231,223 @@ mod tests {
             "the other device's page 7 must reach this one"
         );
         drop(conn);
+        cleanup(&db);
+    }
+
+    /// Fixture-backed fetcher whose series sweep fails on demand, modelling a
+    /// network drop in the middle of a reconciliation.
+    struct FlakySeriesFetcher {
+        inner: FixtureLibraryFetcher,
+        fail_series: bool,
+    }
+
+    impl crate::sync::bootstrap::SeriesFetcher for FlakySeriesFetcher {
+        async fn series_page(
+            &self,
+            request: &crate::api::series::PageRequest,
+        ) -> crate::api::error::Result<crate::model::series::SeriesPage> {
+            if self.fail_series {
+                return Err(ApiError::Network);
+            }
+            crate::sync::bootstrap::SeriesFetcher::series_page(&self.inner, request).await
+        }
+    }
+
+    impl crate::api::server::LibrariesFetcher for FlakySeriesFetcher {
+        async fn libraries(&self) -> crate::api::error::Result<Vec<crate::model::server::Library>> {
+            crate::api::server::LibrariesFetcher::libraries(&self.inner).await
+        }
+    }
+
+    impl crate::api::book::BookFetcher for FlakySeriesFetcher {
+        async fn books_page(
+            &self,
+            series_id: &str,
+            request: &crate::api::series::PageRequest,
+        ) -> crate::api::error::Result<crate::model::book::BookPage> {
+            crate::api::book::BookFetcher::books_page(&self.inner, series_id, request).await
+        }
+
+        async fn on_deck_page(
+            &self,
+            request: &crate::api::series::PageRequest,
+        ) -> crate::api::error::Result<crate::model::book::BookPage> {
+            crate::api::book::BookFetcher::on_deck_page(&self.inner, request).await
+        }
+    }
+
+    impl crate::api::collection::CollectionFetcher for FlakySeriesFetcher {
+        async fn collections_page(
+            &self,
+            request: &crate::api::series::PageRequest,
+        ) -> crate::api::error::Result<crate::model::collection::CollectionPage> {
+            crate::api::collection::CollectionFetcher::collections_page(&self.inner, request).await
+        }
+    }
+
+    impl crate::api::readlist::ReadListFetcher for FlakySeriesFetcher {
+        async fn readlists_page(
+            &self,
+            request: &crate::api::series::PageRequest,
+        ) -> crate::api::error::Result<crate::model::readlist::ReadListPage> {
+            crate::api::readlist::ReadListFetcher::readlists_page(&self.inner, request).await
+        }
+    }
+
+    /// Overwrite one mirrored series with the pre-fix state: the folder name
+    /// used as both the display and sort name, in the row and in the index.
+    fn corrupt_series_name(db: &str, server_id: &str, remote_id: &str) {
+        let conn = crate::store::open(db).unwrap();
+        conn.execute(
+            "UPDATE series SET name = 'cbz', sort_name = 'cbz'
+             WHERE server_id = ?1 AND remote_id = ?2",
+            rusqlite::params![server_id, remote_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE series_fts SET name = 'cbz', sort_name = 'cbz'
+             WHERE rowid = (SELECT fts_rowid FROM series WHERE server_id = ?1 AND remote_id = ?2)",
+            rusqlite::params![server_id, remote_id],
+        )
+        .unwrap();
+    }
+
+    fn stored_name(db: &str, server_id: &str, remote_id: &str) -> String {
+        let conn = crate::store::open(db).unwrap();
+        conn.query_row(
+            "SELECT name FROM series WHERE server_id = ?1 AND remote_id = ?2",
+            rusqlite::params![server_id, remote_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    /// T2: an existing mirror holds the folder name (`cbz`) while the remote
+    /// stamp and counters are unchanged. One sweep must repair the row *and*
+    /// the search index and report the correction as a change; the next sweep
+    /// must not rewrite anything.
+    #[tokio::test]
+    async fn a_name_only_change_in_the_mirror_is_healed_by_one_sweep() {
+        let db = temp_db();
+        full_sync_from(&db, "srv", &FixtureLibraryFetcher {}, StartAt::Fresh)
+            .await
+            .unwrap();
+        corrupt_series_name(&db, "srv", "series-1");
+
+        let summary = reconcile(
+            &db,
+            "srv",
+            &FixtureLibraryFetcher {},
+            ReconcileTrigger::ManualRefresh,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            summary.series_upserted, 1,
+            "only the corrupted series should be rewritten"
+        );
+        assert_eq!(
+            summary.series_changed, 1,
+            "the name correction counts as one change"
+        );
+        assert!(!summary.clean, "{summary:?}");
+
+        assert_eq!(stored_name(&db, "srv", "series-1"), "One Piece");
+        {
+            let conn = crate::store::open(&db).unwrap();
+            let hits = |term: &str| -> i64 {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM series_fts WHERE series_fts MATCH ?1 AND server_id = 'srv'",
+                    rusqlite::params![crate::store::fts::fts_match_query(term)],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(hits("piece"), 1, "the official title is searchable again");
+            assert_eq!(hits("cbz"), 0, "the folder name must leave the index");
+        }
+
+        // Converged: the second sweep is a pure read.
+        let summary = reconcile(
+            &db,
+            "srv",
+            &FixtureLibraryFetcher {},
+            ReconcileTrigger::ManualRefresh,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.series_upserted, 0, "no redundant rewrite");
+        assert_eq!(summary.series_changed, 0);
+        assert!(summary.clean, "{summary:?}");
+        cleanup(&db);
+    }
+
+    /// The repair is scoped to one server: another profile's mirror keeps its
+    /// own (even wrong) rows until that server is reconciled itself.
+    #[tokio::test]
+    async fn a_name_fix_for_one_server_leaves_another_alone() {
+        let db = temp_db();
+        for server in ["A", "B"] {
+            full_sync_from(&db, server, &FixtureLibraryFetcher {}, StartAt::Fresh)
+                .await
+                .unwrap();
+            corrupt_series_name(&db, server, "series-1");
+        }
+
+        reconcile(
+            &db,
+            "A",
+            &FixtureLibraryFetcher {},
+            ReconcileTrigger::ManualRefresh,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stored_name(&db, "A", "series-1"), "One Piece");
+        assert_eq!(
+            stored_name(&db, "B", "series-1"),
+            "cbz",
+            "another server's mirror must not be touched"
+        );
+        cleanup(&db);
+    }
+
+    /// A failed sweep never guesses: the wrong local name survives, and the
+    /// first sweep that succeeds still heals it.
+    #[tokio::test]
+    async fn a_failed_sweep_keeps_the_old_name_and_the_next_one_repairs_it() {
+        let db = temp_db();
+        full_sync_from(&db, "srv", &FixtureLibraryFetcher {}, StartAt::Fresh)
+            .await
+            .unwrap();
+        corrupt_series_name(&db, "srv", "series-1");
+
+        let flaky = FlakySeriesFetcher {
+            inner: FixtureLibraryFetcher {},
+            fail_series: true,
+        };
+        assert!(
+            reconcile(&db, "srv", &flaky, ReconcileTrigger::ManualRefresh)
+                .await
+                .is_err(),
+            "the transport failure must surface"
+        );
+        assert_eq!(
+            stored_name(&db, "srv", "series-1"),
+            "cbz",
+            "a failed sweep must not invent a name"
+        );
+
+        let summary = reconcile(
+            &db,
+            "srv",
+            &FixtureLibraryFetcher {},
+            ReconcileTrigger::ManualRefresh,
+        )
+        .await
+        .unwrap();
+        assert_eq!(summary.series_upserted, 1);
+        assert_eq!(stored_name(&db, "srv", "series-1"), "One Piece");
         cleanup(&db);
     }
 }

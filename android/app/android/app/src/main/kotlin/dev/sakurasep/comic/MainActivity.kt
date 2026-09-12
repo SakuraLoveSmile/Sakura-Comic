@@ -126,28 +126,40 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             CHANNEL,
         ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "save" -> {
-                    val ref = call.argument<String>("ref")
-                    val secret = call.argument<String>("secret")
-                    if (ref == null || secret == null) {
-                        result.error("bad-args", "ref and secret are required", null)
-                    } else {
-                        result.success(store.save(ref, secret))
+            try {
+                when (call.method) {
+                    "save" -> {
+                        val ref = call.argument<String>("ref")
+                        val secret = call.argument<String>("secret")
+                        if (ref == null || secret == null) {
+                            result.error("bad-args", "ref and secret are required", null)
+                        } else {
+                            result.success(store.save(ref, secret))
+                        }
                     }
+                    "read" -> {
+                        val ref = call.argument<String>("ref")
+                        if (ref == null) {
+                            result.error("bad-args", "ref is required", null)
+                        } else {
+                            result.success(store.read(ref))
+                        }
+                    }
+                    "delete" -> {
+                        val ref = call.argument<String>("ref")
+                        if (ref == null) {
+                            result.error("bad-args", "ref is required", null)
+                        } else {
+                            result.success(store.delete(ref))
+                        }
+                    }
+                    "hasSecureStorage" -> result.success(store.isSecure)
+                    else -> result.notImplemented()
                 }
-                "read" -> {
-                    val ref = call.argument<String>("ref")
-                    if (ref == null) result.error("bad-args", "ref is required", null)
-                    else result.success(store.read(ref))
-                }
-                "delete" -> {
-                    val ref = call.argument<String>("ref")
-                    if (ref == null) result.error("bad-args", "ref is required", null)
-                    else result.success(store.delete(ref))
-                }
-                "hasSecureStorage" -> result.success(store.isSecure)
-                else -> result.notImplemented()
+            } catch (e: KeystoreException) {
+                result.error(e.code, e.message, null)
+            } catch (e: Exception) {
+                result.error("UNKNOWN_ERROR", e.message, null)
             }
         }
     }
@@ -160,6 +172,8 @@ class MainActivity : FlutterActivity() {
     }
 }
 
+class KeystoreException(val code: String, message: String) : Exception(message)
+
 /** Keystore-backed AES-GCM secret store (see class doc above). */
 class AuthStore(private val context: Context) {
     private val prefs =
@@ -170,32 +184,44 @@ class AuthStore(private val context: Context) {
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && masterKey() != null
 
     fun save(ref: String, secret: String): Boolean {
-        val key = masterKey() ?: return false
+        val key = masterKey() ?: throw KeystoreException("KEYSTORE_UNAVAILABLE", "Android Keystore master key is unavailable")
         return try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, key)
             val iv = cipher.iv
             val encrypted = cipher.doFinal(secret.toByteArray(Charsets.UTF_8))
-            prefs.edit()
+            val saved = prefs.edit()
                 .putString(ref, encode(iv) + SEPARATOR + encode(encrypted))
                 .commit()
+            if (!saved) {
+                throw KeystoreException("STORAGE_ERROR", "Failed to commit secret to SharedPreferences")
+            }
+            true
+        } catch (e: KeystoreException) {
+            throw e
         } catch (e: Exception) {
-            logFallback(e)
-            plainSave(ref, secret)
+            Log.e(TAG, "Encryption failed: ${e.message}", e)
+            throw KeystoreException("ENCRYPTION_FAILED", e.message ?: "Encryption failed")
         }
     }
 
     fun read(ref: String): String? {
         val raw = prefs.getString(ref, null) ?: return null
-        val key = masterKey() ?: return raw // degraded mode: plain Base64
+        val key = masterKey() ?: throw KeystoreException("KEYSTORE_UNAVAILABLE", "Android Keystore master key is unavailable")
         return try {
-            val (ivPart, dataPart) = raw.split(SEPARATOR, limit = 2)
+            val parts = raw.split(SEPARATOR, limit = 2)
+            if (parts.size != 2) {
+                throw KeystoreException("DECRYPTION_FAILED", "Invalid stored secret format")
+            }
+            val (ivPart, dataPart) = parts
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, decode(ivPart)))
             String(cipher.doFinal(decode(dataPart)), Charsets.UTF_8)
+        } catch (e: KeystoreException) {
+            throw e
         } catch (e: Exception) {
-            // Not encrypted (degraded mode) or corrupted — return as stored.
-            decodeOrNull(raw)?.let { String(it, Charsets.UTF_8) }
+            Log.e(TAG, "Decryption failed: ${e.message}", e)
+            throw KeystoreException("DECRYPTION_FAILED", e.message ?: "Decryption failed")
         }
     }
 
@@ -231,27 +257,11 @@ class AuthStore(private val context: Context) {
         }
     }
 
-    private fun plainSave(ref: String, secret: String): Boolean {
-        Log.w(TAG, "keystore unavailable — storing secret insecurely (API < 23)")
-        return prefs.edit().putString(ref, encode(secret.toByteArray(Charsets.UTF_8))).commit()
-    }
-
-    private fun logFallback(e: Exception) {
-        Log.w(TAG, "AES-GCM failed, falling back: ${e.message}")
-    }
-
     private fun encode(bytes: ByteArray): String =
         Base64.encodeToString(bytes, Base64.NO_WRAP)
 
     private fun decode(part: String): ByteArray =
         Base64.decode(part, Base64.NO_WRAP)
-
-    private fun decodeOrNull(part: String): ByteArray? =
-        try {
-            decode(part)
-        } catch (e: Exception) {
-            null
-        }
 
     private companion object {
         const val ANDROID_KEYSTORE = "AndroidKeyStore"

@@ -2,6 +2,7 @@ import Foundation
 import KomgaDiagnostics
 import KomgaAPI
 import KomgaStore
+import KomgaDownloads
 
 // MARK: - The page pipeline: Page Manifest -> Cache -> Local File (mirror of
 // `reader/loader.rs`)
@@ -178,8 +179,20 @@ public final class PageLoader: @unchecked Sendable {
     }
 
     /// Cache-only lookup: what the UI renders when there is no connection, and
-    /// the input to the next prefetch plan.
+    /// the input to the next prefetch plan. Offline downloads take priority over
+    /// transient cache.
     public func cachedPage(number: UInt32, now: String) throws -> PageRef? {
+        if let downloadURL = try? store.read({ db in
+            try DownloadRecovery.usablePage(
+                db: db,
+                serverID: manifest.serverID,
+                bookID: bookID,
+                pageNumber: Int(number)
+            )
+        }) {
+            let size = Int64((try? FileManager.default.attributesOfItem(atPath: downloadURL.path)[.size] as? UInt64) ?? 0)
+            return PageRef(number: number, url: downloadURL, size: size, source: .cache)
+        }
         guard let location = try cache.lookup(key: manifest.cacheKey(number), now: now) else {
             return nil
         }
@@ -187,7 +200,15 @@ public final class PageLoader: @unchecked Sendable {
     }
 
     public func cachedPages() throws -> Set<UInt32> {
-        try cache.cachedPages(manifest: manifest)
+        var pages = try cache.cachedPages(manifest: manifest)
+        if let downloaded = try? store.read({ db in
+            try DownloadStore.completePages(db: db, serverId: manifest.serverID, bookId: bookID)
+        }) {
+            for num in downloaded {
+                pages.insert(UInt32(num))
+            }
+        }
+        return pages
     }
 
     /// Resolve one page for display. Cache first, then the network; a network
@@ -353,7 +374,7 @@ public struct RemotePageSource: PageSource {
     public let session: URLSession
     public let baseURL: String
 
-    public init(baseURL: String, auth: AuthMethod, session: URLSession = .shared) {
+    public init(baseURL: String, auth: AuthMethod, session: URLSession = KomgaTransport.makeDefaultSession()) {
         self.baseURL = baseURL
         self.auth = auth
         self.session = session

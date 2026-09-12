@@ -196,7 +196,7 @@ public extension KomgaStore {
     }
 
     /// Everything queued, including entries still backing off or given up.
-    func allOutboxEntries(serverID: String) throws -> [OutboxEntry] {
+    public func allOutboxEntries(serverID: String) throws -> [OutboxEntry] {
         try dbQueue.read { db in
             try Row.fetchAll(
                 db,
@@ -273,6 +273,43 @@ public extension KomgaStore {
         }
     }
 
+    /// Completes a single mutation by its ID.
+    ///
+    /// Deletes only the mutation specified by `mutationID`. If there are no
+    /// remaining mutations for this book on this server, `read_progress.mutation_pending`
+    /// is cleared and `server_updated_at` goes NULL. If there are still pending
+    /// mutations (e.g. user performed another action while upload was in flight),
+    /// `mutation_pending` remains 1.
+    func completeMutation(serverID: String, bookID: String, mutationID: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM pending_mutations WHERE id = ?",
+                arguments: [mutationID]
+            )
+            let remaining: Int64 = try Int64.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM pending_mutations WHERE server_id = ? AND entity_id = ?",
+                arguments: [serverID, bookID]
+            ) ?? 0
+            if remaining == 0 {
+                try db.execute(
+                    sql: """
+                    UPDATE read_progress SET mutation_pending = 0, server_updated_at = NULL
+                     WHERE server_id = ? AND book_id = ?
+                    """,
+                    arguments: [serverID, bookID]
+                )
+            }
+        }
+    }
+
+    /// Checks if a mutation entry is still present in the queue.
+    func outboxEntryExists(id: String) throws -> Bool {
+        try dbQueue.read { db in
+            (try Int64.fetchOne(db, sql: "SELECT COUNT(*) FROM pending_mutations WHERE id = ?", arguments: [id]) ?? 0) > 0
+        }
+    }
+
     /// Take the row out of the queue and let the mirror own the local value
     /// again. Used by every "the server side is settled" outcome: confirmed
     /// upload, already applied, or rule R4 giving the round to a later remote
@@ -295,7 +332,7 @@ public extension KomgaStore {
     }
 
     /// pending / waiting (backing off) / failed, for the UI.
-    func outboxCounts(serverID: String, now: String) throws -> OutboxCounts {
+    public func outboxCounts(serverID: String, now: String) throws -> OutboxCounts {
         try dbQueue.read { db in
             var counts = OutboxCounts()
             let rows = try Row.fetchAll(
@@ -326,7 +363,7 @@ public extension KomgaStore {
     /// Hand a given-up row back to the retry machine (UI "retry now"). A new
     /// user action on the same book supersedes it instead. Returns rows reset.
     @discardableResult
-    func retryFailed(serverID: String, bookID: String) throws -> Int {
+    public func retryFailed(serverID: String, bookID: String) throws -> Int {
         try dbQueue.write { db in
             try db.execute(
                 sql: """
@@ -335,6 +372,22 @@ public extension KomgaStore {
                  WHERE server_id = ? AND entity_id = ? AND state = 'failed'
                 """,
                 arguments: [serverID, bookID]
+            )
+            return db.changesCount
+        }
+    }
+
+    /// Hand all given-up rows for a server back to the retry machine.
+    @discardableResult
+    public func retryAllFailed(serverID: String) throws -> Int {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: """
+                UPDATE pending_mutations SET state = 'pending', retry_count = 0,
+                   next_retry_at = NULL, last_error = NULL
+                 WHERE server_id = ? AND state = 'failed'
+                """,
+                arguments: [serverID]
             )
             return db.changesCount
         }

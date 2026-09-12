@@ -75,7 +75,8 @@ class ReaderStressParams {
     for (final pair in query.split('&')) {
       final split = pair.indexOf('=');
       if (split > 0) {
-        values[pair.substring(0, split)] = Uri.decodeComponent(pair.substring(split + 1));
+        values[pair.substring(0, split)] =
+            Uri.decodeComponent(pair.substring(split + 1));
       }
     }
     final base = values['base'];
@@ -172,7 +173,8 @@ class _ReaderStressScreenState extends State<ReaderStressScreen> {
   /// What the core derived for this device, and what Flutter then applied.
   /// Printed because the whole point of the plan is that the UI acts on it: a
   /// device run is the only place that proves the report reached the platform.
-  Future<void> _reportWindow(ReaderController controller, ReaderDevice device) async {
+  Future<void> _reportWindow(
+      ReaderController controller, ReaderDevice device) async {
     final window = controller.window;
     final cache = PaintingBinding.instance.imageCache;
     _report('window', {
@@ -209,7 +211,11 @@ class _ReaderStressScreenState extends State<ReaderStressScreen> {
         // Reported and then continued with, exactly as a reader tapping the retry
         // affordance would: stopping here would mean the outage was only ever
         // observed once, and one observation is below the inference threshold.
-        _report('error', {'step': '$step', 'page': controller.page, 'error': controller.error!});
+        _report('error', {
+          'step': '$step',
+          'page': controller.page,
+          'error': controller.error!
+        });
       }
       stopwatch
         ..reset()
@@ -243,14 +249,16 @@ class _ReaderStressScreenState extends State<ReaderStressScreen> {
         'cacheBytes': PaintingBinding.instance.imageCache.currentSizeBytes,
       });
       final remaining = cadence - stopwatch.elapsed;
-      await Future<void>.delayed(remaining.isNegative ? Duration.zero : remaining);
+      await Future<void>.delayed(
+          remaining.isNegative ? Duration.zero : remaining);
     }
   }
 
   Future<void> _drive(ReaderController controller) async {
     await Future<void>.delayed(Duration(milliseconds: widget.params.warmupMs));
     final params = widget.params;
-    final forward = params.back == 0 ? params.pages : (params.pages / 2).floor();
+    final forward =
+        params.back == 0 ? params.pages : (params.pages / 2).floor();
     final last = (controller.pageCount - 1).clamp(1, 1 << 30);
     final steps = forward.clamp(1, last).toInt();
     // Out and back over the same pages: the outbound half pays the download and
@@ -298,7 +306,8 @@ class _ReaderStressScreenState extends State<ReaderStressScreen> {
     if (failure != _seenReportError) {
       _seenReportError = failure;
       if (failure != null) {
-        _report('report-error', {'error': failure, 'network': controller.reportedNetwork});
+        _report('report-error',
+            {'error': failure, 'network': controller.reportedNetwork});
       }
     }
     // Background / foreground, as the platform delivered it. Reported here rather

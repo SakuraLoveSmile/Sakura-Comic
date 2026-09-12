@@ -242,6 +242,9 @@ private struct BookRowView: View {
 
     @ViewBuilder
     private var readStatusIcon: some View {
+        if model.downloadStatus(bookID: book.remoteID)?.state == "completed" {
+            Image(systemName: "arrow.down.circle.fill").foregroundStyle(.blue).font(.caption)
+        }
         if book.progressCompleted {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
         } else if let page = book.progressPage, page > 0 {
@@ -257,6 +260,9 @@ private struct BookDetailView: View {
     let book: BookRecord
     @ObservedObject var model: LibraryViewModel
     @Environment(\.dismiss) private var dismiss
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     @State private var showReader = false
 
     var body: some View {
@@ -288,9 +294,18 @@ private struct BookDetailView: View {
                         Text("阅读状态：未读").font(.subheadline).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 12) {
+                        #if os(macOS)
+                        Button("开始阅读") {
+                            openWindow(id: "reader", value: "\(model.server?.id ?? ""):\(book.remoteID)")
+                            dismiss()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.readerModel(for: book) == nil)
+                        #else
                         Button("开始阅读") { showReader = true }
                             .buttonStyle(.borderedProminent)
                             .disabled(model.readerModel(for: book) == nil)
+                        #endif
                         Button("标记已读") {
                             model.markRead(book)
                             dismiss()
@@ -301,6 +316,7 @@ private struct BookDetailView: View {
                             dismiss()
                         }
                         .buttonStyle(.bordered)
+                        downloadButton
                     }
                     Divider()
                     if let detail = try? model.bookDetail(for: book) {
@@ -322,11 +338,8 @@ private struct BookDetailView: View {
             #if os(iOS)
             // The reader takes the whole screen on iOS: 屏幕常亮 and brightness are
             // part of what it promises, and a sheet would keep the shelf's chrome in
-            // the way. `fullScreenCover` is unavailable on macOS, where a sheet is the
-            // equivalent presentation.
+            // the way.
             .fullScreenCover(isPresented: $showReader) { readerCover }
-            #else
-            .sheet(isPresented: $showReader) { readerCover }
             #endif
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -354,6 +367,62 @@ private struct BookDetailView: View {
                         }
                     }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var downloadButton: some View {
+        let status = model.downloadStatus(bookID: book.remoteID)
+        if let status {
+            switch status.state {
+            case "completed":
+                Label("已下载", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            case "downloading":
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("\(status.pagesDone)/\(status.pagesTotal)")
+                        .font(.caption)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            case "waiting":
+                Label("等待中", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.gray.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            case "paused":
+                Button {
+                    Task { await model.resumeDownload(bookID: book.remoteID) }
+                } label: {
+                    Label("继续下载", systemImage: "play.fill")
+                }
+                .buttonStyle(.bordered)
+            case "failed":
+                Button {
+                    Task { await model.retryDownload(bookID: book.remoteID) }
+                } label: {
+                    Label("重试下载", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+            default:
+                EmptyView()
+            }
+        } else {
+            Button {
+                Task { await model.enqueueDownload(book: book) }
+            } label: {
+                Label("下载", systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.server == nil)
         }
     }
 
@@ -403,8 +472,8 @@ struct CollectionDetailView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 120), spacing: 12)],
-                spacing: 12
+                columns: model.gridColumns,
+                spacing: model.gridSpacing
             ) {
                 ForEach(members) { item in
                     NavigationLink {
@@ -422,9 +491,9 @@ struct CollectionDetailView: View {
         .task {
             guard !loaded else { return }
             loaded = true
-            guard let server = model.server else { return }
+            guard let server = model.server, let store = model.store else { return }
             do {
-                guard let detail = try model.store.collectionDetail(
+                guard let detail = try store.collectionDetail(
                     serverID: server.id, collectionID: collectionID, limit: 200, offset: 0
                 ) else { return }
                 members = detail.members.items
@@ -482,9 +551,9 @@ struct ReadlistDetailView: View {
         .task {
             guard !loaded else { return }
             loaded = true
-            guard let server = model.server else { return }
+            guard let server = model.server, let store = model.store else { return }
             do {
-                guard let detail = try model.store.readlistDetail(
+                guard let detail = try store.readlistDetail(
                     serverID: server.id, readlistID: readlistID, limit: 500, offset: 0
                 ) else { return }
                 books = detail.books.items
@@ -682,8 +751,8 @@ struct LibraryDetailView: View {
 
     private var seriesWall: some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 120), spacing: 12)],
-            spacing: 12
+            columns: model.gridColumns,
+            spacing: model.gridSpacing
         ) {
             ForEach(items) { item in
                 NavigationLink {

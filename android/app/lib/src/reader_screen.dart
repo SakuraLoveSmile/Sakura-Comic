@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import 'reader_controller.dart';
+import 'reader_offset.dart';
 
 /// The Stage 7 reader.
 ///
@@ -27,8 +29,17 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver {
+class _ReaderScreenState extends State<ReaderScreen>
+    with WidgetsBindingObserver {
   PageController? _paged;
+  final _webtoonKey = GlobalKey<_WebtoonColumnState>();
+  Future<void>? _exitCapture;
+
+  @override
+  void deactivate() {
+    _exitCapture = _webtoonKey.currentState?.captureForClose();
+    super.deactivate();
+  }
 
   @override
   void initState() {
@@ -39,11 +50,43 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   @override
+  void didUpdateWidget(covariant ReaderScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onController);
+      final saved = _webtoonKey.currentState?.captureForClose();
+      final closing = _closeController(oldWidget.controller, saved);
+      _paged?.dispose();
+      _paged = null;
+      final controller = widget.controller;
+      controller.addListener(_onController);
+      unawaited(() async {
+        await closing;
+        if (mounted && controller == widget.controller) {
+          await controller.start();
+        }
+      }());
+    }
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onController);
-    widget.controller.dispose();
+    unawaited(_closeController(widget.controller,
+        _exitCapture ?? _webtoonKey.currentState?.captureForClose()));
+    _paged?.dispose();
     super.dispose();
+  }
+
+  Future<void> _closeController(
+      ReaderController controller, Future<void>? saved) async {
+    try {
+      await saved;
+    } finally {
+      controller.dispose();
+      await controller.closed;
+    }
   }
 
   /// Background and memory pressure are the two moments the reader can act on
@@ -52,6 +95,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   /// slept and the prefetch window has to follow it.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
     switch (state) {
       case AppLifecycleState.resumed:
         unawaited(widget.controller.resumed());
@@ -59,12 +103,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
-        unawaited(widget.controller.paused());
+        final controller = widget.controller;
+        final saved = _webtoonKey.currentState?.captureForClose();
+        unawaited(() async {
+          await saved;
+          await controller.paused();
+        }());
     }
   }
 
   @override
   void didHaveMemoryPressure() {
+    if (!mounted) return;
     unawaited(widget.controller.onMemoryPressure());
   }
 
@@ -114,7 +164,8 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     padding: const EdgeInsets.all(12),
                     child: Text(
                       controller.error!,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                   ),
                 ),
@@ -124,7 +175,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 (true, _) => const CircularProgressIndicator(),
                 (false, 0) => const _EmptyState(),
                 _ => controller.isWebtoon
-                    ? _WebtoonColumn(controller: controller)
+                    ? _WebtoonColumn(key: _webtoonKey, controller: controller)
                     : _PagedView(
                         controller: controller,
                         pageController: _paged ??= PageController(
@@ -194,7 +245,8 @@ class _PagedView extends StatelessWidget {
         controller: pageController,
         // RTL manga reads right-to-left: the page list still runs forward, the
         // scroll direction is what mirrors. Vertical paging scrolls downward.
-        scrollDirection: controller.isVertical ? Axis.vertical : Axis.horizontal,
+        scrollDirection:
+            controller.isVertical ? Axis.vertical : Axis.horizontal,
         reverse: !controller.isVertical && layout.reversed,
         itemCount: controller.spreadCount,
         onPageChanged: (index) {
@@ -255,50 +307,506 @@ class _PagedView extends StatelessWidget {
 }
 
 /// 条漫: one long vertical column, virtualized so a 500-page webtoon keeps a
-/// bounded number of decoded images alive.
-class _WebtoonColumn extends StatelessWidget {
-  const _WebtoonColumn({required this.controller});
+/// bounded number of decoded images alive. Tracks visible pages and syncs bi-directionally
+/// with the controller and slider.
+class _WebtoonColumn extends StatefulWidget {
+  const _WebtoonColumn({super.key, required this.controller});
 
   final ReaderController controller;
 
   @override
+  State<_WebtoonColumn> createState() => _WebtoonColumnState();
+}
+
+class _WebtoonColumnState extends State<_WebtoonColumn>
+    with WidgetsBindingObserver {
+  final ScrollController _scrollController = ScrollController();
+  final Map<int, GlobalKey> _pageKeys = {};
+  final Map<int, double> _pageHeights = {};
+  final Set<int> _readyPages = {};
+  Timer? _debounceTimer;
+  ({int? page, double? ratio})? _latestViewport;
+  Timer? _restoreDeadline;
+  int _restoreGeneration = 0;
+  int _imageAttempt = 0;
+  int? _restorePage;
+  double? _restoreRatio;
+  String? _restoreFailure;
+  bool _advanceScheduled = false;
+  bool _restoring = false;
+  Object? _lastSeek;
+  int _stalled = 0;
+  int _lastKnownPage = 1;
+  double? _lastKnownRatio;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_handleControllerChanged);
+    _openPosition();
+  }
+
+  void _openPosition() {
+    _lastKnownPage = widget.controller.page;
+    _lastKnownRatio = widget.controller.startPageOffsetRatio;
+    if (_lastKnownPage > 1 || _lastKnownRatio != null) {
+      _restoreToPage(_lastKnownPage, _lastKnownRatio);
+    }
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    // This notification precedes the new layout; retain image-relative position.
+    final measured = _restoring ? null : _measureViewport();
+    _restoreToPage(
+        _restorePage ?? measured?.page ?? _lastKnownPage,
+        _restoring
+            ? _restoreRatio
+            : measured?.page != null
+                ? measured!.ratio
+                : _lastKnownRatio);
+  }
+
+  @override
+  void didUpdateWidget(covariant _WebtoonColumn oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _cancelRestore();
+      _debounceTimer?.cancel();
+      _latestViewport = null;
+      _readyPages.clear();
+      _pageHeights.clear();
+      _pageKeys.clear();
+      oldWidget.controller.removeListener(_handleControllerChanged);
+      widget.controller.addListener(_handleControllerChanged);
+      _openPosition();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _debounceTimer?.cancel();
+    _cancelRestore();
+    unawaited(widget.controller.flushPageOffset());
+    widget.controller.removeListener(_handleControllerChanged);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted) return;
+    final page = widget.controller.page;
+    if (page != _lastKnownPage) {
+      _lastKnownPage = page;
+      _lastKnownRatio = null;
+      _restoreToPage(page, null);
+    }
+  }
+
+  RenderBox? _box(int page) {
+    final render = _pageKeys[page]?.currentContext?.findRenderObject();
+    return render is RenderBox && render.hasSize ? render : null;
+  }
+
+  void _restoreToPage(int page, double? ratio) {
+    _cancelRestore();
+    _restorePage = page;
+    _restoreRatio = ratio;
+    _restoring = true;
+    _restoreFailure = null;
+    _lastSeek = null;
+    _stalled = 0;
+    _debounceTimer?.cancel();
+    _latestViewport = null;
+    final generation = _restoreGeneration;
+    _restoreDeadline = Timer(const Duration(seconds: 30), () {
+      if (mounted && generation == _restoreGeneration && _restoring) {
+        _failRestore('图片尚未就绪，未能恢复阅读位置');
+      }
+    });
+    _scheduleAdvance();
+  }
+
+  void _scheduleAdvance() {
+    if (!mounted || !_restoring || _advanceScheduled) return;
+    _advanceScheduled = true;
+    final generation = _restoreGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _restoreGeneration) return;
+      _advanceScheduled = false;
+      _advanceRestore();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _advanceRestore() {
+    if (!_restoring || !_scrollController.hasClients) return;
+    final page = _restorePage!;
+    final viewport = context.findRenderObject() as RenderBox?;
+    if (viewport == null || !viewport.hasSize) return;
+    final box = _box(page);
+    final position = _scrollController.position;
+    final viewportTop = viewport.localToGlobal(Offset.zero).dy;
+    if (box != null) {
+      // A spinner has a size too. Only a decoded image supplies valid geometry.
+      if (!_readyPages.contains(page) || box.size.height <= 0) return;
+      _pageHeights[page] = box.size.height;
+      final desired = position.pixels +
+          box.localToGlobal(Offset.zero).dy -
+          viewportTop +
+          (_restoreRatio ?? 0) * box.size.height;
+      final target = desired.clamp(0.0, position.maxScrollExtent).toDouble();
+      if ((target - position.pixels).abs() <= 1) {
+        _finishRestore();
+        return;
+      }
+      _seek(target);
+      return;
+    }
+
+    // Locate an unmounted page using the current laid-out children, not the
+    // original estimate. Every correction re-measures after a real layout.
+    final mountedPages = _pageKeys.keys.where((p) => _box(p) != null).toList()
+      ..sort();
+    if (mountedPages.isEmpty) {
+      _scheduleAdvance();
+      return;
+    }
+    if (mountedPages.any((p) => !_readyPages.contains(p))) return;
+    final anchor = mountedPages
+        .reduce((a, b) => (a - page).abs() < (b - page).abs() ? a : b);
+    final anchorBox = _box(anchor)!;
+    final decodedHeights = mountedPages
+        .where(_readyPages.contains)
+        .map((p) => _box(p)!.size.height)
+        .toList();
+    final average = decodedHeights.isEmpty
+        ? viewport.size.height
+        : decodedHeights.reduce((a, b) => a + b) / decodedHeights.length;
+    final target = position.pixels +
+        anchorBox.localToGlobal(Offset.zero).dy -
+        viewportTop +
+        (page - anchor) * (average + widget.controller.pageGap);
+    _seek(target.clamp(0.0, position.maxScrollExtent).toDouble());
+  }
+
+  void _seek(double target) {
+    final signature = (
+      target,
+      _scrollController.position.maxScrollExtent,
+      _pageKeys.keys.where((p) => _box(p) != null).join(','),
+      _readyPages.length
+    );
+    _stalled = signature == _lastSeek ? _stalled + 1 : 0;
+    _lastSeek = signature;
+    if (_stalled >= 3) {
+      // Pending images can still alter the list extent: let their completion
+      // wake us, with the overall deadline as the bounded failure path.
+      final pendingImages = _pageKeys.keys
+          .any((p) => _box(p) != null && !_readyPages.contains(p));
+      if (!pendingImages) _failRestore('无法定位到上次阅读位置');
+      return;
+    }
+    _scrollController.jumpTo(target);
+    _scheduleAdvance();
+  }
+
+  void _finishRestore() {
+    final measured = _measureViewport();
+    if (measured.page == null) {
+      _failRestore('无法确认阅读位置');
+      return;
+    }
+    _cancelRestore();
+    _latestViewport = measured;
+    _lastKnownPage = measured.page!;
+    _lastKnownRatio = measured.ratio;
+    _pageKeys.removeWhere((page, key) =>
+        (page - _lastKnownPage).abs() > 20 && key.currentContext == null);
+    unawaited(_saveMeasured(measured));
+  }
+
+  Future<void> _saveMeasured(({int? page, double? ratio}) measured) async {
+    final controller = widget.controller;
+    final generation = _restoreGeneration;
+    if (measured.page != controller.page) {
+      await controller.turnTo(measured.page!);
+    }
+    if (!mounted ||
+        controller != widget.controller ||
+        generation != _restoreGeneration) {
+      return;
+    }
+    await controller.reportPageOffset(measured.ratio);
+  }
+
+  void _cancelRestore() {
+    _restoreDeadline?.cancel();
+    _restoreGeneration++;
+    _advanceScheduled = false;
+    _restoring = false;
+    _restorePage = null;
+    _restoreRatio = null;
+    _restoreFailure = null;
+  }
+
+  void _failRestore(String message) {
+    _restoreDeadline?.cancel();
+    _restoreGeneration++;
+    _advanceScheduled = false;
+    setState(() {
+      _restoring = false;
+      _restoreFailure = message;
+    });
+    // Keep the requested position and suppress writes until retry or user scroll.
+  }
+
+  void _retryRestore() {
+    final page = _restorePage!;
+    final ratio = _restoreRatio;
+    setState(() {
+      _imageAttempt++;
+      _readyPages.clear();
+      _restoreToPage(page, ratio);
+    });
+  }
+
+  void _onImageReady(int page, ReaderController controller) {
+    if (!mounted || controller != widget.controller) return;
+    _readyPages.add(page);
+    final box = _box(page);
+    if (box != null) _pageHeights[page] = box.size.height;
+    _scheduleAdvance();
+  }
+
+  void _onImageFailed(int page, ReaderController controller) {
+    if (!mounted || controller != widget.controller) return;
+    _readyPages.remove(page);
+    if (_restoring && page == _restorePage) _failRestore('图片加载失败，未能恢复阅读位置');
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    final userScroll = notification is ScrollStartNotification &&
+            notification.dragDetails != null ||
+        notification is UserScrollNotification &&
+            notification.direction != ScrollDirection.idle;
+    if (userScroll && (_restoring || _restoreFailure != null)) {
+      setState(_cancelRestore);
+    }
+    if (_restoring || _restoreFailure != null) return false;
+    if (notification is ScrollUpdateNotification ||
+        notification is ScrollEndNotification) {
+      _latestViewport = _measureViewport();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_restoring && _restoreFailure == null) {
+          _latestViewport = _measureViewport();
+        }
+      });
+      _debounceTimer?.cancel();
+      _debounceTimer =
+          Timer(const Duration(milliseconds: 80), _updateVisiblePage);
+    }
+    return false;
+  }
+
+  ({int? page, double? ratio}) _measureViewport() {
+    final viewport = context.findRenderObject() as RenderBox?;
+    if (viewport == null || !viewport.hasSize) return (page: null, ratio: null);
+    final pages = <({int page, double top, double height})>[];
+    for (final page in _pageKeys.keys) {
+      final box = _box(page);
+      if (box == null || !_readyPages.contains(page) || box.size.height <= 0) {
+        continue;
+      }
+      pages.add((
+        page: page,
+        top: box.localToGlobal(Offset.zero).dy,
+        height: box.size.height
+      ));
+    }
+    pages.sort((a, b) => a.top.compareTo(b.top));
+    return ReaderOffsetGeometry.measure(
+        viewportTop: viewport.localToGlobal(Offset.zero).dy, pages: pages);
+  }
+
+  // Capture synchronously before teardown; saving may finish after unmount.
+  Future<void> captureForClose() async {
+    _debounceTimer?.cancel();
+    final measured = _latestViewport;
+    final controller = widget.controller;
+    if (!_restoring && _restoreFailure == null && measured?.page != null) {
+      if (controller.page != measured!.page) {
+        await controller.turnTo(measured.page!);
+      }
+      await controller.reportPageOffset(measured.ratio);
+    }
+    await controller.flushPageOffset();
+  }
+
+  void _updateVisiblePage() {
+    if (!mounted || _restoring || _restoreFailure != null) return;
+    final measured = _measureViewport();
+    if (measured.page == null) return;
+    _latestViewport = measured;
+    _lastKnownPage = measured.page!;
+    _lastKnownRatio = measured.ratio;
+    _pageKeys.removeWhere((page, key) =>
+        (page - _lastKnownPage).abs() > 20 && key.currentContext == null);
+    unawaited(_saveMeasured(measured));
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     final pages = [for (final spread in controller.rawSpreads) ...spread];
-    return ListView.builder(
-      // RTL never reverses a single column; there is nothing to mirror.
-      itemCount: pages.length,
-      itemBuilder: (context, index) => Padding(
-        padding: EdgeInsets.only(bottom: controller.pageGap),
-        child: _PageImage(
-          controller: controller,
-          page: pages[index],
-          fit: BoxFit.fitWidth,
+    return Stack(children: [
+      NotificationListener<ScrollNotification>(
+        onNotification: _onScrollNotification,
+        child: ListView.builder(
+          key: const ValueKey('webtoon-scroll'),
+          controller: _scrollController,
+          itemCount: pages.length,
+          itemBuilder: (context, index) {
+            final page = pages[index];
+            final key = _pageKeys.putIfAbsent(page, () => GlobalKey());
+            return Column(children: [
+              KeyedSubtree(
+                  key: key,
+                  child: _PageImage(
+                    key: ValueKey((controller, page, _imageAttempt)),
+                    controller: controller,
+                    page: page,
+                    fit: BoxFit.fitWidth,
+                    placeholderHeight:
+                        _pageHeights[page] ?? MediaQuery.sizeOf(context).height,
+                    onReady: () => _onImageReady(page, controller),
+                    onFailed: () => _onImageFailed(page, controller),
+                    onDisposed: () {
+                      if (controller == widget.controller) {
+                        _readyPages.remove(page);
+                      }
+                    },
+                  )),
+              SizedBox(height: controller.pageGap),
+            ]);
+          },
         ),
       ),
-    );
+      if (_restoreFailure != null)
+        Positioned(
+            top: kToolbarHeight + 12,
+            left: 12,
+            right: 12,
+            child: Material(
+                color: Colors.black87,
+                child: Column(children: [
+                  Text(_restoreFailure!,
+                      style: const TextStyle(color: Colors.white)),
+                  TextButton(
+                      onPressed: _retryRestore, child: const Text('重试恢复位置')),
+                ]))),
+    ]);
   }
 }
 
-class _PageImage extends StatelessWidget {
-  const _PageImage({required this.controller, required this.page, this.fit});
+class _PageImage extends StatefulWidget {
+  const _PageImage(
+      {super.key,
+      required this.controller,
+      required this.page,
+      this.fit,
+      this.onReady,
+      this.onFailed,
+      this.onDisposed,
+      this.placeholderHeight});
 
   final ReaderController controller;
   final int page;
   final BoxFit? fit;
+  final VoidCallback? onReady;
+  final VoidCallback? onFailed;
+  final VoidCallback? onDisposed;
+  final double? placeholderHeight;
+
+  @override
+  State<_PageImage> createState() => _PageImageState();
+}
+
+class _PageImageState extends State<_PageImage> {
+  late Future<String?> _image;
+
+  @override
+  void initState() {
+    super.initState();
+    _image = widget.controller.imageFor(widget.page);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PageImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.page != widget.page) {
+      _image = widget.controller.imageFor(widget.page);
+      _failed = false;
+      _readyNotified = false;
+    }
+  }
+
+  void _retryImage() {
+    setState(() {
+      _failed = false;
+      _readyNotified = false;
+      _image = widget.controller.imageFor(widget.page);
+    });
+  }
+
+  String? _notifiedPath;
+  int? _notifiedWidth;
+  bool _failed = false;
+  bool _readyNotified = false;
+
+  @override
+  void dispose() {
+    widget.onDisposed?.call();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<String?>(
-        future: controller.imageFor(page),
+        future: _image,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return Center(
-              child: snapshot.connectionState == ConnectionState.done
-                  ? const Icon(Icons.image_not_supported_outlined,
-                      color: Colors.white38)
-                  : const CircularProgressIndicator(strokeWidth: 2),
-            );
+            if (snapshot.connectionState == ConnectionState.done && !_failed) {
+              _failed = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) widget.onFailed?.call();
+              });
+            }
+            return SizedBox(
+                height: widget.placeholderHeight,
+                child: Center(
+                  child: snapshot.connectionState == ConnectionState.done
+                      ? TextButton.icon(
+                          onPressed: _retryImage,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('重试图片'))
+                      : const CircularProgressIndicator(strokeWidth: 2),
+                ));
           }
           final path = snapshot.data!;
+          final decodeWidth = (MediaQuery.sizeOf(context).width *
+                  MediaQuery.devicePixelRatioOf(context))
+              .round();
+          if (_notifiedPath != path || _notifiedWidth != decodeWidth) {
+            _notifiedPath = path;
+            _notifiedWidth = decodeWidth;
+            _failed = false;
+            _readyNotified = false;
+          }
           // Image.file with cacheWidth: the core hands over a file, and Flutter
           // decodes it at the width it will actually draw at. A 4K page decoded
           // at full size is the surest way to drop frames on a fast flip.
@@ -306,13 +814,29 @@ class _PageImage extends StatelessWidget {
             maxScale: 4,
             child: Image.file(
               File(path),
-              fit: fit ?? BoxFit.contain,
-              cacheWidth: (MediaQuery.of(context).size.width *
-                      MediaQuery.of(context).devicePixelRatio)
-                  .round(),
-              errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.broken_image_outlined, color: Colors.white38),
-              ),
+              fit: widget.fit ?? BoxFit.contain,
+              cacheWidth: decodeWidth,
+              frameBuilder: (context, child, frame, wasSync) {
+                if ((frame != null || wasSync) && !_readyNotified) {
+                  _readyNotified = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted && !_failed) widget.onReady?.call();
+                  });
+                }
+                return child;
+              },
+              errorBuilder: (_, __, ___) {
+                if (!_failed) {
+                  _failed = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) widget.onFailed?.call();
+                  });
+                }
+                return const Center(
+                  child:
+                      Icon(Icons.broken_image_outlined, color: Colors.white38),
+                );
+              },
             ),
           );
         },
@@ -328,7 +852,8 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final layout = controller.layout;
     return SafeArea(
-      child: ColoredBox(
+      child: Container(
+        height: 56,
         color: Colors.black.withValues(alpha: 0.45),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -348,9 +873,12 @@ class _BottomBar extends StatelessWidget {
               ),
               Expanded(
                 child: Slider(
-                  value: controller.page.clamp(1, controller.pageCount).toDouble(),
+                  value:
+                      controller.page.clamp(1, controller.pageCount).toDouble(),
                   max: controller.pageCount.toDouble(),
-                  divisions: controller.pageCount > 1 ? controller.pageCount - 1 : null,
+                  divisions: controller.pageCount > 1
+                      ? controller.pageCount - 1
+                      : null,
                   label: '${controller.page}/${controller.pageCount}',
                   onChanged: (value) => controller.turnTo(value.round()),
                 ),
@@ -391,7 +919,8 @@ Future<void> _showSettings(BuildContext context, ReaderController controller) =>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('阅读模式',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -410,7 +939,8 @@ Future<void> _showSettings(BuildContext context, ReaderController controller) =>
               ),
               const SizedBox(height: 16),
               const Text('阅读方向',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -429,7 +959,8 @@ Future<void> _showSettings(BuildContext context, ReaderController controller) =>
               ),
               const SizedBox(height: 16),
               const Text('背景',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -452,12 +983,14 @@ Future<void> _showSettings(BuildContext context, ReaderController controller) =>
               SwitchListTile(
                 value: controller.settings?.keepScreenAwake ?? true,
                 onChanged: controller.setKeepScreenAwake,
-                title: const Text('屏幕常亮', style: TextStyle(color: Colors.white)),
+                title:
+                    const Text('屏幕常亮', style: TextStyle(color: Colors.white)),
               ),
               SwitchListTile(
                 value: controller.settings?.restorePosition ?? true,
                 onChanged: controller.setRestorePosition,
-                title: const Text('阅读位置恢复', style: TextStyle(color: Colors.white)),
+                title:
+                    const Text('阅读位置恢复', style: TextStyle(color: Colors.white)),
               ),
               const SizedBox(height: 8),
               Row(
@@ -524,4 +1057,3 @@ class _BrightnessTile extends StatelessWidget {
     );
   }
 }
-

@@ -47,6 +47,39 @@ fn join_names(names: &[String]) -> String {
     names.join(", ")
 }
 
+/// Whitespace-only strings count as absent: Komga lets a title field hold
+/// spaces, and a blank title must not shadow the folder name.
+fn non_blank(value: &str) -> bool {
+    !value.trim().is_empty()
+}
+
+/// The official display name of one series: a non-blank `metadata.title`
+/// wins over the folder-derived `name`, so a series whose folder is called
+/// `cbz` is still labelled by its Komga title. Both the row and the search
+/// index are written from this (and from [`sort_name`]) so the shelf,
+/// search results and detail screen can never disagree.
+pub fn display_name(series: &Series) -> String {
+    series
+        .metadata
+        .as_ref()
+        .filter(|m| non_blank(&m.title))
+        .map(|m| m.title.clone())
+        .unwrap_or_else(|| series.name.clone())
+}
+
+/// The sort name: a non-blank `metadata.titleSort` wins, otherwise the
+/// display name. The raw folder `name` is never used to sort a titled
+/// series.
+pub fn sort_name(series: &Series) -> String {
+    series
+        .metadata
+        .as_ref()
+        .and_then(|m| m.title_sort.as_deref())
+        .filter(|value| non_blank(value))
+        .map(str::to_string)
+        .unwrap_or_else(|| display_name(series))
+}
+
 fn authors_text(names: &[crate::model::author::Author]) -> String {
     names
         .iter()
@@ -68,9 +101,8 @@ pub fn save_series_batch(
     let mut written = 0;
     for item in series {
         let md: Option<&SeriesMetadata> = item.metadata.as_ref();
-        let sort_name = md
-            .and_then(|m| m.title_sort.clone())
-            .unwrap_or_else(|| item.name.clone());
+        let display = display_name(item);
+        let sort_name = sort_name(item);
         tx.execute(
             "INSERT INTO series (server_id, remote_id, library_id, name, sort_name, status, created_at, last_modified,
                                  books_count, books_read_count, books_unread_count, books_in_progress_count)
@@ -90,7 +122,7 @@ pub fn save_series_batch(
                 server_id,
                 item.id,
                 item.library_id,
-                item.name,
+                display,
                 sort_name,
                 md.and_then(|m| m.status.clone()),
                 item.created,
@@ -189,7 +221,7 @@ pub fn save_series_batch(
             server_id,
             &item.id,
             fts_rowid,
-            &item.name,
+            &display,
             &sort_name,
             &authors_text(&authors),
             &md.and_then(|m| m.publisher.clone()).unwrap_or_default(),
@@ -385,6 +417,7 @@ mod tests {
         let mut s = sample_series("s1", "One Piece");
         save_series_batch(&conn, "server-1", &[s.clone()]).unwrap();
         s.name = "One Piece (Revised)".into();
+        s.metadata.as_mut().unwrap().title = "One Piece (Revised)".into();
         s.metadata.as_mut().unwrap().tags = vec!["Manga".into(), "Pirate".into()];
         s.metadata.as_mut().unwrap().status = Some("ENDED".into());
         save_series_batch(&conn, "server-1", &[s]).unwrap();
@@ -426,5 +459,71 @@ mod tests {
         assert_eq!(count_series(&conn, "server-2").unwrap(), 1);
         assert_eq!(list_series_tags(&conn, "server-1").unwrap().len(), 1);
         assert_eq!(list_series_tags(&conn, "server-2").unwrap().len(), 1);
+    }
+
+    /// A folder called `cbz` must never label a series the server gives a
+    /// title: the official title lands in the row *and* the search index.
+    #[test]
+    fn official_title_wins_over_folder_name() {
+        let conn = open_in_memory().unwrap();
+        let mut s = sample_series("s1", "cbz");
+        s.metadata.as_mut().unwrap().title = "示例漫画".into();
+        s.metadata.as_mut().unwrap().title_sort = Some("Example".into());
+        save_series_batch(&conn, "server-1", &[s]).unwrap();
+
+        let row = get_series(&conn, "server-1", "s1").unwrap().unwrap();
+        assert_eq!(row.name, "示例漫画");
+        assert_eq!(row.sort_name.as_deref(), Some("Example"));
+
+        // Searchable by the official title, not by the folder name.
+        let hits = |term: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM series_fts WHERE series_fts MATCH ?1 AND server_id = 'server-1'",
+                params![fts::fts_match_query(term)],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(hits("示例漫画"), 1);
+        assert_eq!(hits("cbz"), 0, "the folder name must not leak into search");
+    }
+
+    /// A blank/whitespace title is absent, so the folder name (and only it)
+    /// remains the display and sort name.
+    #[test]
+    fn blank_title_falls_back_to_folder_name() {
+        let conn = open_in_memory().unwrap();
+        let mut s = sample_series("s1", "Raw Folder");
+        s.metadata.as_mut().unwrap().title = "   ".into();
+        s.metadata.as_mut().unwrap().title_sort = None;
+        save_series_batch(&conn, "server-1", &[s]).unwrap();
+
+        let row = get_series(&conn, "server-1", "s1").unwrap().unwrap();
+        assert_eq!(row.name, "Raw Folder");
+        assert_eq!(row.sort_name.as_deref(), Some("Raw Folder"));
+    }
+
+    /// No `metadata` at all (or a missing title field) also falls back, and a
+    /// blank `titleSort` sorts by the display name rather than the folder.
+    #[test]
+    fn missing_metadata_and_blank_title_sort_fall_back() {
+        let conn = open_in_memory().unwrap();
+
+        // metadata absent entirely.
+        let mut no_md = sample_series("s1", "cbz");
+        no_md.metadata = None;
+        save_series_batch(&conn, "server-1", &[no_md]).unwrap();
+        let row = get_series(&conn, "server-1", "s1").unwrap().unwrap();
+        assert_eq!(row.name, "cbz");
+        assert_eq!(row.sort_name.as_deref(), Some("cbz"));
+
+        // titled series with a whitespace-only titleSort.
+        let mut s = sample_series("s2", "cbz-2");
+        s.metadata.as_mut().unwrap().title = "示例漫画".into();
+        s.metadata.as_mut().unwrap().title_sort = Some("  ".into());
+        save_series_batch(&conn, "server-1", &[s]).unwrap();
+        let row = get_series(&conn, "server-1", "s2").unwrap().unwrap();
+        assert_eq!(row.name, "示例漫画");
+        assert_eq!(row.sort_name.as_deref(), Some("示例漫画"));
     }
 }

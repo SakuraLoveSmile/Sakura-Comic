@@ -40,6 +40,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   @protected
+  Map<String, String> dco_decode_Map_String_String_None(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -253,6 +256,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ReadlistRow> dco_decode_list_readlist_row(dynamic raw);
 
   @protected
+  List<(String, String)> dco_decode_list_record_string_string(dynamic raw);
+
+  @protected
   List<SeriesRow> dco_decode_list_series_row(dynamic raw);
 
   @protected
@@ -333,6 +339,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   QueueStateCountDto dco_decode_queue_state_count_dto(dynamic raw);
 
   @protected
+  ReadTargetRow dco_decode_read_target_row(dynamic raw);
+
+  @protected
   ReaderBookDto dco_decode_reader_book_dto(dynamic raw);
 
   @protected
@@ -358,6 +367,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReconcileSummary dco_decode_reconcile_summary(dynamic raw);
+
+  @protected
+  (String, String) dco_decode_record_string_string(dynamic raw);
 
   @protected
   SeriesDetailRow dco_decode_series_detail_row(dynamic raw);
@@ -406,6 +418,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt dco_decode_usize(dynamic raw);
+
+  @protected
+  Map<String, String> sse_decode_Map_String_String_None(
+      SseDeserializer deserializer);
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -644,6 +660,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ReadlistRow> sse_decode_list_readlist_row(SseDeserializer deserializer);
 
   @protected
+  List<(String, String)> sse_decode_list_record_string_string(
+      SseDeserializer deserializer);
+
+  @protected
   List<SeriesRow> sse_decode_list_series_row(SseDeserializer deserializer);
 
   @protected
@@ -736,6 +756,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  ReadTargetRow sse_decode_read_target_row(SseDeserializer deserializer);
+
+  @protected
   ReaderBookDto sse_decode_reader_book_dto(SseDeserializer deserializer);
 
   @protected
@@ -764,6 +787,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReconcileSummary sse_decode_reconcile_summary(SseDeserializer deserializer);
+
+  @protected
+  (String, String) sse_decode_record_string_string(
+      SseDeserializer deserializer);
 
   @protected
   SeriesDetailRow sse_decode_series_detail_row(SseDeserializer deserializer);
@@ -812,6 +839,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_usize(SseDeserializer deserializer);
+
+  @protected
+  void sse_encode_Map_String_String_None(
+      Map<String, String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -1070,6 +1101,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<ReadlistRow> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_record_string_string(
+      List<(String, String)> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_series_row(
       List<SeriesRow> self, SseSerializer serializer);
 
@@ -1169,6 +1204,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       QueueStateCountDto self, SseSerializer serializer);
 
   @protected
+  void sse_encode_read_target_row(ReadTargetRow self, SseSerializer serializer);
+
+  @protected
   void sse_encode_reader_book_dto(ReaderBookDto self, SseSerializer serializer);
 
   @protected
@@ -1200,6 +1238,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_reconcile_summary(
       ReconcileSummary self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_record_string_string(
+      (String, String) self, SseSerializer serializer);
 
   @protected
   void sse_encode_series_detail_row(

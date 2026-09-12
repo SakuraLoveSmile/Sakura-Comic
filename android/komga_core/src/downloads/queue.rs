@@ -776,7 +776,7 @@ mod tests {
             .collect()
     }
 
-    fn input<'a>(books: &'a [BookPlan]) -> PassInput<'a> {
+    fn input(books: &[BookPlan]) -> PassInput<'_> {
         PassInput {
             now: harness::now(),
             books,

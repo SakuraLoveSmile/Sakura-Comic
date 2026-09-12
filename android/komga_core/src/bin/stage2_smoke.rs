@@ -155,7 +155,7 @@ where
     println!("[3/5] fetch libraries (GET /api/v1/libraries)");
     println!("[4/5] save ServerProfile with credential ref + capabilities");
     let profile = ServerProfile {
-        id: format!("server-{}", mode),
+        id: format!("server-{mode}"),
         display_name: format!("Home ({mode})"),
         base_url: base_url.clone(),
         auth_type: AuthType::ApiKey,

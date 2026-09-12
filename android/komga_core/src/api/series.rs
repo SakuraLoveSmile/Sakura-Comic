@@ -91,6 +91,7 @@ impl KomgaClient {
         let base_url = super::url::normalize_server_url(&base_url)?;
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
+            .redirect(super::url::strict_redirect_policy())
             .build()
             .map_err(|_| ApiError::Network)?;
         Ok(Self {

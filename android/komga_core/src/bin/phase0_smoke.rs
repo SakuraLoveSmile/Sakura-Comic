@@ -167,7 +167,7 @@ fn print_thumbnail_row(
             Ok(())
         }
         None => {
-            println!("  WARNING: no thumbnails row recorded for {}", remote_id);
+            println!("  WARNING: no thumbnails row recorded for {remote_id}");
             Ok(())
         }
     }

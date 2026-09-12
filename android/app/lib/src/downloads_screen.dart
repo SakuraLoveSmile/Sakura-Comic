@@ -20,8 +20,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   void initState() {
     super.initState();
+    // Listener, not owner: the controller outlives this route (the shelf
+    // creates it above every route), so this must never dispose it.
     widget.controller
-      ..onUpdate = _repaint
+      ..addListener(_repaint)
       ..start()
       ..refresh(withStorage: true);
   }
@@ -30,7 +32,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   void dispose() {
     widget.controller
       ..stop()
-      ..onUpdate = null;
+      ..removeListener(_repaint);
     super.dispose();
   }
 
@@ -109,7 +111,8 @@ class _StorageCard extends StatelessWidget {
           children: [
             Text('存储', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
-            _row('已下载', '${storage.bookCount} 本 · ${formatBytes(storage.downloadBytes)}'),
+            _row('已下载',
+                '${storage.bookCount} 本 · ${formatBytes(storage.downloadBytes)}'),
             _row('页面缓存', formatBytes(storage.cachePageBytes)),
             _row('预取缓存', formatBytes(storage.cachePrefetchBytes)),
             _row('封面缓存', formatBytes(storage.cacheThumbnailBytes)),
@@ -137,9 +140,13 @@ class _StorageCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(
           children: [
-            SizedBox(width: 80, child: Text(label, style: const TextStyle(fontSize: 13))),
+            SizedBox(
+                width: 80,
+                child: Text(label, style: const TextStyle(fontSize: 13))),
             Expanded(
-              child: Text(value, textAlign: TextAlign.right, style: const TextStyle(fontSize: 13)),
+              child: Text(value,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontSize: 13)),
             ),
           ],
         ),
@@ -211,35 +218,36 @@ class _BookCard extends StatelessWidget {
               child: Wrap(
                 spacing: 4,
                 children: [
-                if (book.state == 'waiting' || book.state == 'downloading')
+                  if (book.state == 'waiting' || book.state == 'downloading')
+                    TextButton(
+                      key: Key('pause-${book.bookId}'),
+                      onPressed: () => controller.pause(book.bookId),
+                      child: const Text('暂停'),
+                    ),
+                  if (book.state == 'paused')
+                    TextButton(
+                      key: Key('resume-${book.bookId}'),
+                      onPressed: () => controller.resumeBook(book.bookId),
+                      child: const Text('继续'),
+                    ),
+                  if (book.state == 'failed')
+                    TextButton(
+                      key: Key('retry-${book.bookId}'),
+                      onPressed: () => controller.retry(book.bookId),
+                      child: const Text('重试'),
+                    ),
+                  if (blocked && !book.allowCellular)
+                    TextButton(
+                      key: Key('cellular-${book.bookId}'),
+                      onPressed: () =>
+                          controller.allowCellular(book.bookId, true),
+                      child: const Text('用蜂窝下载'),
+                    ),
                   TextButton(
-                    key: Key('pause-${book.bookId}'),
-                    onPressed: () => controller.pause(book.bookId),
-                    child: const Text('暂停'),
+                    key: Key('delete-${book.bookId}'),
+                    onPressed: () => _confirmDelete(context),
+                    child: const Text('删除下载'),
                   ),
-                if (book.state == 'paused')
-                  TextButton(
-                    key: Key('resume-${book.bookId}'),
-                    onPressed: () => controller.resumeBook(book.bookId),
-                    child: const Text('继续'),
-                  ),
-                if (book.state == 'failed')
-                  TextButton(
-                    key: Key('retry-${book.bookId}'),
-                    onPressed: () => controller.retry(book.bookId),
-                    child: const Text('重试'),
-                  ),
-                if (blocked && !book.allowCellular)
-                  TextButton(
-                    key: Key('cellular-${book.bookId}'),
-                    onPressed: () => controller.allowCellular(book.bookId, true),
-                    child: const Text('用蜂窝下载'),
-                  ),
-                TextButton(
-                  key: Key('delete-${book.bookId}'),
-                  onPressed: () => _confirmDelete(context),
-                  child: const Text('删除下载'),
-                ),
                 ],
               ),
             ),
@@ -294,7 +302,8 @@ String formatBytes(int bytes) {
 extension on DownloadSweepDto {
   /// How much the sweep had to repair. Mirrors the core's own `repairs()`: a healthy
   /// queue answers 0, and that is the number the message depends on.
-  int repairs() => staleParts +
+  int repairs() =>
+      staleParts +
       ghostRows +
       corrupt +
       sizeMismatch +

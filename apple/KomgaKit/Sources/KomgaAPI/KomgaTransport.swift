@@ -34,6 +34,48 @@ public enum KomgaAPIError: Error, Sendable, Equatable {
     case decode(String)
 }
 
+/// Strict redirect policy: max 5 hops, same origin only (scheme, host, port),
+/// rejecting HTTPS -> HTTP downgrade.
+public final class StrictRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    public static let maxHops = 5
+
+    public func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let currentURL = task.currentRequest?.url,
+              let newURL = request.url else {
+            completionHandler(nil)
+            return
+        }
+
+        let sameScheme = currentURL.scheme?.lowercased() == newURL.scheme?.lowercased()
+        let sameHost = currentURL.host?.lowercased() == newURL.host?.lowercased()
+        let currentPort = currentURL.port ?? (currentURL.scheme?.lowercased() == "https" ? 443 : 80)
+        let newPort = newURL.port ?? (newURL.scheme?.lowercased() == "https" ? 443 : 80)
+        let samePort = currentPort == newPort
+
+        let isDowngrade = currentURL.scheme?.lowercased() == "https" && newURL.scheme?.lowercased() == "http"
+
+        if !sameScheme || !sameHost || !samePort || isDowngrade {
+            completionHandler(nil)
+            return
+        }
+
+        let hopCount = (task.taskDescription.flatMap(Int.init) ?? 0) + 1
+        if hopCount > Self.maxHops {
+            completionHandler(nil)
+            return
+        }
+        task.taskDescription = String(hopCount)
+
+        completionHandler(request)
+    }
+}
+
 /// URLSession-based transport. One instance per server profile; the auth
 /// method is attached at request time — never persist secrets here.
 public struct KomgaTransport: Sendable {
@@ -41,10 +83,15 @@ public struct KomgaTransport: Sendable {
     public let auth: AuthMethod
     private let session: URLSession
 
-    public init(baseURL: String, auth: AuthMethod, session: URLSession = .shared) {
+    public static func makeDefaultSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        return URLSession(configuration: configuration, delegate: StrictRedirectDelegate(), delegateQueue: nil)
+    }
+
+    public init(baseURL: String, auth: AuthMethod, session: URLSession? = nil) {
         self.baseURL = baseURL
         self.auth = auth
-        self.session = session
+        self.session = session ?? Self.makeDefaultSession()
     }
 
     public func fetchSeriesPage(_ request: PageRequest) async throws -> SeriesPageDTO {

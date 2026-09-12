@@ -26,7 +26,8 @@ void main() {
 
   testWidgets('grid shows rows from repository', (tester) async {
     final repo = _FakeRepository();
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
     expect(find.text('One Piece'), findsOneWidget);
     expect(find.text('Berserk'), findsOneWidget);
@@ -92,6 +93,9 @@ void main() {
 
     await tester.enterText(
         find.widgetWithText(TextField, '服务器地址'), 'http://192.168.0.69:25600');
+    await tester.pump();
+    expect(
+        find.byKey(const ValueKey('plaintext-http-warning')), findsOneWidget);
     await tester.enterText(
         find.widgetWithText(TextField, 'API Key（X-API-Key）'), 'secret-key');
     await tester.tap(find.text('测试连接'));
@@ -145,6 +149,13 @@ void main() {
 
   testWidgets('cover wall renders disk covers from SQLite-resolved paths',
       (tester) async {
+    // Pin the surface so the expected decode width is derived from real tile
+    // geometry rather than guessed from the binding's defaults. 1600x1200 at
+    // dpr 2 is the default 800x600 logical viewport, made explicit.
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
+
     // Sync IO only: real async (createTemp / file IO / FileImage decode)
     // never completes under the widget test's fake async zone.
     final dir = Directory.systemTemp.createTempSync('comic_cover_test');
@@ -153,17 +164,37 @@ void main() {
       ..writeAsBytesSync(base64Decode(_tinyPngBase64));
 
     await tester.pumpWidget(MaterialApp(
-      home: SeriesGridScreen(repository: _CoverFakeRepository(coverPath: cover.path)),
+      home: SeriesGridScreen(
+          repository: _CoverFakeRepository(coverPath: cover.path)),
     ));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
     // Every tile resolves its cover through the repository (SQLite paths):
-    // the grid renders FileImage-backed Image widgets, not placeholders.
+    // the grid renders file-backed Image widgets, not placeholders — and it
+    // decodes them downsampled to the tile's painted width.
     final images = tester.widgetList<Image>(find.byType(Image)).toList();
     expect(images, isNotEmpty);
-    expect(images.every((img) => img.image is FileImage), isTrue);
     expect(images.length, 2);
+
+    final decoded = images.map((img) => img.image).toList();
+    // `Image.file(..., cacheWidth:)` wraps the provider in a ResizeImage with a
+    // null `cacheHeight`; asserting on the wrapper is what pins the downsample.
+    final resized = decoded.cast<ResizeImage>();
+    final widths = resized.map((r) => r.width).toSet();
+    expect(widths.length, 1, reason: 'every tile shares one column width');
+    final width = widths.single;
+    expect(width, isNotNull);
+    expect(width, greaterThan(0));
+    // 2 columns of ~140 px slots at dpr 2 land near 300 px; the exact number is
+    // Flutter's layout, so bind it loosely but strictly below the source's
+    // natural width — an unsampled decode would report no width at all.
+    expect(width, lessThan(400));
+    for (final r in resized) {
+      expect(r.imageProvider, isA<FileImage>());
+      expect(r.height, isNull,
+          reason: 'cacheWidth only: aspect ratio preserved');
+    }
     expect(find.byIcon(Icons.menu_book_outlined), findsNothing);
   });
 
@@ -179,17 +210,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Solo Leveling'), findsOneWidget);
   });
+
+  test('sanitizeRoute masks sensitive authentication query parameters', () {
+    const raw =
+        '/reader-stress?baseUrl=http://127.0.0.1:25600&apiKey=secret123&bookId=b1&token=tok456';
+    final sanitized = sanitizeRoute(raw);
+    expect(sanitized, isNot(contains('secret123')));
+    expect(sanitized, isNot(contains('tok456')));
+    final params = Uri.parse(sanitized).queryParameters;
+    expect(params['apiKey'], '***');
+    expect(params['token'], '***');
+    expect(params['bookId'], 'b1');
+  });
+
+  testWidgets('unavailable screen is rendered when core is not available',
+      (tester) async {
+    await tester.pumpWidget(const ComicApp(isCoreAvailable: false));
+    expect(find.text('核心服务不可用'), findsOneWidget);
+    expect(find.text('Berserk'), findsNothing);
+  });
 }
 
 class _FakeRepository extends LibraryRepository {
-  List<Series> get seeded =>
-      const [
+  List<Series> get seeded => const [
         Series(remoteId: 's1', libraryId: 'lib-1', name: 'One Piece'),
         Series(remoteId: 's2', libraryId: 'lib-1', name: 'Berserk'),
       ];
 
   @override
-  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => seeded;
+  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async =>
+      seeded;
 
   @override
   Future<PagedSeries> querySeries({
@@ -206,10 +256,14 @@ class _FakeRepository extends LibraryRepository {
       PagedSeries(items: seeded, total: seeded.length);
 
   @override
-  Future<Map<String, String>> fetchCoverPaths() async => const {};
+  Future<Map<String, String>> fetchCoverPaths({
+    required List<String> seriesIds,
+  }) async =>
+      const {};
 
   @override
-  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async => null;
+  Future<BootstrapSummary?> bootstrapActiveServer({bool resume = true}) async =>
+      null;
 
   @override
   Future<int> syncCovers() async => 0;
@@ -224,9 +278,6 @@ class _FakeRepository extends LibraryRepository {
 
   @override
   bool get demoSupported => false;
-
-  @override
-  Stream<List<Series>> observeSeries() => const Stream.empty();
 }
 
 /// Repository with SQLite-resolved cover paths pointing at a real file.
@@ -236,7 +287,13 @@ class _CoverFakeRepository extends _FakeRepository {
   final String coverPath;
 
   @override
-  Future<Map<String, String>> fetchCoverPaths() async => {'s1': coverPath, 's2': coverPath};
+  Future<Map<String, String>> fetchCoverPaths({
+    required List<String> seriesIds,
+  }) async =>
+      {
+        for (final id in seriesIds)
+          if (id == 's1' || id == 's2') id: coverPath,
+      };
 }
 
 /// Repository that can seed the demo wall (FFI-backed flavor).
@@ -251,7 +308,8 @@ class _DemoFakeRepository extends _FakeRepository {
   List<Series> get seeded => _demoSeries;
 
   @override
-  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => _demoSeries;
+  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async =>
+      _demoSeries;
 
   @override
   Future<BootstrapSummary> loadDemo() async => BootstrapSummary(

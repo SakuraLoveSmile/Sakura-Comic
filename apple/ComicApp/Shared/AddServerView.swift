@@ -47,6 +47,10 @@ struct AddServerView: View {
         }
     }
 
+    private var isPlaintextHTTP: Bool {
+        baseURL.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("http://")
+    }
+
     private var canSave: Bool {
         if case .tested = phase { return !saving && !displayName.trimmingCharacters(in: .whitespaces).isEmpty }
         return false
@@ -63,6 +67,16 @@ struct AddServerView: View {
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
                         #endif
+                    if isPlaintextHTTP {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.yellow)
+                            Text("当前连接为明文 HTTP，账号密码与阅读记录在局域网/公共网络可能被窃听，建议尽可能配置 HTTPS")
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                        }
+                        .padding(.vertical, 4)
+                    }
                     Picker("认证方式", selection: $authType) {
                         ForEach(AuthType.allCases) { type in
                             Text(type.label).tag(type)
@@ -157,8 +171,9 @@ struct AddServerView: View {
         guard case .tested(let result) = phase else { return }
         saving = true
         defer { saving = false }
+        let success: Bool
         if let existing {
-            await model.updateServer(
+            success = await model.updateServer(
                 existing,
                 displayName: displayName,
                 baseURL: baseURL,
@@ -167,7 +182,7 @@ struct AddServerView: View {
                 result: result
             )
         } else {
-            await model.addServer(
+            success = await model.addServer(
                 displayName: displayName,
                 baseURL: baseURL,
                 authType: authType,
@@ -175,6 +190,8 @@ struct AddServerView: View {
                 result: result
             )
         }
-        dismiss()
+        if success {
+            dismiss()
+        }
     }
 }

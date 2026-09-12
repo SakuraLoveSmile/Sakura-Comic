@@ -13,18 +13,21 @@ import 'package:comic_app/src/series_grid.dart';
 void main() {
   testWidgets('never-synced server bootstraps on first load', (tester) async {
     final repo = _SyncFakeRepository(status: const SyncStatus());
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(repo.bootstrapCalls, 1);
     expect(repo.triggers, isEmpty);
   });
 
-  testWidgets('an already-mirrored server reconciles on app launch', (tester) async {
+  testWidgets('an already-mirrored server reconciles on app launch',
+      (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
     );
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(repo.bootstrapCalls, 0);
@@ -37,7 +40,8 @@ void main() {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
     );
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
     final afterLaunch = repo.triggers.length;
 
@@ -50,21 +54,24 @@ void main() {
     expect(repo.triggers, contains('did_become_active'));
   });
 
-  testWidgets('pull to refresh reconciles and drops the deleted series', (tester) async {
+  testWidgets('pull to refresh reconciles and drops the deleted series',
+      (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
     );
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
     expect(find.text('One Piece'), findsOneWidget);
     expect(find.text('Berserk'), findsOneWidget);
 
     // The sweep reports One Piece as deleted; the wall re-reads SQLite.
-    repo.nextReport = const ReconcileReport(
-        added: 0, changed: 0, removed: 1, clean: false);
+    repo.nextReport =
+        const ReconcileReport(added: 0, changed: 0, removed: 1, clean: false);
     repo.deletedByReconcile = 'One Piece';
 
-    await tester.drag(find.byKey(const ValueKey('shelf-list')), const Offset(0, 240));
+    await tester.drag(
+        find.byKey(const ValueKey('shelf-list')), const Offset(0, 240));
     await tester.pumpAndSettle();
 
     expect(repo.triggers, contains('manual_refresh'));
@@ -73,7 +80,8 @@ void main() {
     expect(find.textContaining('删除 1'), findsOneWidget);
   });
 
-  testWidgets('an interrupted bootstrap is announced and stays browsable', (tester) async {
+  testWidgets('an interrupted bootstrap is announced and stays browsable',
+      (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(
         lastSyncAt: '2026-08-27T09:00:00.000Z',
@@ -82,7 +90,8 @@ void main() {
         resumableEntities: ['books'],
       ),
     );
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('同步中断'), findsOneWidget);
@@ -90,12 +99,14 @@ void main() {
     expect(find.text('Berserk'), findsOneWidget);
   });
 
-  testWidgets('a failed sweep retries as the network-recovery trigger', (tester) async {
+  testWidgets('a failed sweep retries as the network-recovery trigger',
+      (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
     );
     repo.failuresLeft = 1; // the server is unreachable at launch, then back
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     expect(repo.triggers, contains('app_launch'));
@@ -114,12 +125,14 @@ void main() {
     expect(repo.triggers.where((t) => t == 'network_recovered').length, 1);
   });
 
-  testWidgets('recovery retries stop after the bounded attempts', (tester) async {
+  testWidgets('recovery retries stop after the bounded attempts',
+      (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
     );
     repo.throwOnReconcile = true; // permanently offline
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
     for (final delay in [15, 60, 300]) {
@@ -133,15 +146,18 @@ void main() {
     expect(repo.triggers.where((t) => t == 'network_recovered').length, 3);
   });
 
-  testWidgets('a reconcile failure keeps the local library on screen', (tester) async {
+  testWidgets('a reconcile failure keeps the local library on screen',
+      (tester) async {
     final repo = _SyncFakeRepository(
       status: const SyncStatus(lastSyncAt: '2026-08-27T09:00:00.000Z'),
     );
     repo.throwOnReconcile = true;
-    await tester.pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byKey(const ValueKey('shelf-list')), const Offset(0, 240));
+    await tester.drag(
+        find.byKey(const ValueKey('shelf-list')), const Offset(0, 240));
     await tester.pumpAndSettle();
 
     // The core recorded the failure; the shelf still shows the local library.
@@ -169,7 +185,8 @@ class _SyncFakeRepository extends LibraryRepository {
   ];
 
   @override
-  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async => _series;
+  Future<List<Series>> fetchSeries({int limit = 50, int offset = 0}) async =>
+      _series;
 
   @override
   bool get demoSupported => true;
@@ -189,7 +206,8 @@ class _SyncFakeRepository extends LibraryRepository {
   }
 
   @override
-  Future<ReconcileReport?> reconcileActiveServer({required String trigger}) async {
+  Future<ReconcileReport?> reconcileActiveServer(
+      {required String trigger}) async {
     triggers.add(trigger);
     if (throwOnReconcile || failuresLeft > 0) {
       failuresLeft = failuresLeft > 0 ? failuresLeft - 1 : failuresLeft;
@@ -224,7 +242,10 @@ class _SyncFakeRepository extends LibraryRepository {
       PagedSeries(items: _series, total: _series.length);
 
   @override
-  Future<Map<String, String>> fetchCoverPaths() async => const {};
+  Future<Map<String, String>> fetchCoverPaths({
+    required List<String> seriesIds,
+  }) async =>
+      const {};
 
   @override
   Future<int> syncCovers() async => 0;
@@ -236,7 +257,4 @@ class _SyncFakeRepository extends LibraryRepository {
         totalElements: 0,
         hasMorePages: false,
       );
-
-  @override
-  Stream<List<Series>> observeSeries() => const Stream.empty();
 }

@@ -28,7 +28,7 @@ public struct SSEClient: Sendable {
             // Reset on every byte: this is the "a live stream may stay silent for
             // 15 s, then it is dead" rule, not a total-duration budget.
             configuration.timeoutIntervalForRequest = sseFirstFrameTimeout
-            self.session = URLSession(configuration: configuration)
+            self.session = URLSession(configuration: configuration, delegate: StrictRedirectDelegate(), delegateQueue: nil)
         }
     }
 

@@ -12,12 +12,69 @@
   同步引擎每页开一次连接（`Connection` 不能跨 await 持有），规模测试里
   1000 series / 20000 books 一次扫描要开上千次连接
 - 需要验证：Migration / Foreign Key / Cascade / 多服务器隔离 / 事务回滚 / 大库性能
-- 当前 Schema 版本：**v7**（v2 新增 `app_state`；v3 新增 `thumbnails`；
+- 当前 Schema 版本：**v11**（v2 新增 `app_state`；v3 新增 `thumbnails`；
   v4 新增归一化筛选表 / 成员关系表 / 完整元数据列 / 服务器作用域 FTS；
   v5 为 `libraries` 补齐详情列；v6 让 `sync_state` 按实体类型记账并新增墓碑表；
   v7 给 `pending_mutations` 加上 Outbox 消费所需的 `state` / `next_retry_at`；
+  v8 为阅读器加 `book_pages` 与 `cache_entries` 的 LRU 索引；
+  v9 给 `downloads` / `download_pages` 补上可续传所需的列；
+  v10 给 `reader_position` 加 `page_offset_ratio`；
+  v11 只加媒体库列表索引，不加列不加表；
   两端用幂等 `CREATE TABLE IF NOT EXISTS` + 受保护的 `ALTER TABLE ADD COLUMN`
   应用迁移并写 `PRAGMA user_version`）
+- **本文件的版本号曾经漂移**：代码到 v9 时这里写的是 v7，而 v8 / v9 两节其实已经
+  写好并排在下面。v10 实施时一并订正标题，并补上这一条，免得下一次再漂。
+- **v11 实施后两端 `user_version` 差 2**：Apple 停在 v9，Rust 到 v11。这个差距
+  不影响可读性——v11 不动任何列或表，所以 `pragma_table_info` 一类的形状收敛测试
+  不受影响，Apple 打开 v11 库也不会因为形状而失败。照上面的规矩，把漂移**写下来**，
+  别让它悄悄变成第三个数字。
+
+## v11 变更（只加索引）
+
+在此之前，整个库里只有两个索引（`pending_mutations_due` 与 `cache_entries_lru`），
+没有一个是给媒体库列表查询用的。后果是书架墙每一页都要在临时 B 树里排一次
+全服务器的 `series`（页一次、它的 `COUNT(*)` 再一次），而列一个系列的书要扫
+全服务器的 `books`（`books` 主键是 `(server_id, remote_id)`）。
+
+新增（`V11_INDEX_STATEMENTS`，执行在 ALTER 循环**之后**）：
+
+| 索引 | 列 | 服务 |
+| --- | --- | --- |
+| `series_name_nocase` | `(server_id, name COLLATE NOCASE)` | 按名称排序 |
+| `series_sort_name_nocase` | `(server_id, COALESCE(sort_name, name) COLLATE NOCASE)` | 按排序名 |
+| `series_created_at` | `(server_id, created_at)` | 按加入日期 |
+| `series_last_modified` | `(server_id, last_modified)` | 按最近更新 |
+| `series_books_count` | `(server_id, books_count)` | 按册数 |
+| `series_library` | `(server_id, library_id)` | 库筛选 + `library_counts` 的驱动顺序 |
+| `books_series_order` | `(server_id, series_id, number_sort)` | 一个系列的书 |
+
+三条容易踩空的：
+
+1. **`COLLATE NOCASE` 是索引的一部分，不是装饰。** BINARY 序的索引满足不了
+   `ORDER BY name COLLATE NOCASE`，规划器会静默退回临时 B 树。一个索引同时服务
+   ASC 与 DESC（反向扫描），所以没有降序孪生索引。
+2. **`series_sort_name_nocase` 是表达式索引**，只有当 `SeriesSort::order_expr`
+   与它逐字匹配（除 `s.` 别名）时才会被选中。`store/query.rs` 里那个测试就是
+   为了在某次改动悄悄重新引入 filesort 时响起来。
+3. **统计信息与索引同等重要。** 实测 1200 series / 12000 books：同一批索引，
+   没有 `sqlite_stat1` 时 `library_counts` 走 1,539,860 VM 步，有统计信息后
+   119,068（12.9×）。而 `migrate()` 跑在空库上，那时 `PRAGMA optimize` 对
+   `series` / `books` 收集不到任何统计（实测只给两张 FTS config 表写了行）。
+   所以统计信息必须在**镜像有数据之后**收集——见 `sync::full` 末尾的
+   `PRAGMA optimize`。详见 [large-library-performance.md](large-library-performance.md)。
+
+索引成本（`dbstat` 实测，10000 series / 100000 books）：新增约 **3.8 MB**
+（`books_series_order` 2.67 MB，六个 `series` 索引合计 1.16 MB），
+在一个约 16 MB 的镜像上约 +24%。
+
+## 索引策略的教训：索引要建在 ALTER 之后的列上
+
+`pending_mutations_due` 曾在 `CREATE_STATEMENTS` 里，而它索引的 `state` /
+`next_retry_at` 由 `V7_ALTER_STATEMENTS` 添加。`migrate()` 先跑
+`CREATE_STATEMENTS`，于是 pre-v7 的库直接以 `no such column: state` 打不开——
+用户的离线队列被一个拒绝打开的库挡住。它现在在 `POST_ALTER_INDEX_STATEMENTS`
+里，由 `a_v6_outbox_row_survives_the_migration_and_gains_its_retry_columns` 钉住。
+上面那句"建在新列上的索引会失败"不是推测，是已经踩过的坑。
 
 ## 主要表
 
@@ -27,6 +84,38 @@ read_progress / series_metadata / book_metadata / **sync_state (v6 复合主键)
 **thumbnails** / cache_entries /
 **series_genres / series_tags / series_authors / book_tags / book_authors /
 collection_series / readlist_books**（v4）/ **series_fts / book_fts**（v4 服务器作用域）
+
+## v10 变更（Stage 10 条漫定位）
+
+### `reader_position.page_offset_ratio REAL NULL`
+
+条漫是一根很长的列，"第 62 页"本身说不清人在哪儿：没有页内偏移，重新打开会把
+读到一半的那一页拉回顶部。
+
+- 单页 / 双页模式**不写**这一列，`NULL` —— 它对分页阅读器就等于"页首"，
+  而且预 v10 的每一行也都是 `NULL`。两者是同一个事实，但不是 `0.0`：
+  存 0 会把"没有记录"说成"在页首"，下次打开就会把滚到一半的读者拽回去。
+- `save_with_offset` 把比例**夹紧**在 0..1 而不是拒绝：过冲回弹会报出 1.02，
+  而页码仍然值得保存，为了一个比例丢掉页码是笔亏本买卖。
+- 偏移随下一次 persist 落库，不在滚动时写：滚动是连续上报的，
+  每帧过一遍 SQLite 会把整行位置写穿。翻页、改模式、关书都会触发 persist。
+
+### 这是本项目唯一一个"丢不了东西"的迁移
+
+`migrate()` 仍然不是事务性的，但每一步都是幂等且带守卫的，重跑安全。
+纯加一个可空列，失败模式是"某本书回到页首"，不是像 v9 那样丢掉用户的下载记账。
+
+### 形状收敛
+
+`CREATE_STATEMENTS` 与 `V10_ALTER_STATEMENTS` 必须落到同一形状
+（`a_migrated_v9_reader_position_has_the_fresh_shape` 用 `pragma_table_info` 逐列对比）。
+这次差点踩到：新列写进 CREATE 时放在 `updated_at` **之前**，而 ALTER 只能追加到
+**最后** —— 两条路径的列序不同，测试当场抓住。现在新列统一排在 `updated_at` 之后。
+
+### 行存活
+
+`a_v9_reader_position_row_survives_the_v10_migration_untouched` 用纯 v9 DDL 建库、
+插一行、迁移，断言页码 / 模式 / 方向 / 时间戳原样存活、新列为 `NULL`。
 
 ## v9 变更（Stage 9 离线下载）
 

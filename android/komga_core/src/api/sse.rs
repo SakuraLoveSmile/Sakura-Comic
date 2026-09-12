@@ -232,7 +232,10 @@ pub struct SseClient {
 
 impl SseClient {
     pub fn new(base_url: String, auth: AuthMethod) -> Result<Self> {
-        let http = Client::builder().build().map_err(|_| ApiError::Network)?;
+        let http = Client::builder()
+            .redirect(super::url::strict_redirect_policy())
+            .build()
+            .map_err(|_| ApiError::Network)?;
         Ok(Self {
             base_url,
             auth,

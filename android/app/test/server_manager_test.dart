@@ -88,6 +88,108 @@ void main() {
       expect(deleted, isTrue);
       expect(secrets.isEmpty, isTrue);
       expect(api.servers, isEmpty);
+      expect(api.stoppedSseServerId, profile.id);
+    });
+
+    test(
+        'F09: verification failure during add rolls back secret and throws KeystoreException',
+        () async {
+      final api = _MemoryRustCoreApi();
+      final secrets = _FailingReadSecretStore();
+      final manager = ServerManager(
+        dbPath: '/tmp/test.sqlite',
+        api: api,
+        secrets: secrets,
+      );
+
+      await expectLater(
+        () => manager.add(
+          displayName: 'Faulty',
+          baseUrl: 'http://a.local:25600',
+          apiKey: 'key-to-fail',
+        ),
+        throwsA(isA<KeystoreException>()),
+      );
+
+      expect(secrets.deletedKeys, contains(startsWith('keystore:')));
+      expect(api.servers, isEmpty);
+    });
+
+    test('F09: SQLite saveServer failure rolls back secret and rethrows',
+        () async {
+      final api = _MemoryRustCoreApi()..failSaveServer = true;
+      final secrets = InMemorySecretStore();
+      final manager = ServerManager(
+        dbPath: '/tmp/test.sqlite',
+        api: api,
+        secrets: secrets,
+      );
+
+      await expectLater(
+        () => manager.add(
+          displayName: 'FaultyDb',
+          baseUrl: 'http://a.local:25600',
+          apiKey: 'key-to-rollback',
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(secrets.isEmpty, isTrue);
+      expect(api.servers, isEmpty);
+    });
+
+    test(
+        'F09: update cleans up old credential ref only after SQLite save succeeds',
+        () async {
+      final api = _MemoryRustCoreApi();
+      final secrets = InMemorySecretStore();
+      final manager = ServerManager(
+        dbPath: '/tmp/test.sqlite',
+        api: api,
+        secrets: secrets,
+      );
+
+      final initial = await manager.add(
+        displayName: 'Initial',
+        baseUrl: 'http://a.local:25600',
+        apiKey: 'initial-key',
+      );
+      final initialRef = initial.credentialRef!;
+      expect(await secrets.read(initialRef), 'initial-key');
+
+      final updated = await manager.update(
+        existing: initial,
+        displayName: 'Updated',
+        baseUrl: 'http://a.local:25600',
+        apiKey: 'new-key',
+      );
+
+      expect(updated.credentialRef, isNot(initialRef));
+      expect(await secrets.read(initialRef), isNull);
+      expect(await secrets.read(updated.credentialRef!), 'new-key');
+    });
+
+    test(
+        'F09: delete stops SSE and leaves secret intact if SQLite delete fails',
+        () async {
+      final api = _MemoryRustCoreApi()..failDeleteServer = true;
+      final secrets = InMemorySecretStore();
+      final manager = ServerManager(
+        dbPath: '/tmp/test.sqlite',
+        api: api,
+        secrets: secrets,
+      );
+
+      final profile = await manager.add(
+        displayName: 'Undeletable',
+        baseUrl: 'http://a.local:25600',
+        apiKey: 'safe-key',
+      );
+
+      final deleted = await manager.delete(serverId: profile.id);
+      expect(deleted, isFalse);
+      expect(api.stoppedSseServerId, profile.id);
+      expect(await secrets.read(profile.credentialRef!), 'safe-key');
     });
   });
 }
@@ -100,6 +202,17 @@ class _MemoryRustCoreApi extends RustCoreApi {
   String? activeId;
   String? probedUrl;
   String? probedKey;
+  String? stoppedSseServerId;
+  bool failSaveServer = false;
+  bool failDeleteServer = false;
+
+  @override
+  Future<void> sseStop({
+    required String dbPath,
+    required String serverId,
+  }) async {
+    stoppedSseServerId = serverId;
+  }
 
   @override
   Future<ConnectionResult> testConnection({
@@ -151,6 +264,9 @@ class _MemoryRustCoreApi extends RustCoreApi {
     required String dbPath,
     required ServerProfile profile,
   }) async {
+    if (failSaveServer) {
+      throw StateError('Simulated SQLite disk write failure');
+    }
     servers[profile.id] = profile;
   }
 
@@ -166,6 +282,9 @@ class _MemoryRustCoreApi extends RustCoreApi {
     required String dbPath,
     required String serverId,
   }) async {
+    if (failDeleteServer) {
+      return false;
+    }
     if (activeId == serverId) activeId = null;
     librariesByServer.remove(serverId);
     return servers.remove(serverId) != null;
@@ -198,6 +317,15 @@ class _MemoryRustCoreApi extends RustCoreApi {
     required String seriesId,
   }) async =>
       null;
+
+  @override
+  Future<Map<String, String>> coverPaths({
+    required String dbPath,
+    required String serverId,
+    required String variant,
+    required List<String> remoteIds,
+  }) async =>
+      const {};
 
   @override
   Future<List<ThumbnailRow>> listThumbnails({
@@ -238,3 +366,24 @@ class _MemoryRustCoreApi extends RustCoreApi {
       );
 }
 
+class _FailingReadSecretStore implements SecretStore {
+  final Map<String, String> _secrets = {};
+  final List<String> deletedKeys = [];
+
+  @override
+  Future<void> save(String ref, String secret) async {
+    _secrets[ref] = secret;
+  }
+
+  @override
+  Future<String?> read(String ref) async {
+    // Simulates returning corrupted data / bad verification
+    return 'corrupted-secret-value';
+  }
+
+  @override
+  Future<void> delete(String ref) async {
+    deletedKeys.add(ref);
+    _secrets.remove(ref);
+  }
+}

@@ -173,7 +173,8 @@ class _ServersScreenState extends State<ServersScreen> {
                 ),
             ],
           ),
-          subtitle: Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+          subtitle:
+              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
           trailing: PopupMenuButton<String>(
             onSelected: (action) {
               switch (action) {

@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FLUTTER_VERSION: stable
+  FLUTTER_VERSION: "3.29.0"
 
 jobs:
   # Android — Flutter shell on top of Rust core, signed with the self-signed
@@ -46,25 +46,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve version
+      - name: Resolve and validate version
         id: version
         run: |
+          set -euo pipefail
+          PUB_FULL=$(grep '^version:' android/app/pubspec.yaml | awk '{print $2}')
+          PUB_VERSION=$(echo "$PUB_FULL" | cut -d'+' -f1)
+          PUB_BUILD=$(echo "$PUB_FULL" | cut -s -d'+' -f2)
+          PUB_BUILD="${PUB_BUILD:-1}"
           if [[ -n "${{ inputs.version }}" ]]; then
-            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            REQ_TAG="${{ inputs.version }}"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-            echo "version=$TAG" >> "$GITHUB_OUTPUT"
+            REQ_TAG="${GITHUB_REF#refs/tags/}"
           else
-            PUB=$(grep '^version:' android/app/pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-            echo "tag=v$PUB" >> "$GITHUB_OUTPUT"
-            echo "version=v$PUB" >> "$GITHUB_OUTPUT"
+            REQ_TAG="v$PUB_VERSION"
           fi
+          CLEAN_TAG="${REQ_TAG#v}"
+          if [[ "$CLEAN_TAG" != "$PUB_VERSION" ]]; then
+            echo "::error::Release tag '$REQ_TAG' does not match pubspec.yaml version '$PUB_VERSION'!" >&2
+            exit 1
+          fi
+          echo "tag=$REQ_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$PUB_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$PUB_BUILD" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.85.0"
           components: rustfmt, clippy
 
       - name: Install Android targets + cargo-ndk + flutter_rust_bridge_codegen
@@ -81,6 +90,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Restore keystore + key.properties from secrets
@@ -116,8 +126,8 @@ jobs:
       - name: Build Android APKs (signed, split-per-abi) + AAB
         working-directory: android/app
         run: |
-          flutter build apk --release --split-per-abi --verbose
-          flutter build appbundle --release --verbose
+          flutter build apk --release --split-per-abi --build-name="${{ steps.version.outputs.version }}" --build-number="${{ steps.version.outputs.build_number }}" --verbose
+          flutter build appbundle --release --build-name="${{ steps.version.outputs.version }}" --build-number="${{ steps.version.outputs.build_number }}" --verbose
           ls -lh build/app/outputs/flutter-apk/*.apk
           ls -lh build/app/outputs/bundle/release/*.aab
           # quick signature sanity
@@ -157,17 +167,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version
+      - name: Resolve and validate version
         id: version
         run: |
+          set -euo pipefail
+          PUB_FULL=$(grep '^version:' android/app/pubspec.yaml | awk '{print $2}')
+          PUB_VERSION=$(echo "$PUB_FULL" | cut -d'+' -f1)
+          PUB_BUILD=$(echo "$PUB_FULL" | cut -s -d'+' -f2)
+          PUB_BUILD="${PUB_BUILD:-1}"
           if [[ -n "${{ inputs.version }}" ]]; then
-            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            REQ_TAG="${{ inputs.version }}"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            REQ_TAG="${GITHUB_REF#refs/tags/}"
           else
-            PUB=$(grep '^version:' android/app/pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-            echo "tag=v$PUB" >> "$GITHUB_OUTPUT"
+            REQ_TAG="v$PUB_VERSION"
           fi
+          CLEAN_TAG="${REQ_TAG#v}"
+          if [[ "$CLEAN_TAG" != "$PUB_VERSION" ]]; then
+            echo "::error::Release tag '$REQ_TAG' does not match pubspec.yaml version '$PUB_VERSION'!" >&2
+            exit 1
+          fi
+          echo "tag=$REQ_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$PUB_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$PUB_BUILD" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
       - name: SwiftPM — KomgaKit build + test
@@ -195,8 +217,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build_number }}" \
             -derivedDataPath build \
-            build | xcpretty || cat build/Logs/Build/*.log 2>/dev/null | tail -80
+            build | xcpretty
 
       - name: Build macOS (Release, unsigned)
         working-directory: apple/ComicApp
@@ -206,29 +230,43 @@ jobs:
             -scheme ComicApp_macOS \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build_number }}" \
             -derivedDataPath build \
-            build | xcpretty || true
+            build | xcpretty
 
-      - name: Zip .app bundles
+      - name: Zip .app bundles and verify artifacts
         working-directory: apple/ComicApp
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p dist
-          for app in $(find build/Build/Products -name "*.app" -maxdepth 4 2>/dev/null); do
+          APPS=$(find build/Build/Products -name "*.app" -maxdepth 4 2>/dev/null)
+          if [ -z "$APPS" ]; then
+            echo "::error::No .app bundles found! Build failed to produce targets." >&2
+            exit 1
+          fi
+          IOS_APP=0
+          MAC_APP=0
+          for app in $APPS; do
             name=$(basename "$app" .app)
             cfg=$(basename $(dirname "$app"))
             zipname="dist/${name}-${cfg}-${{ steps.version.outputs.tag }}.app.zip"
             ditto -c -k --sequesterRsrc --keepParent "$app" "$zipname"
             ls -lh "$zipname"
+            if [[ "$name" == *"iOS"* ]]; then IOS_APP=1; fi
+            if [[ "$name" == *"macOS"* ]] || [[ "$name" == *"MacOS"* ]]; then MAC_APP=1; fi
           done
-          ls -lh dist/ || echo "no .app bundles found — check xcodebuild logs above"
+          if [ "$IOS_APP" -ne 1 ] || [ "$MAC_APP" -ne 1 ]; then
+            echo "::error::Missing required .app bundles: iOS=$IOS_APP macOS=$MAC_APP" >&2
+            exit 1
+          fi
 
       - name: Upload Apple artifacts
         uses: actions/upload-artifact@v4
         with:
           name: apple-${{ steps.version.outputs.tag }}
           path: apple/ComicApp/dist/*.zip
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Publish Apple zips to the same Release
         uses: softprops/action-gh-release@v2

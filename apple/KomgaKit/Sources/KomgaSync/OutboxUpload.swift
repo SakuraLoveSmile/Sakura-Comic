@@ -282,6 +282,32 @@ public struct UploadSummary: Sendable, Equatable {
     }
 }
 
+private actor UploadCoordinator {
+    static let shared = UploadCoordinator()
+    private var activeKeys: Set<String> = []
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    func withLock<T: Sendable>(key: String, operation: @Sendable () async throws -> T) async throws -> T {
+        if activeKeys.contains(key) {
+            await withCheckedContinuation { continuation in
+                waiters[key, default: []].append(continuation)
+            }
+        }
+        activeKeys.insert(key)
+        defer {
+            if var list = waiters[key], !list.isEmpty {
+                let next = list.removeFirst()
+                waiters[key] = list
+                next.resume()
+            } else {
+                activeKeys.remove(key)
+                waiters.removeValue(forKey: key)
+            }
+        }
+        return try await operation()
+    }
+}
+
 public enum OutboxUpload {
     /// One pass over everything due right now. `now` is injected so the backoff
     /// schedule is testable (and so a restart cannot reschedule anything).
@@ -291,6 +317,18 @@ public enum OutboxUpload {
         serverID: String,
         writer: any ProgressWriting,
         now: String = outboxSecondText(Date())
+    ) async throws -> UploadSummary {
+        let key = "\(store.storageIdentifier):\(serverID)"
+        return try await UploadCoordinator.shared.withLock(key: key) {
+            try await performRun(store: store, serverID: serverID, writer: writer, now: now)
+        }
+    }
+
+    private static func performRun(
+        store: KomgaStore,
+        serverID: String,
+        writer: any ProgressWriting,
+        now: String
     ) async throws -> UploadSummary {
         let due = try store.dueOutboxEntries(serverID: serverID, now: now)
         var summary = UploadSummary(serverID: serverID)
@@ -305,14 +343,20 @@ public enum OutboxUpload {
             }
             let localActionAt = try store.localActionTime(serverID: serverID, entry: entry)
             let refetch = await writer.refetch(bookID: entry.entityID)
+
+            // F03: Check if entry still exists before proceeding with upload or decision
+            if !(try store.outboxEntryExists(id: entry.id)) {
+                continue
+            }
+
             switch decide(bookID: entry.entityID, intent: intent, localUpdatedAt: localActionAt, refetch: refetch) {
             case .dropGone:
-                try store.forget(serverID: serverID, bookID: entry.entityID)
+                try store.completeMutation(serverID: serverID, bookID: entry.entityID, mutationID: entry.id)
                 summary.gone += 1
             case .dropNoOp:
                 // R7: opening a book and putting it down is neither a success
                 // nor a failure — the queue just goes quiet.
-                try store.forget(serverID: serverID, bookID: entry.entityID)
+                try store.completeMutation(serverID: serverID, bookID: entry.entityID, mutationID: entry.id)
                 summary.noOp += 1
             case .unsupportedFormat(let reason):
                 // R8: park the row with the reason instead of spending the retry
@@ -322,12 +366,12 @@ public enum OutboxUpload {
                 )
                 summary.unsupportedFormat += 1
             case .dropSuccess:
-                try store.forget(serverID: serverID, bookID: entry.entityID)
+                try store.completeMutation(serverID: serverID, bookID: entry.entityID, mutationID: entry.id)
                 summary.alreadyApplied += 1
             case .dropRemoteWins:
                 // Our intent loses on purpose. Clearing the queue lets the next
                 // mirror sweep take the server value, so both sides converge.
-                try store.forget(serverID: serverID, bookID: entry.entityID)
+                try store.completeMutation(serverID: serverID, bookID: entry.entityID, mutationID: entry.id)
                 summary.remoteWins += 1
             case .deferred(let penalised):
                 if penalised {
@@ -344,8 +388,11 @@ public enum OutboxUpload {
                 let attempt = await writer.apply(request: request)
                 switch attempt {
                 case .succeeded:
-                    try store.forget(serverID: serverID, bookID: entry.entityID)
+                    try store.completeMutation(serverID: serverID, bookID: entry.entityID, mutationID: entry.id)
                     summary.uploaded += 1
+                case .gone:
+                    try store.completeMutation(serverID: serverID, bookID: entry.entityID, mutationID: entry.id)
+                    summary.gone += 1
                 case .blockedAuthentication:
                     summary.blockedAuthentication += 1
                     summary.status = .blockedAuthentication
