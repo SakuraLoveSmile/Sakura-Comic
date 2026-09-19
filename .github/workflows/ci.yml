@@ -36,8 +36,9 @@ jobs:
         with:
           toolchain: "1.85.0"
       - run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-      # cargo-ndk 4.x needs rustc 1.86; the pinned toolchain is 1.85.0.
-      - run: cargo install cargo-ndk --locked --version 3.5.7
+      # cargo-ndk 4.x needs rustc 1.86 and 3.5.5+ are yanked; the pinned
+      # toolchain is 1.85.0, so the newest installable release is 3.5.4.
+      - run: cargo install cargo-ndk --locked --version 3.5.4
       - name: Cross-compile komga_core (features frb) into jniLibs
         run: |
           NDK_ROOT="${ANDROID_NDK_HOME:-$(ls -d ${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/* | head -1)}"

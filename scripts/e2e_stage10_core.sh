@@ -178,9 +178,13 @@ DB="$WORK/snapshot/comic.sqlite"
 
 q() { "$SQLITE" "$DB" "$1" 2>/dev/null | tail -1; }
 
+# The expected schema is read out of the source constant, not pinned here —
+# the assertion would otherwise silently rot every time a migration lands.
+EXPECTED_SCHEMA=$(grep -m1 'SCHEMA_VERSION' "$CORE/src/store/schema.rs" | grep -oE '[0-9]+' | tail -1)
 check "schema version matches PRAGMA user_version" \
   "$(metric "$SNAP" schema_version)" "$(q 'PRAGMA user_version')"
-check "schema version is 9, the Stage 9 shape" "$(metric "$SNAP" schema_version)" "9"
+check "schema version is the one SCHEMA_VERSION declares" \
+  "$(metric "$SNAP" schema_version)" "$EXPECTED_SCHEMA"
 check "integrity verdict matches the engine's own" \
   "$(metric "$SNAP" integrity)" "$(q 'PRAGMA integrity_check')"
 # `busy_timeout` is per-connection, so a second sqlite3 process cannot witness
@@ -308,7 +312,7 @@ section "facade: the same surfaces through the entry points the app calls"
 # ---------------------------------------------------------------------------
 run_phase facade
 FACADE="$WORK/facade/report"
-check "ffi snapshot sees the schema" "$(metric "$FACADE" ffi_schema_version)" "9"
+check "ffi snapshot sees the schema" "$(metric "$FACADE" ffi_schema_version)" "$EXPECTED_SCHEMA"
 check "ffi snapshot sees the ring" "$(metric "$FACADE" ffi_log_installed)" "1"
 check "ffi log records came back non-empty" \
   "$(metric_at_least "$FACADE" ffi_log_records 1)" "yes"
