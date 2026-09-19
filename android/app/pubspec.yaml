@@ -1,10 +1,10 @@
 name: comic_app
 description: "Komga media library client — Android shell (Flutter UI on top of Rust Core)."
 publish_to: "none"
-version: 0.1.0+2
+version: 0.2.0+3
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  sdk: ">=3.6.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -15,17 +15,26 @@ dependencies:
   path_provider: ^2.1.5
   # 反馈组件（仓库子目录 flutter/feedback）。ref 固定到真实提交 SHA：
   # 不用分支或可变标签；升级时显式改 SHA 并提交本目录 pubspec.lock。
-  # Git 认证走开发机/CI 的 SSH 配置，URL 内不写访问令牌。
+  # 上游仓库公开，走 https 让开发机与 CI 都无需凭据，URL 内不写访问令牌。
   feedback_widget:
     git:
-      url: git@github.com:SakuraLoveSmile/Sakura-Feedback.git
+      url: https://github.com/SakuraLoveSmile/Sakura-Feedback.git
       path: flutter/feedback
-      ref: 8c66cc07c3ba9e1fa706485b8b0b8ada25635343
+      ref: 60a9b22eb85904a023dcb60852f3d6be1792f684
+  # 反馈上报随附真实安装包版本与构建号（package_info_plus）。
+  package_info_plus: ^8.3.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+
+# 本机 Flutter SDK 高于 CI（3.29/Dart 3.7），生成的 pubspec.lock 在 CI 上
+# 会整体重解析：不加约束时 flutter_secure_storage 会升到 10.x（minSdk 23），
+# 高于 flutter.minSdkVersion 默认 21 导致 manifest merger 失败。锁定 <10
+# 让 CI 与本机解析到同一 9.x 版本，保证本地验收与正式产物一致。
+dependency_overrides:
+  flutter_secure_storage: ">=9.2.2 <10.0.0"
 
 flutter:
   uses-material-design: true

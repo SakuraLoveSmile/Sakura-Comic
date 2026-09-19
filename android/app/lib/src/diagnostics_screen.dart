@@ -64,6 +64,95 @@ typedef DiagnosticsScreenState = DiagnosticsSanitizer;
 String redactServerId(String id) => DiagnosticsSanitizer.redactServerId(id);
 String redactString(String input) => DiagnosticsSanitizer.redactString(input);
 
+/// 脱敏诊断快照的 map 形状——剪贴板导出与反馈日志附件共用同一形状。
+/// [snap] 为 null 时只导出日志段（快照字段整体缺省）。
+Map<String, dynamic> redactedDiagnosticsMap(
+    DiagnosticsDto? snap, List<LogRecord> logs) {
+  return <String, dynamic>{
+    if (snap != null) ...{
+      'serverId': redactServerId(snap.serverId),
+      'db': {
+        'schemaVersion': snap.db.schemaVersion.toInt(),
+        'integrity': snap.db.integrity,
+        'journalMode': snap.db.journalMode,
+        'pageSize': snap.db.pageSize.toInt(),
+        'pageCount': snap.db.pageCount.toInt(),
+        'freelistCount': snap.db.freelistCount.toInt(),
+        'fileBytes': snap.db.fileBytes.toInt(),
+        'tables': snap.db.tables
+            .map((t) => {'table': t.table, 'rows': t.rows.toInt()})
+            .toList(),
+      },
+      'auth': {
+        'state': snap.auth.state,
+        'at': snap.auth.at,
+      },
+      'outbox': {
+        'pending': snap.outbox.pending.toInt(),
+        'waiting': snap.outbox.waiting.toInt(),
+        'failed': snap.outbox.failed.toInt(),
+        'queuedRows': snap.outboxQueuedRows.toInt(),
+      },
+      'cache': {
+        'pageBytes': snap.cache.pageBytes.toInt(),
+        'prefetchBytes': snap.cache.prefetchBytes.toInt(),
+        'downloadBytes': snap.cache.downloadBytes.toInt(),
+        'diskBytes': snap.cache.diskBytes.toInt(),
+        'memoryBytes': snap.cache.memoryBytes.toInt(),
+        'ledgerBytes': snap.cache.ledgerBytes.toInt(),
+      },
+      'storage': {
+        'cacheTotalBytes': snap.storage.cacheTotalBytes.toInt(),
+        'downloadBytes': snap.storage.downloadBytes.toInt(),
+        'bookCount': snap.storage.bookCount.toInt(),
+        'freeVolumeBytes': snap.storage.freeVolumeBytes.toInt(),
+      },
+      'sync': snap.sync_
+          .map((s) => {
+                'entityType': s.entityType,
+                'status': s.syncStatus,
+                'cursor': s.syncCursor == null ? 'none' : '[REDACTED_CURSOR]',
+                'lastSyncAt': s.lastSyncAt,
+                'lastError':
+                    s.lastError == null ? null : redactString(s.lastError!),
+              })
+          .toList(),
+    },
+    'logs': logs
+        .take(50)
+        .map((l) => {
+              'level': l.level,
+              'target': l.target,
+              'at': l.at,
+              'message': l.message,
+            })
+        .toList(),
+  };
+}
+
+/// 现场拉取快照与近期日志并产出脱敏 JSON，供反馈组件作日志附件上报。
+/// 单项失败（快照不可用、日志环为空）只让对应段缺省，不整单失败。
+Future<String> buildRedactedDiagnosticsExport(
+    LibraryRepository repository) async {
+  DiagnosticsDto? snap;
+  List<LogRecord> logs = const [];
+  try {
+    snap = await repository.diagnosticsSnapshot();
+  } catch (_) {/* 快照缺省 */}
+  try {
+    logs = (await repository.diagnosticsLogs(limit: 200))
+        .map((l) => LogRecord(
+              level: l.level,
+              target: l.target,
+              at: l.at,
+              message: redactString(l.message),
+            ))
+        .toList();
+  } catch (_) {/* 日志段缺省 */}
+  return const JsonEncoder.withIndent('  ')
+      .convert(redactedDiagnosticsMap(snap, logs));
+}
+
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({
     super.key,
@@ -143,66 +232,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     final snap = _snapshot;
     if (snap == null) return;
 
-    final sanitizedMap = <String, dynamic>{
-      'serverId': redactServerId(snap.serverId),
-      'db': {
-        'schemaVersion': snap.db.schemaVersion.toInt(),
-        'integrity': snap.db.integrity,
-        'journalMode': snap.db.journalMode,
-        'pageSize': snap.db.pageSize.toInt(),
-        'pageCount': snap.db.pageCount.toInt(),
-        'freelistCount': snap.db.freelistCount.toInt(),
-        'fileBytes': snap.db.fileBytes.toInt(),
-        'tables': snap.db.tables
-            .map((t) => {'table': t.table, 'rows': t.rows.toInt()})
-            .toList(),
-      },
-      'auth': {
-        'state': snap.auth.state,
-        'at': snap.auth.at,
-      },
-      'outbox': {
-        'pending': snap.outbox.pending.toInt(),
-        'waiting': snap.outbox.waiting.toInt(),
-        'failed': snap.outbox.failed.toInt(),
-        'queuedRows': snap.outboxQueuedRows.toInt(),
-      },
-      'cache': {
-        'pageBytes': snap.cache.pageBytes.toInt(),
-        'prefetchBytes': snap.cache.prefetchBytes.toInt(),
-        'downloadBytes': snap.cache.downloadBytes.toInt(),
-        'diskBytes': snap.cache.diskBytes.toInt(),
-        'memoryBytes': snap.cache.memoryBytes.toInt(),
-        'ledgerBytes': snap.cache.ledgerBytes.toInt(),
-      },
-      'storage': {
-        'cacheTotalBytes': snap.storage.cacheTotalBytes.toInt(),
-        'downloadBytes': snap.storage.downloadBytes.toInt(),
-        'bookCount': snap.storage.bookCount.toInt(),
-        'freeVolumeBytes': snap.storage.freeVolumeBytes.toInt(),
-      },
-      'sync': snap.sync_
-          .map((s) => {
-                'entityType': s.entityType,
-                'status': s.syncStatus,
-                'cursor': s.syncCursor == null ? 'none' : '[REDACTED_CURSOR]',
-                'lastSyncAt': s.lastSyncAt,
-                'lastError':
-                    s.lastError == null ? null : redactString(s.lastError!),
-              })
-          .toList(),
-      'logs': _logs
-          .take(50)
-          .map((l) => {
-                'level': l.level,
-                'target': l.target,
-                'at': l.at,
-                'message': l.message,
-              })
-          .toList(),
-    };
-
-    final jsonStr = const JsonEncoder.withIndent('  ').convert(sanitizedMap);
+    final jsonStr = const JsonEncoder.withIndent('  ')
+        .convert(redactedDiagnosticsMap(snap, _logs));
     Clipboard.setData(ClipboardData(text: jsonStr));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已复制脱敏诊断快照到剪贴板')),

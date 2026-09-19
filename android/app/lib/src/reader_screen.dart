@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 
+import 'feedback_access.dart';
 import 'reader_controller.dart';
 import 'reader_offset.dart';
 
@@ -34,6 +35,31 @@ class _ReaderScreenState extends State<ReaderScreen>
   PageController? _paged;
   final _webtoonKey = GlobalKey<_WebtoonColumnState>();
   Future<void>? _exitCapture;
+
+  /// 反馈作用域与登记状态：阅读中隐藏悬浮球。底部设置页等临时弹层
+  /// 不经过这里，计数不受影响；退出阅读器（dispose）后恢复。
+  ///
+  /// 增减计数都必须推迟到 post-frame：路由推入/弹出帧内对
+  /// readerDepth 的通知会落在内层 Navigator 的 buildScope 里被吞掉，
+  /// 外层外壳收不到重建信号（真机验证：同步自增后悬浮球不隐藏）。
+  FeedbackAccess? _feedbackAccess;
+  bool _readerCounted = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_feedbackAccess == null) {
+      final access = FeedbackAccess.maybeOf(context);
+      if (access != null) {
+        _feedbackAccess = access;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _readerCounted) return;
+          access.readerDepth.value += 1;
+          _readerCounted = true;
+        });
+      }
+    }
+  }
 
   @override
   void deactivate() {
@@ -71,6 +97,13 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   @override
   void dispose() {
+    if (_readerCounted) {
+      _readerCounted = false;
+      final access = _feedbackAccess;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        access?.readerDepth.value -= 1;
+      });
+    }
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onController);
     unawaited(_closeController(widget.controller,
@@ -907,8 +940,10 @@ class _BottomBar extends StatelessWidget {
   }
 }
 
-Future<void> _showSettings(BuildContext context, ReaderController controller) =>
-    showModalBottomSheet<void>(
+Future<void> _showSettings(BuildContext context, ReaderController controller) {
+  final feedback = FeedbackAccess.maybeOf(context)?.controller;
+  late final Future<void> sheetClosed;
+  sheetClosed = showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF141414),
@@ -1012,11 +1047,33 @@ Future<void> _showSettings(BuildContext context, ReaderController controller) =>
                   ),
                 ],
               ),
+              if (feedback != null) ...[
+                const Divider(color: Colors.white24, height: 24),
+                ListTile(
+                  leading: const Icon(Icons.feedback_outlined,
+                      color: Colors.white70),
+                  title: const Text('反馈当前页面',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: const Text('截取当前阅读页并附脱敏诊断日志',
+                      style:
+                          TextStyle(color: Colors.white54, fontSize: 12)),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    // 等底部页收起动画结束再截，不把菜单本身截进反馈图。
+                    unawaited(sheetClosed.then((_) async {
+                      await WidgetsBinding.instance.endOfFrame;
+                      await feedback.captureAndOpen();
+                    }));
+                  },
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
+  return sheetClosed;
+}
 
 class _GapTile extends StatelessWidget {
   const _GapTile({required this.controller});

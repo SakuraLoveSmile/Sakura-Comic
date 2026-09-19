@@ -14,6 +14,14 @@ on:
         required: false
         default: false
         type: boolean
+      release_target:
+        description: "Which platform jobs to run. Tag pushes always run all jobs regardless."
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - android
 
 permissions:
   contents: write
@@ -24,6 +32,10 @@ concurrency:
 
 env:
   FLUTTER_VERSION: "3.29.0"
+  # 反馈服务接入：正式包必须携带。这不是密钥——值经 dart-define 编进产物，
+  # 校验步骤保证两端一致且非空。
+  FEEDBACK_API_BASE: "https://feedback.xn--fhqths51enha.cn"
+  FEEDBACK_APP_ID: "comic"
 
 jobs:
   # Android — Flutter shell on top of Rust core, signed with the self-signed
@@ -123,11 +135,25 @@ jobs:
           export JAVA_HOME="${JAVA_HOME:-}"
           bash scripts/frb_wire.sh
 
+      - name: Validate feedback config (release must ship it)
+        run: |
+          set -euo pipefail
+          if [[ -z "${FEEDBACK_API_BASE:-}" || -z "${FEEDBACK_APP_ID:-}" ]]; then
+            echo "::error::反馈配置缺失——正式包必须携带反馈接入。请在 workflow env 中设置 FEEDBACK_API_BASE 与 FEEDBACK_APP_ID。" >&2
+            exit 1
+          fi
+          if [[ ! "$FEEDBACK_API_BASE" =~ ^https?://[^[:space:]]+$ ]]; then
+            echo "::error::FEEDBACK_API_BASE 非法（'$FEEDBACK_API_BASE'）——必须是 http(s) 地址。" >&2
+            exit 1
+          fi
+          echo "feedback config ok: base=$FEEDBACK_API_BASE appId=$FEEDBACK_APP_ID"
+
       - name: Build Android APKs (signed, split-per-abi) + AAB
         working-directory: android/app
         run: |
-          flutter build apk --release --split-per-abi --build-name="${{ steps.version.outputs.version }}" --build-number="${{ steps.version.outputs.build_number }}" --verbose
-          flutter build appbundle --release --build-name="${{ steps.version.outputs.version }}" --build-number="${{ steps.version.outputs.build_number }}" --verbose
+          DEFINES="--dart-define=FEEDBACK_API_BASE=$FEEDBACK_API_BASE --dart-define=FEEDBACK_APP_ID=$FEEDBACK_APP_ID"
+          flutter build apk --release --split-per-abi --build-name="${{ steps.version.outputs.version }}" --build-number="${{ steps.version.outputs.build_number }}" $DEFINES --verbose
+          flutter build appbundle --release --build-name="${{ steps.version.outputs.version }}" --build-number="${{ steps.version.outputs.build_number }}" $DEFINES --verbose
           ls -lh build/app/outputs/flutter-apk/*.apk
           ls -lh build/app/outputs/bundle/release/*.aab
           # quick signature sanity
@@ -145,6 +171,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           draft: ${{ inputs.draft || false }}
           generate_release_notes: true
           files: |
@@ -163,6 +190,8 @@ jobs:
   # change apple/ComicApp/project.yml bundleIdPrefix to dev.sakurasep.comic
   # before an App Store / TestFlight submission.
   apple:
+    # 手动发布且显式选 android 时才跳过；tag push 保持原有全平台行为。
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_target != 'android' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -272,6 +301,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           draft: ${{ inputs.draft || false }}
           generate_release_notes: true
           files: apple/ComicApp/dist/*.zip

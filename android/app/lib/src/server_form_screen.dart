@@ -112,22 +112,27 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          TextField(
-            controller: _name,
-            decoration: const InputDecoration(
-              labelText: '显示名称',
-              border: OutlineInputBorder(),
+          // 显示名称与服务器地址同属账号标识：截图时一并遮挡。
+          FeedbackCaptureMask(
+            child: TextField(
+              controller: _name,
+              decoration: const InputDecoration(
+                labelText: '显示名称',
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _url,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            decoration: const InputDecoration(
-              labelText: '服务器地址',
-              hintText: 'http://192.168.0.69:25600',
-              border: OutlineInputBorder(),
+          FeedbackCaptureMask(
+            child: TextField(
+              controller: _url,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: '服务器地址',
+                hintText: 'http://192.168.0.69:25600',
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
           ValueListenableBuilder<TextEditingValue>(
@@ -190,10 +195,13 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
                 : const Text('测试连接'),
           ),
           if (_tested != null) _TestResultView(result: _tested!),
+          // 原始错误文本可能回显服务器地址或凭据：整块遮挡。
           if (_testError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: _TestErrorView(error: _testError!),
+            FeedbackCaptureMask(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _TestErrorView(error: _testError!),
+              ),
             ),
           if (_isEdit && _tested == null && _testError == null)
             const Padding(
