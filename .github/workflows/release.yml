@@ -91,7 +91,8 @@ jobs:
       - name: Install Android targets + cargo-ndk + flutter_rust_bridge_codegen
         run: |
           rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-          cargo install cargo-ndk --locked || true
+          # cargo-ndk 4.x needs rustc 1.86; the pinned toolchain is 1.85.0.
+          cargo install cargo-ndk --locked --version 3.5.7 || true
           cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked || true
 
       - uses: actions/setup-java@v4

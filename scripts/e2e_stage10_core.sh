@@ -21,7 +21,10 @@
 # The log ring is process state, so a phase that wanted to count lines could
 # otherwise be counting its predecessor's.
 #
-#   scripts/e2e_stage10_core.sh [--keep] [--live]
+#   scripts/e2e_stage10_core.sh [--keep] [--live] [--skip-swift]
+#
+# --skip-swift drops the KomgaKit mirror leg — for Linux runners where the
+# package does not build; the macOS swift-package job covers it.
 #
 # --live adds one leg against a real Komga: a deliberately wrong key must produce
 # the same authExpired verdict and the same parked-queue behaviour. It needs no
@@ -38,6 +41,7 @@ SQLITE="$(command -v sqlite3 || true)"
 FAILURES=0
 KEEP=0
 LIVE=0
+SKIP_SWIFT=0
 KEY="fixture-key"
 BAD_KEY="definitely-not-the-key"
 # Nothing can listen on port 1: a real unreachable route, not a mock.
@@ -60,6 +64,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --keep) KEEP=1 ;;
     --live) LIVE=1 ;;
+    --skip-swift) SKIP_SWIFT=1 ;;
     *) echo "unknown flag $1" >&2; exit 2 ;;
   esac
   shift
@@ -316,27 +321,29 @@ check "an error filter is narrower than no filter" \
   "yes"
 check "ffi auth_state answers for the server" "$(metric "$FACADE" ffi_auth_state)" "unknown"
 
-# ---------------------------------------------------------------------------
-section "the same checks on the other platform"
-# ---------------------------------------------------------------------------
-# Rust's suites assert the same fixtures, and the Swift mirror of every one
-# of these four areas has to run in this gate or "both platforms" means
-# "one of them, twice". Totals are checked, not just green-ness: a suite that
-# quietly stopped compiling the Stage 10 files would still report zero
-# failures. 219 was the Swift count before any of them existed.
-SWIFT_LOG="$WORK/swift.log"
-( cd "$ROOT/apple/KomgaKit" && swift test >"$SWIFT_LOG" 2>&1 ) || true
-check "swift suite finished green" \
-  "$(grep -cE "^Test Suite 'All tests' passed" "$SWIFT_LOG")" "1"
-check "not one swift test case failed" \
-  "$(grep -cE "Test Case .*[\])'] failed" "$SWIFT_LOG")" "0"
-SWIFT_TESTS=$(grep -oE "Executed [0-9]+ tests" "$SWIFT_LOG" | tail -1 | grep -oE "[0-9]+")
-check "swift suite carries the Stage 10 mirrors" \
-  "$([ "${SWIFT_TESTS:-0}" -ge 240 ] && echo yes)" "yes"
-STAGE10_CASES=$(grep -cE "Test Case .-\[KomgaKitTests\.(CoreErrorContractTests|CoreLogTests|DatabaseHealthTests|AuthStateTests|DiagnosticsSnapshotTests|SchemaV9MigrationTests)" "$SWIFT_LOG")
-check "the six Stage 10 swift suites each ran" \
-  "$([ "${STAGE10_CASES:-0}" -ge 25 ] && echo yes)" "yes"
-printf "  info swift tests: %s total, %s of them Stage 10\n" "${SWIFT_TESTS:-?}" "${STAGE10_CASES:-?}"
+if [ "$SKIP_SWIFT" = "0" ]; then
+  # -------------------------------------------------------------------------
+  section "the same checks on the other platform"
+  # -------------------------------------------------------------------------
+  # Rust's suites assert the same fixtures, and the Swift mirror of every one
+  # of these four areas has to run in this gate or "both platforms" means
+  # "one of them, twice". Totals are checked, not just green-ness: a suite that
+  # quietly stopped compiling the Stage 10 files would still report zero
+  # failures. 219 was the Swift count before any of them existed.
+  SWIFT_LOG="$WORK/swift.log"
+  ( cd "$ROOT/apple/KomgaKit" && swift test >"$SWIFT_LOG" 2>&1 ) || true
+  check "swift suite finished green" \
+    "$(grep -cE "^Test Suite 'All tests' passed" "$SWIFT_LOG")" "1"
+  check "not one swift test case failed" \
+    "$(grep -cE "Test Case .*[\])'] failed" "$SWIFT_LOG")" "0"
+  SWIFT_TESTS=$(grep -oE "Executed [0-9]+ tests" "$SWIFT_LOG" | tail -1 | grep -oE "[0-9]+")
+  check "swift suite carries the Stage 10 mirrors" \
+    "$([ "${SWIFT_TESTS:-0}" -ge 240 ] && echo yes)" "yes"
+  STAGE10_CASES=$(grep -cE "Test Case .-\[KomgaKitTests\.(CoreErrorContractTests|CoreLogTests|DatabaseHealthTests|AuthStateTests|DiagnosticsSnapshotTests|SchemaV9MigrationTests)" "$SWIFT_LOG")
+  check "the six Stage 10 swift suites each ran" \
+    "$([ "${STAGE10_CASES:-0}" -ge 25 ] && echo yes)" "yes"
+  printf "  info swift tests: %s total, %s of them Stage 10\n" "${SWIFT_TESTS:-?}" "${STAGE10_CASES:-?}"
+fi
 
 # ---------------------------------------------------------------------------
 if [ "$LIVE" = "1" ]; then
