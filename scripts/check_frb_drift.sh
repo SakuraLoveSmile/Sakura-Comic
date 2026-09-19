@@ -76,9 +76,23 @@ if ! cmp -s "$CORE_DST/src/ffi/generated/frb_generated.rs" "$ROOT/android/komga_
   DRIFT=1
 fi
 
-if ! diff -r -q "$APP_DST/lib/src/rust" "$ROOT/android/app/lib/src/rust" >/dev/null 2>&1; then
+# Formatter behaviour drifts across Dart releases (3.7 folds short constructors
+# that 3.11 expands), so a byte-compare fails on cosmetics even when the
+# bindings are semantically identical. `dart format` resolves a file's language
+# version from the surrounding package context, so both sides are normalised
+# inside the SAME sandbox package by THIS toolchain — real drift still fails.
+DART_BIN="$(command -v dart || true)"
+if [ -z "$DART_BIN" ]; then
+  DART_BIN="$(dirname "$(command -v flutter)")/dart"
+fi
+REPO_DART="$APP_DST/lib/repo_rust"
+cp -R "$ROOT/android/app/lib/src/rust" "$REPO_DART"
+mv "$APP_DST/lib/src/rust" "$APP_DST/lib/gen_rust"
+"$DART_BIN" format "$APP_DST/lib/gen_rust" "$REPO_DART" >/dev/null
+
+if ! diff -r -q "$APP_DST/lib/gen_rust" "$REPO_DART" >/dev/null 2>&1; then
   echo "::error::Generated Dart bindings differ from repository!" >&2
-  diff -r -u "$ROOT/android/app/lib/src/rust" "$APP_DST/lib/src/rust" | head -50 >&2 || true
+  diff -r -u "$REPO_DART" "$APP_DST/lib/gen_rust" | head -50 >&2 || true
   DRIFT=1
 fi
 
