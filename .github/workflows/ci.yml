@@ -78,7 +78,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: '3.29.0'
+          # Pinned to the dev-machine toolchain: flutter_rust_bridge 2.13.0
+          # needs Dart >=3.9.2, and the lockfile needs Flutter >=3.38.4 —
+          # 3.41.3 satisfies both and makes pub get reuse the lockfile
+          # byte-for-byte instead of re-resolving into a different graph.
+          flutter-version: '3.41.3'
           cache: true
       - uses: dtolnay/rust-toolchain@master
         with:
