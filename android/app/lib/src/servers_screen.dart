@@ -1,3 +1,4 @@
+import 'package:feedback_widget/feedback_widget.dart';
 import 'package:flutter/material.dart';
 
 import 'error_presentation.dart';
@@ -62,7 +63,9 @@ class _ServersScreenState extends State<ServersScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除服务器'),
-        content: Text('删除「${profile.displayName}」？本地镜像与凭据将一并移除。'),
+        content: FeedbackCaptureMask(
+          child: Text('删除「${profile.displayName}」？本地镜像与凭据将一并移除。'),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -126,10 +129,13 @@ class _ServersScreenState extends State<ServersScreen> {
               Text(view.headline, textAlign: TextAlign.center),
               if (view.detail.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(
-                  view.detail,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall,
+                // 原始错误文本可能回显服务器地址或凭据：遮挡。
+                FeedbackCaptureMask(
+                  child: Text(
+                    view.detail,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
               ],
             ],
@@ -160,9 +166,12 @@ class _ServersScreenState extends State<ServersScreen> {
             isActive ? Icons.cloud_done : Icons.cloud_outlined,
             color: isActive ? Colors.green : null,
           ),
+          // 名称与地址是服务器/账号标识：截图遮挡（「当前」徽标不敏感，留在外面）。
           title: Row(
             children: [
-              Flexible(child: Text(profile.displayName)),
+              Flexible(
+                child: FeedbackCaptureMask(child: Text(profile.displayName)),
+              ),
               if (isActive)
                 Padding(
                   padding: const EdgeInsets.only(left: 8),
@@ -173,8 +182,9 @@ class _ServersScreenState extends State<ServersScreen> {
                 ),
             ],
           ),
-          subtitle:
-              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+          subtitle: FeedbackCaptureMask(
+            child: Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+          ),
           trailing: PopupMenuButton<String>(
             onSelected: (action) {
               switch (action) {

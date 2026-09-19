@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_settings.dart';
 import 'diagnostics_screen.dart';
+import 'feedback_access.dart';
 import 'library_repository.dart';
 import 'manual_sync_result.dart';
 import 'error_presentation.dart';
@@ -529,6 +530,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // Section: Diagnostics & About
           const _SectionHeader(title: '系统支持与关于'),
+          // 反馈组件未接入（缺 dart-define）时作用域不存在，入口整体隐藏。
+          if (FeedbackAccess.maybeOf(context) case final access?)
+            ListTile(
+              leading: const Icon(Icons.feedback_outlined),
+              title: const Text('问题反馈'),
+              subtitle: const Text('截图并附脱敏诊断日志，向开发者反馈问题'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => access.controller.captureAndOpen(),
+            ),
           ListTile(
             leading: const Icon(Icons.monitor_heart_outlined),
             title: const Text('系统诊断与日志'),
