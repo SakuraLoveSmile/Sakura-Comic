@@ -31,7 +31,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FLUTTER_VERSION: "3.29.0"
+  # Pinned to the dev-machine toolchain — see ci.yml for why.
+  FLUTTER_VERSION: "3.41.3"
   # 反馈服务接入：正式包必须携带。这不是密钥——值经 dart-define 编进产物，
   # 校验步骤保证两端一致且非空。
   FEEDBACK_API_BASE: "https://feedback.xn--fhqths51enha.cn"
