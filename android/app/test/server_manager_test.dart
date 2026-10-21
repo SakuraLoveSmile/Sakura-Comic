@@ -23,12 +23,12 @@ void main() {
 
       final profile = await manager.add(
         displayName: 'Home',
-        baseUrl: 'http://192.168.0.69:25600',
+        baseUrl: 'http://192.0.2.10:25600',
         apiKey: 'secret-key',
       );
 
       // 登录/验证/信息：probe hit with the given credentials.
-      expect(api.probedUrl, 'http://192.168.0.69:25600');
+      expect(api.probedUrl, 'http://192.0.2.10:25600');
       expect(api.probedKey, 'secret-key');
       // 保存 Server Profile：secret in keystore store, ref on the profile.
       expect(profile.credentialRef, 'keystore:${profile.id}');

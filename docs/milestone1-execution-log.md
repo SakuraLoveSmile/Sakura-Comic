@@ -11,9 +11,9 @@
 
 | 项 | 结果 |
 |---|---|
-| 仓库 | `/Users/sakurasep/Documents/Code/Project/Personal Project/Comic`，分支 `main`，跟踪 `origin/main` |
+| 仓库 | `<repository-root>`，分支 `main`，跟踪 `origin/main` |
 | 工作区 | **65 个文件已修改 / 若干未跟踪文件**（用户既有改动，未清理、未回退、未计入本次成果） |
-| Flutter | 3.41.3（Dart 3.11.1），`/Users/sakurasep/flutter/bin` |
+| Flutter | 3.41.3（Dart 3.11.1），`<flutter-sdk>/bin` |
 | Rust | cargo 1.98.0 / rustc 1.98.0；cargo-ndk 4.1.2 |
 | Android SDK | `$HOME/Library/Android/sdk`，NDK 28.2.13676358，targetSdk 36 / minSdk 24 |
 | JDK | 系统默认 JDK 是 1.8（**不能**构建 Android）；构建需 `JAVA_HOME=/opt/homebrew/opt/openjdk@17` |
@@ -430,7 +430,7 @@ widget 测试里 `Image.file` 解不出高度，渲染盒全是 0，量不到任
 
 ### 本次实际执行的检查
 
-Flutter 命令工作目录：`android/app`；Flutter 可执行文件：`/Users/sakurasep/flutter/bin/flutter`。本轮未改 Rust 接口或数据库版本，未重跑 Rust/Apple 全量验证。
+Flutter 命令工作目录：`android/app`；Flutter 可执行文件：`<flutter-sdk>/bin/flutter`。本轮未改 Rust 接口或数据库版本，未重跑 Rust/Apple 全量验证。
 
 | 检查 | 本次实际结果 | 记录入口 |
 |---|---|---|

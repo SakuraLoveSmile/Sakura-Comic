@@ -1,5 +1,7 @@
 # Stage 4 Checklist — 完整媒体库
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 验收标准（双端完整跑通）：
 
 ```text
@@ -24,7 +26,7 @@ bash scripts/e2e_stage4.sh    # fixture 电池 30/30 PASS → 离线重放 27/27
 
 真实服务器链路（需 API Key，同步 → 无凭据离线重放同一数据库）：
 ```bash
-export KOMGA_BASE_URL=http://192.168.0.69:25600
+export KOMGA_BASE_URL=http://komga.example.com:25600
 export KOMGA_API_KEY=your-api-key
 bash scripts/e2e_stage4.sh
 ```

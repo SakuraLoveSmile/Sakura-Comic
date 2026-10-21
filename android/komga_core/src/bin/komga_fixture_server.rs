@@ -486,7 +486,7 @@ fn write_route(stream: &mut TcpStream, config: &Config, request: &Request) -> st
 fn sse_stream(stream: &mut TcpStream, config: &Config) -> std::io::Result<()> {
     let frames = std::fs::read(&config.sse_file).unwrap_or_default();
     // Spring's SseEmitter answers with chunked transfer-encoding (the real
-    // server does exactly this — observed on a 401 from 192.168.0.69:25600),
+    // server does exactly this — observed on a 401 from a private server; address redacted),
     // so the fixture must not lean on "body delimited by connection close":
     // a client that trusts Content-Length/chunking would see an empty body.
     stream.write_all(

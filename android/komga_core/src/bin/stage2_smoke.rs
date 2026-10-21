@@ -14,7 +14,7 @@
 //!
 //! ```text
 //! cargo run --manifest-path android/komga_core/Cargo.toml --bin stage2_smoke -- \
-//!   --db /tmp/comic-stage2.sqlite --base-url http://192.168.0.69:25600 --api-key YOUR_KEY
+//!   --db /tmp/comic-stage2.sqlite --base-url http://192.0.2.10:25600 --api-key YOUR_KEY
 //! ```
 //!
 //! Usage (offline fixture):
@@ -111,7 +111,7 @@ async fn run_fixture(args: &Args) -> Result<(), String> {
     run_acceptance(
         &app,
         "fixture",
-        "http://192.168.0.69:25600".into(),
+        "http://192.0.2.10:25600".into(),
         "test-key".into(),
         Some(FakeConnectionFetcher { info, libraries }),
     )

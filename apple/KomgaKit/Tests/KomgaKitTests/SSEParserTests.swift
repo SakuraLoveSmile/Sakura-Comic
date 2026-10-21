@@ -186,10 +186,10 @@ final class SSEParserTests: XCTestCase {
     func testRequestCarriesTheContractedEndpointAndHeaders() throws {
         let fixture: HandshakeFixture = try load("handshake.json")
         XCTAssertEqual(sseEventsPath, fixture.endpoint.path)
-        let client = SSEClient(baseURL: "http://192.168.0.69:25600/", auth: .apiKey("secret"))
+        let client = SSEClient(baseURL: "http://192.0.2.10:25600/", auth: .apiKey("secret"))
         XCTAssertEqual(
             client.eventsURL?.absoluteString,
-            "http://192.168.0.69:25600" + fixture.endpoint.path
+            "http://192.0.2.10:25600" + fixture.endpoint.path
         )
         let request = try client.makeRequest()
         XCTAssertEqual(request.httpMethod, fixture.endpoint.method)

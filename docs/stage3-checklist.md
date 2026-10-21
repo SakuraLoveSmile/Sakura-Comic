@@ -1,5 +1,7 @@
 # Stage 3 Checklist — Local Store 与 Vertical Slice
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 验收标准（双端完整跑通）：
 
 ```text
@@ -64,7 +66,7 @@ cd android/komga_core && cargo run --bin phase0_smoke -- --fixture \
 ## 真实服务器验收（可选，需 API Key）
 
 ```bash
-export KOMGA_BASE_URL=http://192.168.0.69:25600
+export KOMGA_BASE_URL=http://komga.example.com:25600
 export KOMGA_API_KEY=your-api-key
 bash scripts/e2e_stage3.sh
 ```

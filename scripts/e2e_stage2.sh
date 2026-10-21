@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-: "${KOMGA_BASE_URL:?set KOMGA_BASE_URL (e.g. http://192.168.0.69:25600)}"
+: "${KOMGA_BASE_URL:?set KOMGA_BASE_URL (e.g. http://komga.example.com:25600)}"
 : "${KOMGA_API_KEY:?set KOMGA_API_KEY}"
 DB="${KOMGA_DB:-/tmp/comic-stage2-live.sqlite}"
 

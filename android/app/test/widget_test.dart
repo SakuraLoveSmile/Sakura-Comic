@@ -92,7 +92,7 @@ void main() {
     expect(tester.widget<FilledButton>(saveButton).onPressed, isNull);
 
     await tester.enterText(
-        find.widgetWithText(TextField, '服务器地址'), 'http://192.168.0.69:25600');
+        find.widgetWithText(TextField, '服务器地址'), 'http://192.0.2.10:25600');
     await tester.pump();
     expect(
         find.byKey(const ValueKey('plaintext-http-warning')), findsOneWidget);

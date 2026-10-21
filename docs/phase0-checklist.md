@@ -1,5 +1,7 @@
 # Phase 0 验收清单
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 目标：证明整个技术架构成立 —— 两端都能「添加真实 Komga 服务器 → 认证 →
 拉取 Series → 写入本地 SQLite → 从 SQLite 展示封面墙（含封面缓存）」。
 
@@ -24,7 +26,7 @@
 ## 数据层
 
 - [x] Server Profile + URL 规范化 + 认证头（Swift + Rust）
-- [x] 真实服务器认证成功（192.168.0.69 实测：X-API-Key → 200；无凭证 → 401）
+- [x] 真实服务器认证成功（原地址已脱敏，历史实测：X-API-Key → 200；无凭证 → 401）
 - [x] OpenAPI 快照已导出（Komga 1.26.3 / OpenAPI 3.1.0 / 139 路径，specs/openapi/komga-openapi.yaml）
 - [x] Series API 契约对照真实响应（分页字段一致；publisher/genres 差异已记录兼容性文档）
 - [x] SQLite Schema v1（Swift GRDB / Rust rusqlite 镜像一致）

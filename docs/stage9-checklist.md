@@ -1,5 +1,7 @@
 # Stage 9 验收清单 — 离线下载（Full Mobile v1）
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 **阶段目标**：实现真正独立于 Cache 的离线阅读系统。Download Manager 支持整书下载 /
 暂停 / 恢复 / Retry / 删除 / 下载队列 / 下载进度 / 存储空间统计 / 失败恢复；文件结构
 `downloads/{serverId}/{bookId}/manifest.json + 0001.jpg …`，**不打包 ZIP**；
@@ -243,7 +245,7 @@ completed 收回 waiting；状态写入仍记为 `settle`。契约里加了 `hea
 1. **真实 Komga 服务器上的整本下载 + 断流阅读**。脚本里有这一腿
    （`KOMGA_BASE_URL` + `KOMGA_API_KEY` + `KOMGA_BOOK_ID`，缺就跳过并说明），
    本轮**从未跑过**。命令：
-   `KOMGA_BASE_URL=http://192.168.0.69:25600 KOMGA_API_KEY=… KOMGA_BOOK_ID=0Q9FQVFC4TTJQ scripts/e2e_stage9.sh`
+   `KOMGA_BASE_URL=http://komga.example.com:25600 KOMGA_API_KEY=… KOMGA_BOOK_ID=0Q9FQVFC4TTJQ scripts/e2e_stage9.sh`
    （那台服务器上最大的单本是 292 页 / 48 MB）。
 2. **物理手机**。本轮只有 AVD；`svc data disable` 造出的"Wi-Fi 关、数据开"与真机上
    一张 SIM 的蜂窝网络不是一回事，`isActiveNetworkMetered()` 的真值分布也只有真机能给。

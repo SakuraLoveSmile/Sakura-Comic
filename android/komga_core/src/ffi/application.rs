@@ -4517,7 +4517,7 @@ mod tests {
         assert!(result.capabilities.iter().any(|c| c == "libraries:2"));
 
         // Acceptance chain: save profile + libraries + activate.
-        let mut profile = ServerProfile::new("Home", "http://192.168.0.69:25600", AuthType::ApiKey);
+        let mut profile = ServerProfile::new("Home", "http://192.0.2.10:25600", AuthType::ApiKey);
         profile.id = "server-1".into();
         profile.capabilities = result.capabilities.clone();
         profile.last_successful_connection = Some("2026-08-26T00:00:00Z".into());

@@ -298,7 +298,7 @@ void main() {
     expect(find.byType(FeedbackCaptureMask), findsNWidgets(3));
 
     await tester.enterText(
-        find.widgetWithText(TextField, '服务器地址'), 'http://192.168.0.69:25600');
+        find.widgetWithText(TextField, '服务器地址'), 'http://192.0.2.10:25600');
     await tester.enterText(
         find.widgetWithText(TextField, 'API Key（X-API-Key）'), 'secret-key');
     await tester.tap(find.text('测试连接'));

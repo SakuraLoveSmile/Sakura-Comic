@@ -394,8 +394,8 @@ mod tests {
     #[test]
     fn events_url_matches_the_spec_path() {
         assert_eq!(
-            events_url("http://192.168.0.69:25600/"),
-            "http://192.168.0.69:25600/sse/v1/events"
+            events_url("http://192.0.2.10:25600/"),
+            "http://192.0.2.10:25600/sse/v1/events"
         );
     }
 }
