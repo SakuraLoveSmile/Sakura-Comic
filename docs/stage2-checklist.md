@@ -1,5 +1,7 @@
 # Stage 2 Checklist — API 契约与服务器管理
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 验收标准（双端必须完成）：
 
 ```text
@@ -51,12 +53,12 @@ cargo run -p komga_core --bin stage2_smoke -- --db /tmp/comic-stage2.sqlite \
 
 Apple 侧 live 测试：`KomgaKitTests/LiveConnectionTests`（无环境变量时跳过）。
 
-## 真实服务器实测记录（192.0.2.10:25600，2026-08-26）
+## 真实服务器实测记录（原地址已脱敏，2026-08-26）
 
 - 无凭证 GET /actuator/info、GET /api/v1/libraries → 401（`authentication` 映射成立）
 - stage2_smoke live 携带无效 API Key → `connection probe failed: authentication failed`
 - **成功路径（有效 API Key）双端通过**：
-  - Android：`stage2_smoke --base-url http://192.0.2.10:25600 --api-key <key>` →
+  - Android：`stage2_smoke --base-url http://komga.example.com:25600 --api-key <key>` →
     `STAGE 2 SMOKE OK`（version=1.26.3，libraries=2，Profile 保存 + active 切换）
   - Apple：`LiveConnectionTests`（env-gated）→ passed（ServerURL 规范化 → /actuator/info →
     版本策略 → libraries 镜像 (server_id, remote_id) → Keychain + SQLite + active 切换）

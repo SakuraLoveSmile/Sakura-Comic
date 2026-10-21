@@ -436,7 +436,7 @@
     "note": "204 carries no body, so the server stamp is unknown until the next Reconcile. Writing a guessed stamp here would make R4 lie later."
   },
   "transport_reality_measured_on_the_live_server": {
-    "note": "Not inferable from the exported OpenAPI. Measured against 192.0.2.10:25600 with a real key, restoring every probe.",
+    "note": "Not inferable from the exported OpenAPI. Measured against a private server (address redacted) with a real key, restoring every probe.",
     "PATCH_read_progress": {
       "page": "must be >= 1: {page:0} answers 400 with violations fieldName=page message 'must be greater than 0'",
       "completed_false_alone": "400 {violations:[]} - unsetting completion without a page is not accepted",

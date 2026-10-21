@@ -11,9 +11,9 @@ command -v flutter_rust_bridge_codegen >/dev/null || {
   exit 1
 }
 
-# Locate flutter / dart if not in current PATH
+# Locate flutter / dart if not in current PATH (FLUTTER_ROOT may select the SDK).
 if ! command -v flutter >/dev/null && ! command -v dart >/dev/null; then
-  for p in "$HOME/flutter/bin" "/Users/developer/flutter/bin" "/usr/local/bin"; do
+  for p in "${FLUTTER_ROOT:-$HOME/flutter}/bin" "/usr/local/bin"; do
     if [ -x "$p/flutter" ] || [ -x "$p/dart" ]; then
       export PATH="$p:$PATH"
       break

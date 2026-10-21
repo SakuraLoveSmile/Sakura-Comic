@@ -26,7 +26,7 @@
 #   scripts/e2e_stage8_device.sh --avd-memory 1536    # boot a headless AVD if
 #                                                     # nothing is attached
 #   scripts/e2e_stage8_device.sh --device <serial> \
-#       --base-url http://192.0.2.10:25600 --key "$KOMGA_API_KEY" --book <id>
+#       --base-url http://komga.example.com:25600 --key "$KOMGA_API_KEY" --book <id>
 #
 # Two instrument facts this script encodes, both learned the hard way:
 #   * `-gpu swift_shader_indirect` costs ~900 ms per page turn that `-gpu host`

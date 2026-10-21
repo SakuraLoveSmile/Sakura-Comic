@@ -1,5 +1,7 @@
 # Comic — Komga 全平台媒体库客户端
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 Local-first Komga media library client for Apple platforms and Android.
 
 > 网络负责同步，本地数据库负责展示。
@@ -105,7 +107,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
 - **真实服务器验收**（需 API Key）：
   ```bash
-  export KOMGA_BASE_URL=http://192.0.2.10:25600
+  export KOMGA_BASE_URL=http://komga.example.com:25600
   export KOMGA_API_KEY=your-api-key
   bash scripts/e2e_stage2.sh
   ```
@@ -132,7 +134,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
 - **真实服务器验收**（需 API Key）：
   ```bash
-  export KOMGA_BASE_URL=http://192.0.2.10:25600
+  export KOMGA_BASE_URL=http://komga.example.com:25600
   export KOMGA_API_KEY=your-api-key
   bash scripts/e2e_stage3.sh
   ```
@@ -164,7 +166,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
 - **真实服务器验收**（需 API Key：同步 → 断网重放同一数据库）：
   ```bash
-  export KOMGA_BASE_URL=http://192.0.2.10:25600
+  export KOMGA_BASE_URL=http://komga.example.com:25600
   export KOMGA_API_KEY=your-api-key
   bash scripts/e2e_stage4.sh
   ```
@@ -203,7 +205,7 @@ iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp
   ```
   真实服务器链路（Bootstrap → Reconcile → 逐 series 校验镜像 == 服务器 → 再扫一次 clean）：
   ```bash
-  export KOMGA_BASE_URL=http://192.0.2.10:25600
+  export KOMGA_BASE_URL=http://komga.example.com:25600
   export KOMGA_API_KEY=your-api-key
   bash scripts/e2e_stage5.sh
   ```
