@@ -130,7 +130,7 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
               autocorrect: false,
               decoration: const InputDecoration(
                 labelText: '服务器地址',
-                hintText: 'http://192.0.2.10:25600',
+                hintText: 'http://komga.example.com:25600',
                 border: OutlineInputBorder(),
               ),
             ),

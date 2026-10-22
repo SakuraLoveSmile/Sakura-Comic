@@ -1,5 +1,7 @@
 # Stage 5 Checklist — 同步引擎
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 目标：建立长期可靠的数据同步系统，本阶段落地 **Bootstrap Sync + Reconcile Sync**，
 并把「即使 SSE 完全失效，本地库仍能依靠 Reconcile 最终恢复到正确状态」变成可验证事实。
 
@@ -15,7 +17,7 @@ Bootstrap Sync + Reconcile Sync + (SSE Event Sync: 触发入口已留，事件�
 
 ```bash
 bash scripts/e2e_stage5.sh        # 场景 16/16 → 回环 HTTP（含凭据被拒 11/11）→ 真实服务器 → Swift 同契约
-KOMGA_BASE_URL=http://192.0.2.10:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
+KOMGA_BASE_URL=http://komga.example.com:25600 bash scripts/e2e_stage5.sh   # 追加 3a：真实服务器认证失败恢复
 bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + flutter analyze/test
                                   # → ALL GREEN：Rust 120 / Swift 102（1 skip=live）/ Flutter 26
 ```
@@ -37,13 +39,13 @@ bash scripts/verify.sh            # cargo fmt/clippy/test + swift build/test + f
 | 断网离线重放 | 无凭据可读：无游标残留、无孤儿 Book、FTS 命中 |
 | 凭据被拒（`--auth-failure`） | 11/11 PASS：报 `authentication failed` → `sync_status=error` + `last_error`；镜像一行不多一行不少（前后计数相同）；书架照常可读；下一次健康扫描 `clean=true` 且失败标记被清除 |
 
-**这一项已经在你的真实 Komga 上跑过**：`KOMGA_BASE_URL=http://192.0.2.10:25600 bash scripts/e2e_stage5.sh`
+**这一项已经在你的真实 Komga 上跑过**：`KOMGA_BASE_URL=http://komga.example.com:25600 bash scripts/e2e_stage5.sh`
 的第 3a/4 步用一个**故意错误的 key** 打真实服务器（只读 GET，真实 Komga 回 401），
 断言全部通过 —— 不需要谁的凭据，也已经在该服务器上验证过真实 HTTP 语义（真实 401
 → 统一错误模型 → sync_state → 镜像不变 → 恢复）。
 
 > **仍未执行的半程**：第 3b 步（真实 Komga 上的完整 Bootstrap + Reconcile 一致性）
-> 需要 `KOMGA_API_KEY`。本环境能连到 `http://192.0.2.10:25600`（未带凭据 401），
+> 需要 `KOMGA_API_KEY`。历史环境曾连到真实服务器（地址已脱敏，未带凭据 401），
 > 密钥不在仓库里，所以那一半**没跑过**（3a 认证失败那半已在真实服务器上跑过）。
 > 它和第 2 步跑的是同一套断言，只是将回环服务器换成真服务器：
 > `export KOMGA_BASE_URL=... KOMGA_API_KEY=... && bash scripts/e2e_stage5.sh`。
@@ -181,7 +183,7 @@ name/status/lastModified、归一化 genres 与 summary、book title、合集/�
 
 ## 从你自己服务器的 OpenAPI 导出里查出来的两件事
 
-`specs/openapi/` 是 Komga 1.26.3 从 `http://192.0.2.10:25600` 导出的文档，属于
+`specs/openapi/` 是 Komga 1.26.3 从真实服务器导出的文档（原地址已脱敏），属于
 可离线核对的事实。据此新增了一道 API 一致性门禁（`api/openapi.rs`，4 条测试，
 变异校验过：改坏一个 URL 构造器就报错）：
 

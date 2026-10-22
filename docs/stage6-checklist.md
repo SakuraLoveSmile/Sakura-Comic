@@ -1,5 +1,7 @@
 # Stage 6 Checklist — SSE 与 Mutation Outbox
 
+> 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
+
 目标：把 Stage 5 的「镜像可靠」升级为「交互可靠」。补齐同步引擎的后两半
 **Event Driven Sync** 与 **Mutation Upload Sync**。
 
@@ -13,7 +15,7 @@ Bootstrap + Reconcile（Stage 5）+ SSE Event Sync + Mutation Upload（Stage 6�
 
 ```bash
 bash scripts/e2e_stage6.sh      # 断网→阅读→kill -9→重启→恢复网络→自动上传 → 注入故障阶梯 → SSE 真流 → 部署包核对 → Swift
-KOMGA_BASE_URL=http://192.0.2.10:25600 bash scripts/e2e_stage6.sh   # 追加：无凭据核实事件表
+KOMGA_BASE_URL=http://komga.example.com:25600 bash scripts/e2e_stage6.sh   # 追加：无凭据核实事件表
 KOMGA_API_KEY=... bash scripts/e2e_stage6.sh                          # 追加：带凭据握手 + 真实写往返
 bash scripts/verify.sh          # cargo fmt/clippy/test + swift build/test + flutter analyze/test
 ```
@@ -176,7 +178,7 @@ R8 的正式出口是 `PUT /api/v1/books/{id}/progression`，那是阅读器版�
   无凭据实测不可能得出结论：`/api/*` 与 `/sse/*` 一律 401（认证过滤器在路由之前；
   对照瞎写路径 200）。带 Key 跑脚本第 2c 步即可确认握手：
   ```bash
-  KOMGA_BASE_URL=http://192.0.2.10:25600 KOMGA_API_KEY=<你的 key> bash scripts/e2e_stage6.sh
+  KOMGA_BASE_URL=http://komga.example.com:25600 KOMGA_API_KEY=<你的 key> bash scripts/e2e_stage6.sh
   ```
   读路由的形状（`PATCH` body `{page?, completed?}`、`DELETE` 表 Mark Unread、成功 204
   无 body）来自**你自己服务器导出的 OpenAPI**，这一条是有据的。

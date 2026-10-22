@@ -3,8 +3,8 @@ import KomgaAPI
 import KomgaStore
 
 /// Live acceptance for the Apple side of Stage 2, env-gated:
-/// `KOMGA_BASE_URL` + `KOMGA_API_KEY` must be set (e.g. the LAN Komga at
-/// 192.0.2.10:25600). Without them the test is skipped so CI stays green.
+/// `KOMGA_BASE_URL` + `KOMGA_API_KEY` must be set (e.g. your server at
+/// komga.example.com:25600; example hostname). Without them the test is skipped so CI stays green.
 ///
 /// Chain: 添加服务器(URL 规范化) → 登录(API Key) → 验证 Komga/GET /actuator/info
 /// → 获取服务器信息(版本策略) → 保存 ServerProfile(Keychain + SQLite + active)。
