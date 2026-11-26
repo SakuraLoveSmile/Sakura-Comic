@@ -30,7 +30,8 @@ downloads / pending_mutations（read_progress 为 `(server_id, book_id)`）。
 
 - **Android**：Flutter(UI) → Application API → flutter_rust_bridge → Rust Core
   （HTTP / SSE / SQLite / Sync / Cache / Downloads）
-- **Apple**：SwiftUI → Feature Model → KomgaKit
+- ~~**Apple**：SwiftUI → Feature Model → KomgaKit~~ — 2026-11-26 起冻结：
+  代码留在 `apple/`，不构建、不测试、不发布（见 [apple/README.md](../apple/README.md)）。
   （KomgaAPI / KomgaStore / KomgaSync / KomgaReader）
 
 ## 错误模型

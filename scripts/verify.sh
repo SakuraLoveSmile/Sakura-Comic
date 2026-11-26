@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs the verification suites: Rust (host), Rust (the Android target the app
-# actually ships), the generated FFI glue, Swift, Flutter.
-# Usage: scripts/verify.sh [--skip-flutter] [--skip-swift] [--skip-android] [--skip-frb]
+# actually ships), the generated FFI glue, Flutter.
+# Usage: scripts/verify.sh [--skip-flutter] [--skip-android] [--skip-frb]
+# `--skip-swift` is still accepted and does nothing: Apple is frozen, but old
+# scripts (and muscle memory) pass it.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,10 +20,10 @@ fi
 for arg in "$@"; do
   case "$arg" in
     --skip-flutter) SKIP_FLUTTER=1 ;;
-    --skip-swift) SKIP_SWIFT=1 ;;
+    --skip-swift) SKIP_SWIFT=1 ;; # Apple frozen: accepted, does nothing
     --skip-android) SKIP_ANDROID=1 ;;
     --skip-frb) SKIP_FRB=1 ;;
-    --with-apple-apps) WITH_APPLE_APPS=1 ;;
+    --with-apple-apps) WITH_APPLE_APPS=1 ;; # Apple frozen: accepted, does nothing
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -61,21 +63,13 @@ if [ "$SKIP_FRB" -eq 0 ]; then
   fi
 fi
 
-if [ "$SKIP_SWIFT" -eq 0 ]; then
-  echo "==> swift build && swift test (KomgaKit)"
-  (cd "$ROOT/apple/KomgaKit" && swift build && swift test)
-fi
+# Apple (swift build / swift test / xcodebuild) is not run: the project is
+# Android-only for now and apple/ is kept as history. See README「平台范围」.
 
 if [ "$SKIP_FLUTTER" -eq 0 ]; then
   echo "==> flutter analyze && flutter test"
   (cd "$ROOT/android/app" && flutter analyze && flutter test)
 fi
 
-if [ "$WITH_APPLE_APPS" -eq 1 ]; then
-  echo "==> xcodegen generate && xcodebuild (macOS & iOS)"
-  (cd "$ROOT/apple/ComicApp" && xcodegen generate && \
-   xcodebuild -scheme ComicApp_macOS -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO && \
-   xcodebuild -scheme ComicApp_iOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO)
-fi
 
 echo "ALL GREEN"

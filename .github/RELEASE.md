@@ -49,22 +49,16 @@ base64 -i android/app/android/keystore/comic-release.jks | tr -d '\n' | pbcopy
 
 CI 中 workflow 会把 `ANDROID_KEYSTORE_BASE64` 解回 `keystore/comic-release.jks` 并现场生成 `key.properties`，失败则 loud-fail（`build.gradle.kts` 要求 release 必须签名，不会悄悄退回 debug 签名）。
 
-## Apple 产物
+## Apple 产物（已停止）
 
-- `ComicApp_iOS-Release-iphoneos-v*.app.zip`（unsigned，`CODE_SIGNING_ALLOWED=NO`）
-- `ComicApp_macOS-...app.zip` 同理
-
-`apple/ComicApp/project.yml` 由 `xcodegen generate` 生成 `.xcodeproj`（git-忽略），workflow 已包含该步。
-tvOS / visionOS 已从本次发布流水线中暂时移除（按当前需求），后续需要可在 `release.yml` 中恢复对应 job 步骤。
-
-> 当前 `bundleIdPrefix` 仍为 `com.example.comic`（`apple/ComicApp/project.yml:5`）。首次提交 App Store / TestFlight 前建议改为 `dev.sakurasep.comic`，与 Android 的 `applicationId` 保持一致（改后需在 Apple Developer Portal 重新注册 bundle IDs）。
-
-要产出可安装的签名 IPA / pkg，需在 `release.yml` 的 `apple` job 中把 `CODE_SIGNING_ALLOWED=NO` 换成你的 `CODE_SIGN_IDENTITY` / `PROVISIONING_PROFILE_SPECIFIER` / `DEVELOPMENT_TEAM`，并注入 `APPLE_CERTIFICATE_*` 等 Secrets。
+Apple 侧（iOS / macOS / tvOS / visionOS）自 2026-11-26 起冻结：`release.yml` 里已经没有 `apple` job，
+Release 只产出 Android 的 APK 与 AAB。`apple/` 目录保留作历史，见 [apple/README.md](../apple/README.md)。
+如需恢复，先接回 CI / Release 里对应的任务、签名身份与 `MARKETING_VERSION` 同步。
 
 ## 版本号
 
 - `android/app/pubspec.yaml` 的 `version: 0.1.0+2` 同时决定 `versionName`/`versionCode`。
-- Apple 各 target 的 `MARKETING_VERSION` 需手动与之同步（或在 release job 里加一步 `grep` 同步）。
+- ~~Apple 各 target 的 `MARKETING_VERSION` 同步~~：Apple 冻结后不再适用。
 - 覆盖安装测试：同签名下 `0.1.0+1 → 0.1.0+2` 已在本地验证不丢库与下载。
 
 ## 产物校验

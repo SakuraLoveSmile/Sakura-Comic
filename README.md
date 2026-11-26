@@ -1,8 +1,15 @@
-# Comic — Komga 全平台媒体库客户端
+# Comic — Komga 媒体库客户端（Android）
 
 > 隐私说明：本文中的 `komga.example.com:25600` 是示例地址。历史实测结论保留，原服务器地址已脱敏；执行命令前请替换为自己的服务器。
 
-Local-first Komga media library client for Apple platforms and Android.
+Local-first Komga media library client for Android.
+
+## 平台范围（2026-11-26 起）
+
+**本项目暂时是 Android 端独占。** Apple 侧（iOS / macOS / tvOS / visionOS）暂停维护：
+`apple/` 目录保留在仓库里作为历史与参考，但不再构建、不再测试、不再发布；
+CI 与 Release 流水线里已经没有 Apple 任务。恢复支持需要重新接上这些任务与签名身份。
+平台范围的变化记录在 [docs/roadmap.md](docs/roadmap.md) 顶部。
 
 > 网络负责同步，本地数据库负责展示。
 > UI 不直接依赖实时网络请求；所有媒体库页面优先从本地索引读取。
@@ -30,7 +37,7 @@ Komga Server
 
 ```text
 Comic/
-├── apple/          Apple 平台：ComicApp (iOS/macOS) + KomgaKit Swift Package
+├── apple/          Apple 平台（已冻结，仅作历史）：ComicApp (iOS/macOS) + KomgaKit
 ├── android/        Android 平台：Flutter shell (android/app) + Rust Core (android/komga_core)
 ├── specs/          OpenAPI / SSE 事件 / Behavior 契约 / Shared Fixtures
 ├── docs/           架构、同步引擎、数据库、阅读器、离线存储
@@ -43,16 +50,21 @@ Comic/
 
 | 主题 | 一句话 | 位置 |
 | --- | --- | --- |
-| **日常可用** | 出错时知道发生了什么，能自查 | 现在 |
-| 离线可用 | iPhone / iPad 上能像 Android 一样管理下载 | 下一棒 |
-| 桌面可用 | macOS 上像原生 App 一样用 | 再下一棒 |
+| **日常可用** | 出错时知道发生了什么，能自查 | 已完成 |
+| **离线可用** | 端上的下载中心：队列、暂停恢复、空间与计费、永久保留 | 已完成（Android） |
+| **大库可用** | 大库下书架墙不再随规模变慢 | 已完成（Android） |
+| **反馈与更新** | 端内反馈组件（0.17.0，宿主托管外观）+ 正式版/预览版检查更新 | 已完成（Android） |
+
+> Apple 侧主题（离线可用 / 桌面可用 的 iOS、macOS 部分）随平台范围一起暂停，
+> 相关能力代码保留在 `apple/` 里，不再排期。
 
 > 下面「已交付能力」各章是历史实现说明的存档，记录当前代码为什么长这样；
 > 它们描述的是既成事实，不作为排期依据。
 
 ## 本期明确不做
 
-Windows / Linux 客户端、全平台 Rust Shared Core、OCR、内容识别、本地图像处理、
+iOS / macOS / tvOS / visionOS 客户端（Apple 侧冻结）、Windows / Linux 客户端、
+全平台 Rust Shared Core、OCR、内容识别、本地图像处理、
 自建转码、云端账户、OPDS Server、Komga 服务端管理、
 **tvOS 客户端、visionOS 客户端**。
 
@@ -61,7 +73,7 @@ Windows / Linux 客户端、全平台 Rust Shared Core、OCR、内容识别、�
 ```bash
 chmod +x scripts/*.sh   # 首次
 
-# 1. 三方代码检查（cargo fmt/clippy/test、swift build/test、flutter analyze/test）
+# 1. 代码检查（cargo fmt/clippy/test、Android 目标交叉检查、FFI 漂移、flutter analyze/test）
 bash scripts/verify.sh
 
 # 2. FFI 接线（一次性；codegen 2.13 + cargo-ndk 4，生成绑定 + 三 ABI jniLibs）
@@ -86,7 +98,8 @@ export KOMGA_API_KEY=your-api-key
 bash scripts/e2e_smoke.sh
 ```
 
-iOS 侧：`cd apple/ComicApp && xcodegen generate && xcodebuild -scheme ComicApp_iOS -sdk iphonesimulator build`（.xcodeproj 为生成物，不入库）。
+Apple 侧已冻结：`apple/` 不再构建、不再测试（见 [apple/README.md](apple/README.md)）。
+`scripts/verify.sh` 仍接受 `--skip-swift` 是为了兼容旧脚本，它现在不做任何事。
 
 验收细节与勾选状态见 [docs/phase0-checklist.md](docs/phase0-checklist.md)。
 

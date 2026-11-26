@@ -119,67 +119,7 @@ jobs:
           done
           echo "APK successfully packages all 3 ABI native libraries."
 
-  swift-package:
-    runs-on: macos-15
-    defaults:
-      run:
-        working-directory: apple/KomgaKit
-    steps:
-      - uses: actions/checkout@v4
-      - run: swift build
-      - run: swift test
 
-  # Stage 1: builds the iOS app (KomgaKit linked) and proves it launches on
-  # a simulator. The .xcodeproj is generated from project.yml (gitignored).
-  ios-app:
-    runs-on: macos-15
-    defaults:
-      run:
-        working-directory: apple/ComicApp
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate Xcode project
-        run: xcodegen generate
-      - name: Build for iOS Simulator
-        run: |
-          xcodebuild -project ComicApp.xcodeproj -scheme ComicApp_iOS \
-            -sdk iphonesimulator -configuration Debug \
-            -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
-      - name: Boot simulator, install, and launch the app
-        run: |
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          devices = json.load(sys.stdin)["devices"]
-          for runtime in sorted(devices):
-              for d in devices[runtime]:
-                  if d["isAvailable"]:
-                      print(d["udid"]); sys.exit()
-          ' )
-          echo "Booting simulator $DEVICE"
-          xcrun simctl boot "$DEVICE" || true
-          xcrun simctl bootstatus "$DEVICE" -b
-          xcrun simctl install "$DEVICE" build/Build/Products/Debug-iphonesimulator/ComicApp_iOS.app
-          xcrun simctl launch "$DEVICE" com.example.comic.ios
-          sleep 5
-          xcrun simctl spawn "$DEVICE" launchctl list | grep com.example.comic.ios && echo "iOS APP LAUNCHED OK"
-
-  # Builds the macOS app (with multi-window architecture) and validates build.
-  macos-app:
-    runs-on: macos-15
-    defaults:
-      run:
-        working-directory: apple/ComicApp
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate Xcode project
-        run: xcodegen generate
-      - name: Build for macOS
-        run: |
-          xcodebuild -project ComicApp.xcodeproj -scheme ComicApp_macOS \
-            -configuration Debug \
-            -destination 'platform=macOS' \
-            -derivedDataPath build build CODE_SIGNING_ALLOWED=NO
+# Apple jobs (swift-package / ios-app / macos-app) were here. They are removed
+# while the project is Android-only: apple/ is kept as history, not as a target.
+# See the note in the README roadmap section.

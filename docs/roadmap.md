@@ -1,5 +1,14 @@
 # 路线图
 
+## 平台范围（2026-11-26）
+
+**本项目暂时是 Android 端独占。** Apple 侧（iOS / macOS / tvOS / visionOS）暂停：
+`apple/` 保留为历史与参考，CI、Release 与 `scripts/verify.sh` 里已经没有 Apple 任务；
+下面「离线可用」「桌面可用」两章的 iOS / macOS 交付随平台范围一起暂停，代码留在 `apple/`。
+恢复支持要重新接上 Apple 的构建/测试/签名，不是改一行开关。
+
+当前主线只有一条：**Android 上把每天用的路径做扎实**（发版见 0.3.0 / 0.3.1 的任务记录）。
+
 > 本文件取代此前的 Phase / Stage 阶段体系。
 > 旧编号（Phase 0–5、Stage 2–10）只作为历史存档，不再作为规划依据；
 > `docs/stage*-checklist.md` 保留为验收记录，但不再驱动排期。
