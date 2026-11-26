@@ -91,5 +91,4 @@ enum ErrorCode {
 
   /// Anything this build cannot name, including a code from a newer client.
   unknown,
-  ;
 }

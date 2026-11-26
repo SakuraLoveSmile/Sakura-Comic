@@ -80,10 +80,7 @@ class TableRows {
   final String table;
   final PlatformInt64 rows;
 
-  const TableRows({
-    required this.table,
-    required this.rows,
-  });
+  const TableRows({required this.table, required this.rows});
 
   @override
   int get hashCode => table.hashCode ^ rows.hashCode;

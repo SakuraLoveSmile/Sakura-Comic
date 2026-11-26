@@ -341,10 +341,7 @@ class CollectionPageResult {
   final List<CollectionRow> items;
   final PlatformInt64 total;
 
-  const CollectionPageResult({
-    required this.items,
-    required this.total,
-  });
+  const CollectionPageResult({required this.items, required this.total});
 
   @override
   int get hashCode => items.hashCode ^ total.hashCode;
@@ -363,10 +360,7 @@ class CollectionRef {
   final String remoteId;
   final String name;
 
-  const CollectionRef({
-    required this.remoteId,
-    required this.name,
-  });
+  const CollectionRef({required this.remoteId, required this.name});
 
   @override
   int get hashCode => remoteId.hashCode ^ name.hashCode;
@@ -1276,10 +1270,7 @@ class ReadlistPageResult {
   final List<ReadlistRow> items;
   final PlatformInt64 total;
 
-  const ReadlistPageResult({
-    required this.items,
-    required this.total,
-  });
+  const ReadlistPageResult({required this.items, required this.total});
 
   @override
   int get hashCode => items.hashCode ^ total.hashCode;

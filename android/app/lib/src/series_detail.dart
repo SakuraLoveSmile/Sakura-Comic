@@ -2,12 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'download_controller.dart';
+import 'error_presentation.dart';
 import 'library_repository.dart';
+import 'models.dart';
 import 'reader_controller.dart';
 import 'reader_screen.dart';
 import 'reader_system_controls.dart';
-import 'models.dart';
-import 'download_controller.dart';
+import 'rust/ffi/error.dart' show ErrorCode;
 
 /// Series detail: metadata (Tags/Genres/Status/Authors/Publisher) + the
 /// book list with read status and covers. All data from the local store;
@@ -555,11 +557,17 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
           await controller.enqueue(bookId);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('下载操作失败: $e')),
-        );
-      }
+      if (!mounted) return;
+      // The one failure worth translating: queuing a book this device has
+      // never opened needs a single manifest request, so an unreachable server
+      // means "come back online", not "the download is broken".
+      final view = FailurePresentation.from(e);
+      final message = view.code == ErrorCode.networkUnavailable
+          ? '这本书还没同步过页数，联网后再点一次下载'
+          : view.headline;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } finally {
       if (mounted) {
         setState(() => _isDownloadingAction = false);
@@ -580,8 +588,11 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
   Widget build(BuildContext context) {
     final book = widget.book;
     final detail = _detail;
+    // The sheet is scrollable and its actions wrap: four labelled buttons plus
+    // their gaps are wider than a phone, and a sheet that overflows sideways
+    // hides the one action ("下载" / "标记已读") it exists for.
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -604,14 +615,16 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
             Text(_statusText(book),
                 style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 FilledButton.icon(
                   onPressed: () => _openReader(context, book),
                   icon: const Icon(Icons.menu_book_outlined),
                   label: const Text('开始阅读'),
                 ),
-                const SizedBox(width: 12),
                 FilledButton(
                   onPressed: () async {
                     await widget.repository.markRead(bookId: book.remoteId);
@@ -620,8 +633,7 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
                   },
                   child: const Text('标记已读'),
                 ),
-                if (widget.downloads != null) ...[
-                  const SizedBox(width: 12),
+                if (widget.downloads != null)
                   OutlinedButton.icon(
                     key: Key('download-${book.remoteId}'),
                     onPressed: _isDownloadingAction ? null : _toggleDownload,
@@ -634,8 +646,6 @@ class _BookDetailSheetState extends State<_BookDetailSheet> {
                         : const Icon(Icons.download_outlined, size: 18),
                     label: Text(_downloadLabel),
                   ),
-                ],
-                const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () async {
                     await widget.repository.markUnread(bookId: book.remoteId);

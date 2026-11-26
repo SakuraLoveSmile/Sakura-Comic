@@ -1075,6 +1075,29 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     );
   }
 
+  /// Menu sentinel for "no filter at all".
+  ///
+  /// It must never reach the query: the parameter is compared against the
+  /// column value, so the literal 全部 matched the rows *named* 全部 — that is,
+  /// none of them — and picking "全部状态" answered 0 of 4 series while the menu
+  /// read like "clear the filter". Clearing is a null, not a word.
+  static const String _anyLabel = '全部';
+
+  void _selectStatus(String? value) {
+    setState(() => _selectedStatus = value);
+    _loadWall(reset: true);
+  }
+
+  void _selectTag(String? value) {
+    setState(() => _selectedTag = value);
+    _loadWall(reset: true);
+  }
+
+  void _selectGenre(String? value) {
+    setState(() => _selectedGenre = value);
+    _loadWall(reset: true);
+  }
+
   Widget _shelfControls() {
     return Wrap(
       spacing: 8,
@@ -1083,12 +1106,9 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       children: [
         PopupMenuButton<String>(
           initialValue: _selectedStatus,
-          onSelected: (value) {
-            setState(() => _selectedStatus = value);
-            _loadWall(reset: true);
-          },
+          onSelected: (value) => _selectStatus(value == _anyLabel ? null : value),
           itemBuilder: (context) => [
-            const PopupMenuItem(value: '全部', child: Text('全部状态')),
+            const PopupMenuItem(value: _anyLabel, child: Text('全部状态')),
             for (final s in _filterOptions.statuses)
               PopupMenuItem(value: s, child: Text(s)),
           ],
@@ -1100,12 +1120,9 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         ),
         PopupMenuButton<String>(
           initialValue: _selectedTag,
-          onSelected: (value) {
-            setState(() => _selectedTag = value);
-            _loadWall(reset: true);
-          },
+          onSelected: (value) => _selectTag(value == _anyLabel ? null : value),
           itemBuilder: (context) => [
-            const PopupMenuItem(value: '全部', child: Text('全部标签')),
+            const PopupMenuItem(value: _anyLabel, child: Text('全部标签')),
             for (final t in _filterOptions.tags)
               PopupMenuItem(value: t, child: Text(t)),
           ],
@@ -1117,12 +1134,9 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         ),
         PopupMenuButton<String>(
           initialValue: _selectedGenre,
-          onSelected: (value) {
-            setState(() => _selectedGenre = value);
-            _loadWall(reset: true);
-          },
+          onSelected: (value) => _selectGenre(value == _anyLabel ? null : value),
           itemBuilder: (context) => [
-            const PopupMenuItem(value: '全部', child: Text('全部题材')),
+            const PopupMenuItem(value: _anyLabel, child: Text('全部题材')),
             for (final g in _filterOptions.genres)
               PopupMenuItem(value: g, child: Text(g)),
           ],

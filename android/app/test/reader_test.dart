@@ -306,6 +306,49 @@ void main() {
     await tester.runAsync(() => File(path).parent.delete(recursive: true));
   });
 
+  testWidgets('分页模式：点按、底栏箭头、滑块都让画面跟着页码走', (tester) async {
+    final api = InMemoryReaderApi(pageCount: 6);
+    final controller = ReaderController(api: api);
+    await tester
+        .pumpWidget(MaterialApp(home: ReaderScreen(controller: controller)));
+    await pumpUntil(tester,
+        () => find.byType(PageView).evaluate().isNotEmpty && !controller.busy);
+
+    PageController pager() =>
+        tester.widget<PageView>(find.byType(PageView)).controller!;
+    Future<void> settle() async {
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    expect(pager().page?.round(), 0,
+        reason: 'the reader opens on the first spread');
+
+    // 单页 LTR: the right half is 下一页.
+    final view = tester.getSize(find.byType(PageView));
+    await tester.tapAt(Offset(view.width * 0.85, view.height * 0.4));
+    await settle();
+    expect(controller.spread, 1);
+    expect(pager().page?.round(), 1,
+        reason: 'the picture has to follow the tap, not just the page number');
+
+    // 底栏箭头走的是同一个模型。
+    await tester.tap(find.byTooltip('下一页'));
+    await settle();
+    expect(controller.spread, 2);
+    expect(pager().page?.round(), 2);
+
+    // 滑块是一次跳转，画面同样要跟上。
+    final track = tester.getRect(find.byType(Slider));
+    await tester.tapAt(Offset(track.right - 10, track.center.dy));
+    await settle();
+    expect(controller.page, greaterThan(3),
+        reason: 'tapping the end of the track was supposed to jump forward');
+    expect(pager().page?.round(), controller.spread,
+        reason: 'after a jump the view and the page number must agree');
+  });
+
   testWidgets('条漫拖动后立即退出仍保存实际位置', (tester) async {
     final path = (await tester.runAsync(writeTallPng))!;
     final api = InMemoryReaderApi(pageCount: 3, startPageOffsetRatio: 0.2)

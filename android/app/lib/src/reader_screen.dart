@@ -33,6 +33,14 @@ class ReaderScreen extends StatefulWidget {
 class _ReaderScreenState extends State<ReaderScreen>
     with WidgetsBindingObserver {
   PageController? _paged;
+
+  /// At most one follow-the-model jump per frame: a tap that lands next to a
+  /// progress write would otherwise schedule the same jump twice.
+  bool _followScheduled = false;
+
+  /// The page mode the current [PageController] was built for.
+  String? _pagerMode;
+
   final _webtoonKey = GlobalKey<_WebtoonColumnState>();
   Future<void>? _exitCapture;
 
@@ -155,9 +163,47 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (!mounted) return;
     setState(() {});
     // The webtoon column owns its scroll offset; paged modes use a PageView.
-    if (!widget.controller.isWebtoon) {
-      _paged ??= PageController(initialPage: widget.controller.spread);
+    final controller = widget.controller;
+    // A pager belongs to one page mode: 单页→双页 changes what an index means, and
+    // coming back from 条漫 restores a cached index that was measured against a
+    // different layout. Both start a new controller at the spread the core says
+    // rather than at an index that used to mean that page.
+    final mode =
+        controller.isWebtoon ? 'webtoon' : (controller.settings?.mode ?? '');
+    if (_pagerMode != null && _pagerMode != mode) {
+      final stale = _paged;
+      _paged = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) => stale?.dispose());
     }
+    _pagerMode = mode;
+    if (controller.isWebtoon) return;
+    _paged ??= PageController(initialPage: controller.spread);
+    _followSpread();
+  }
+
+  /// Paged modes: a tap, the bottom arrows and the slider all move the model
+  /// (`ReaderController.spread`), so the page view has to be told to follow —
+  /// without this the page number and the picture disagree, and only a swipe
+  /// ever turns a page.
+  ///
+  /// It runs after the frame, because `notifyListeners` can fire from inside a
+  /// scroll callback: jumping there would move the view under the drag that is
+  /// still being resolved. A swipe arrives here as a spread that already
+  /// matches, so this stays a no-op for it instead of fighting the gesture.
+  void _followSpread() {
+    if (_followScheduled) return;
+    _followScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _followScheduled = false;
+      if (!mounted) return;
+      final pager = _paged;
+      if (pager == null || !pager.hasClients) return;
+      final count = widget.controller.spreadCount;
+      if (count <= 0) return;
+      final target = widget.controller.spread.clamp(0, count - 1);
+      if (pager.page?.round() == target) return;
+      pager.jumpToPage(target);
+    });
   }
 
   @override

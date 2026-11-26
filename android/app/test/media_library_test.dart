@@ -72,6 +72,71 @@ void main() {
     expect(repo.lastLibraryId, 'lib-1');
   });
 
+  testWidgets('全部状态 clears the filter instead of filtering by the word',
+      (tester) async {
+    final repo = _MediaFakeRepository();
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester.pumpAndSettle();
+    // Solo Leveling is COMPLETED and never appears in 继续阅读, so it is the one
+    // card whose presence answers "is the shelf filtered or empty?".
+    expect(find.text('Solo Leveling'), findsOneWidget);
+
+    // Narrow to one status first, so clearing has something to clear.
+    await tester.tap(find.text('状态'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ONGOING').last);
+    await tester.pumpAndSettle();
+    expect(repo.lastStatus, 'ONGOING');
+    expect(find.text('Solo Leveling'), findsNothing);
+
+    // 全部状态 means "no filter". Passing the literal down emptied the shelf and
+    // left no way back short of restarting the app.
+    await tester.tap(find.text('ONGOING'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('全部状态'));
+    await tester.pumpAndSettle();
+    expect(repo.lastStatus, isNull);
+    expect(find.text('Solo Leveling'), findsOneWidget);
+  });
+
+  testWidgets('书籍详情弹层在小屏上四动作齐全且不横向溢出', (tester) async {
+    tester.view.physicalSize = const Size(1080, 1920);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final repo = _MediaFakeRepository();
+    final api = InMemoryDownloadsApi();
+    final controller = DownloadController(
+      api,
+      link: () async => 'unmetered',
+      freeBytes: () async => 1 << 30,
+      interval: const Duration(hours: 1),
+      passesPerTurn: 0,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: SeriesDetailScreen(
+        repository: repo,
+        seriesId: 'series-1',
+        downloads: controller,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Book 3'));
+    await tester.pumpAndSettle();
+
+    // A Row of four labelled buttons overflowed this sheet on every phone, and
+    // the overflow was the only thing the user saw.
+    expect(tester.takeException(), isNull);
+    expect(find.text('开始阅读'), findsOneWidget);
+    expect(find.text('标记已读'), findsOneWidget);
+    expect(find.text('下载'), findsOneWidget);
+    expect(find.text('标记未读'), findsOneWidget);
+    controller.stop();
+  });
+
   testWidgets('continue reading shelf renders local progress', (tester) async {
     final repo = _MediaFakeRepository();
     await tester
@@ -394,6 +459,7 @@ class _MediaFakeRepository extends LibraryRepository {
 
   String? lastSearch;
   String? lastLibraryId;
+  String? lastStatus;
   final List<String> markedRead = [];
 
   @override
@@ -410,11 +476,16 @@ class _MediaFakeRepository extends LibraryRepository {
   }) async {
     lastSearch = search;
     lastLibraryId = libraryId;
+    lastStatus = status;
     final items = _series
         .where((s) =>
             search == null ||
             s.name.toLowerCase().contains(search.toLowerCase()))
         .where((s) => libraryId == null || s.libraryId == libraryId)
+        // The core compares the column to the argument, so the fake has to,
+        // otherwise a literal 全部 in the query looks harmless here and empties
+        // a real shelf.
+        .where((s) => status == null || s.status == status)
         .toList();
     return PagedSeries(
         items: items, total: items.length); // items is runtime-filtered

@@ -11,10 +11,7 @@ class AuthorRow {
   final String name;
   final String role;
 
-  const AuthorRow({
-    required this.name,
-    required this.role,
-  });
+  const AuthorRow({required this.name, required this.role});
 
   @override
   int get hashCode => name.hashCode ^ role.hashCode;

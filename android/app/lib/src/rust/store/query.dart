@@ -12,10 +12,7 @@ class BookPageResult {
   final List<BookRow> items;
   final PlatformInt64 total;
 
-  const BookPageResult({
-    required this.items,
-    required this.total,
-  });
+  const BookPageResult({required this.items, required this.total});
 
   @override
   int get hashCode => items.hashCode ^ total.hashCode;
@@ -117,10 +114,7 @@ class SeriesPageResult {
   final List<SeriesRow> items;
   final PlatformInt64 total;
 
-  const SeriesPageResult({
-    required this.items,
-    required this.total,
-  });
+  const SeriesPageResult({required this.items, required this.total});
 
   @override
   int get hashCode => items.hashCode ^ total.hashCode;

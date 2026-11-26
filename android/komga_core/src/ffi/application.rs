@@ -3156,6 +3156,80 @@ impl App {
         download_dto(&conn, &Some(row), &server_id, &book_id)
     }
 
+    /// Make a book downloadable even though this device never opened it online.
+    ///
+    /// `download_enqueue` can only queue a book whose page manifest is already
+    /// mirrored, and the mirror is written by `reader_open` — so "browse a series,
+    /// tap 下载 on an unread volume" failed on every volume the user had not read
+    /// yet, with an English message about a missing manifest. The manifest is one
+    /// request and the same one opening the book makes; asking for it here is what
+    /// turns that dead end into a download.
+    pub async fn download_prepare(
+        &self,
+        server_id: String,
+        book_id: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<DownloadBookDto, ApiError> {
+        let client = KomgaClient::shared(base_url, AuthMethod::ApiKey { key: api_key })?;
+        self.download_prepare_with(&client, &server_id, &book_id)
+            .await
+    }
+
+    /// Same, over any [PageStreaming], so the mirror step is testable without a
+    /// socket. An already-mirrored book makes no request at all: this stays the
+    /// offline-safe path it was.
+    pub async fn download_prepare_with<S: PageStreaming + Sync>(
+        &self,
+        source: &S,
+        server_id: &str,
+        book_id: &str,
+    ) -> Result<DownloadBookDto, ApiError> {
+        let (mirrored, media_type) = {
+            let conn = store::open(&self.db_path).map_err(db_err)?;
+            let rows = store::pages::list(&conn, server_id, book_id).map_err(db_err)?;
+            let media: Option<String> = conn
+                .query_row(
+                    "SELECT media_type FROM books WHERE server_id = ?1 AND remote_id = ?2",
+                    rusqlite::params![server_id, book_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(None);
+            (rows, media)
+        };
+        if mirrored.is_empty() {
+            let dtos = source.pages(book_id).await?;
+            let raw: Vec<reader::manifest::RawPage> = dtos
+                .iter()
+                .map(|page| reader::manifest::RawPage {
+                    file_name: page.file_name.clone(),
+                    media_type: page.media_type.clone(),
+                    number: i64::from(page.number),
+                    width: page.width.map(i64::from),
+                    height: page.height.map(i64::from),
+                    size_bytes: page.size_bytes,
+                })
+                .collect();
+            let built = reader::manifest::PageManifest::from_raw(
+                server_id,
+                book_id,
+                media_type.as_deref(),
+                &raw,
+            );
+            if built.empty_error() {
+                return Err(ApiError::InvalidInput {
+                    message: format!("book {book_id} reports no pages"),
+                });
+            }
+            let conn = store::open(&self.db_path).map_err(db_err)?;
+            let rows: Vec<_> = built.pages.iter().map(|page| page.to_row()).collect();
+            store::pages::replace(&conn, server_id, book_id, &rows, &thumbnails_now())
+                .map_err(db_err)?;
+            drop(conn);
+        }
+        self.download_enqueue(server_id.to_string(), book_id.to_string())
+    }
+
     /// The only gesture that may stop a download in flight, and the only one that
     /// may start one back up again.
     pub fn download_pause(
@@ -5641,6 +5715,96 @@ mod tests {
         assert!(app
             .download_enqueue("s1".to_string(), "unseen".to_string())
             .is_err());
+        cleanup_temp(&db);
+    }
+
+    /// A page source that answers from memory. The mirror step is what these
+    /// tests assert, and a socket would only add a way for them to be flaky.
+    struct InlinePages {
+        pages: Vec<crate::api::page::PageDto>,
+        calls: std::sync::atomic::AtomicU32,
+    }
+
+    impl InlinePages {
+        fn of(count: i32) -> Self {
+            let pages = (1..=count)
+                .map(|number| crate::api::page::PageDto {
+                    file_name: format!("{number:04}.png"),
+                    media_type: "image/png".to_string(),
+                    number,
+                    size: "1 MB".to_string(),
+                    width: Some(1200),
+                    height: Some(1800),
+                    size_bytes: Some(1024),
+                })
+                .collect();
+            Self {
+                pages,
+                calls: std::sync::atomic::AtomicU32::new(0),
+            }
+        }
+
+        fn calls(&self) -> u32 {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl PageStreaming for InlinePages {
+        async fn pages(&self, _book_id: &str) -> Result<Vec<crate::api::page::PageDto>, ApiError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.pages.clone())
+        }
+
+        async fn page_bytes(
+            &self,
+            _book_id: &str,
+            _number: u32,
+        ) -> Result<(Vec<u8>, String), ApiError> {
+            unreachable!("preparing a download must not fetch page bytes")
+        }
+    }
+
+    /// The gesture the download button means, on a book this device has never
+    /// opened: ask for the manifest once, mirror it, queue it. Before this, the
+    /// queue refused every unread volume and the UI could only print the core's
+    /// English "no mirrored manifest" text.
+    #[tokio::test]
+    async fn a_book_never_opened_online_can_still_be_queued() {
+        let db = temp_db();
+        let app = App::new(&db);
+        plant_book_row(&db, "s1", "b-new", "2024-05-11T18:07:33Z");
+        assert!(
+            app.download_enqueue("s1".to_string(), "b-new".to_string())
+                .is_err(),
+            "the queue alone still refuses a book with no mirrored pages"
+        );
+
+        let pages = InlinePages::of(3);
+        let queued = app
+            .download_prepare_with(&pages, "s1", "b-new")
+            .await
+            .expect("preparing a never-opened book must queue it");
+        assert_eq!(queued.pages_total, 3);
+        assert_eq!(queued.state, "waiting");
+        assert_eq!(pages.calls(), 1, "one manifest request, not one per page");
+
+        // Mirrored means the reader can open it offline from here on, and the
+        // next prepare costs no request at all.
+        let conn = store::open(&db).unwrap();
+        let mirrored = store::pages::list(&conn, "s1", "b-new").unwrap();
+        assert_eq!(mirrored.len(), 3);
+        drop(conn);
+        let offline = InlinePages::of(0);
+        let again = app
+            .download_prepare_with(&offline, "s1", "b-new")
+            .await
+            .unwrap();
+        assert_eq!(again.pages_total, 3);
+        assert_eq!(
+            offline.calls(),
+            0,
+            "a mirrored book must not ask the server again"
+        );
         cleanup_temp(&db);
     }
 

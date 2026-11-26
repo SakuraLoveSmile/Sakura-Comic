@@ -294,7 +294,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CollectionDetailRow? dco_decode_opt_box_autoadd_collection_detail_row(
-      dynamic raw);
+    dynamic raw,
+  );
 
   @protected
   DownloadPumpDto? dco_decode_opt_box_autoadd_download_pump_dto(dynamic raw);
@@ -316,7 +317,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReadlistDetailRow? dco_decode_opt_box_autoadd_readlist_detail_row(
-      dynamic raw);
+    dynamic raw,
+  );
 
   @protected
   SeriesDetailRow? dco_decode_opt_box_autoadd_series_detail_row(dynamic raw);
@@ -419,7 +421,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Map<String, String> sse_decode_Map_String_String_None(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -453,7 +456,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BookDetailRow sse_decode_box_autoadd_book_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
@@ -463,15 +467,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CollectionDetailRow sse_decode_box_autoadd_collection_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   DeviceProfileDto sse_decode_box_autoadd_device_profile_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   DownloadPumpDto sse_decode_box_autoadd_download_pump_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
@@ -487,27 +494,33 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LibraryCountRow sse_decode_box_autoadd_library_count_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReaderSettingsDto sse_decode_box_autoadd_reader_settings_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReadlistDetailRow sse_decode_box_autoadd_readlist_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   SeriesDetailRow sse_decode_box_autoadd_series_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ServerProfile sse_decode_box_autoadd_server_profile(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   SsePollResult sse_decode_box_autoadd_sse_poll_result(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   BuildInfo sse_decode_build_info(SseDeserializer deserializer);
@@ -520,11 +533,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CollectionDetailRow sse_decode_collection_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   CollectionPageResult sse_decode_collection_page_result(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   CollectionRef sse_decode_collection_ref(SseDeserializer deserializer);
@@ -537,7 +552,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ContinueReadingRow sse_decode_continue_reading_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   CoreError sse_decode_core_error(SseDeserializer deserializer);
@@ -556,7 +572,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DownloadDeleteDto sse_decode_download_delete_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   DownloadPumpDto sse_decode_download_pump_dto(SseDeserializer deserializer);
@@ -608,41 +625,49 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<CollectionRef> sse_decode_list_collection_ref(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<CollectionRow> sse_decode_list_collection_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<ContinueReadingRow> sse_decode_list_continue_reading_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<DownloadBookDto> sse_decode_list_download_book_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<EntitySyncState> sse_decode_list_entity_sync_state(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<Library> sse_decode_list_library(SseDeserializer deserializer);
 
   @protected
   List<LibraryCountRow> sse_decode_list_library_count_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<Uint32List> sse_decode_list_list_prim_u_32_strict(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<LogRecord> sse_decode_list_log_record(SseDeserializer deserializer);
 
   @protected
   List<OutboxEntryDto> sse_decode_list_outbox_entry_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   Uint32List sse_decode_list_prim_u_32_strict(SseDeserializer deserializer);
@@ -652,32 +677,37 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<QueueStateCountDto> sse_decode_list_queue_state_count_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<ReadlistRow> sse_decode_list_readlist_row(SseDeserializer deserializer);
 
   @protected
   List<(String, String)> sse_decode_list_record_string_string(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<SeriesRow> sse_decode_list_series_row(SseDeserializer deserializer);
 
   @protected
   List<ServerProfile> sse_decode_list_server_profile(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<StorageBookDto> sse_decode_list_storage_book_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<TableRows> sse_decode_list_table_rows(SseDeserializer deserializer);
 
   @protected
   List<ThumbnailRow> sse_decode_list_thumbnail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<Tombstone> sse_decode_list_tombstone(SseDeserializer deserializer);
@@ -693,29 +723,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BookDetailRow? sse_decode_opt_box_autoadd_book_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   BuildInfo? sse_decode_opt_box_autoadd_build_info(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   CollectionDetailRow? sse_decode_opt_box_autoadd_collection_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   DownloadPumpDto? sse_decode_opt_box_autoadd_download_pump_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
   GitCommit? sse_decode_opt_box_autoadd_git_commit(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   GitInfo? sse_decode_opt_box_autoadd_git_info(SseDeserializer deserializer);
@@ -725,23 +760,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LibraryCountRow? sse_decode_opt_box_autoadd_library_count_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReadlistDetailRow? sse_decode_opt_box_autoadd_readlist_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   SeriesDetailRow? sse_decode_opt_box_autoadd_series_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ServerProfile? sse_decode_opt_box_autoadd_server_profile(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   SsePollResult? sse_decode_opt_box_autoadd_sse_poll_result(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   OutboxEntryDto sse_decode_outbox_entry_dto(SseDeserializer deserializer);
@@ -751,7 +791,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   QueueStateCountDto sse_decode_queue_state_count_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReadTargetRow sse_decode_read_target_row(SseDeserializer deserializer);
@@ -764,7 +805,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReaderSettingsDto sse_decode_reader_settings_dto(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReaderTurnDto sse_decode_reader_turn_dto(SseDeserializer deserializer);
@@ -774,11 +816,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReadlistDetailRow sse_decode_readlist_detail_row(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReadlistPageResult sse_decode_readlist_page_result(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReadlistRow sse_decode_readlist_row(SseDeserializer deserializer);
@@ -788,7 +832,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (String, String) sse_decode_record_string_string(
-      SseDeserializer deserializer);
+    SseDeserializer deserializer,
+  );
 
   @protected
   SeriesDetailRow sse_decode_series_detail_row(SseDeserializer deserializer);
@@ -840,7 +885,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_Map_String_String_None(
-      Map<String, String> self, SseSerializer serializer);
+    Map<String, String> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -862,7 +909,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_book_page_result(
-      BookPageResult self, SseSerializer serializer);
+    BookPageResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_book_row(BookRow self, SseSerializer serializer);
@@ -872,86 +921,120 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_bootstrap_summary(
-      BootstrapSummary self, SseSerializer serializer);
+    BootstrapSummary self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_book_detail_row(
-      BookDetailRow self, SseSerializer serializer);
+    BookDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_build_info(
-      BuildInfo self, SseSerializer serializer);
+    BuildInfo self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_collection_detail_row(
-      CollectionDetailRow self, SseSerializer serializer);
+    CollectionDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_device_profile_dto(
-      DeviceProfileDto self, SseSerializer serializer);
+    DeviceProfileDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_download_pump_dto(
-      DownloadPumpDto self, SseSerializer serializer);
+    DownloadPumpDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_git_commit(
-      GitCommit self, SseSerializer serializer);
+    GitCommit self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_git_info(GitInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_i_64(
-      PlatformInt64 self, SseSerializer serializer);
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_library_count_row(
-      LibraryCountRow self, SseSerializer serializer);
+    LibraryCountRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_reader_settings_dto(
-      ReaderSettingsDto self, SseSerializer serializer);
+    ReaderSettingsDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_readlist_detail_row(
-      ReadlistDetailRow self, SseSerializer serializer);
+    ReadlistDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_series_detail_row(
-      SeriesDetailRow self, SseSerializer serializer);
+    SeriesDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_server_profile(
-      ServerProfile self, SseSerializer serializer);
+    ServerProfile self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_sse_poll_result(
-      SsePollResult self, SseSerializer serializer);
+    SsePollResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_build_info(BuildInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_cache_cleanup_dto(
-      CacheCleanupDto self, SseSerializer serializer);
+    CacheCleanupDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_cache_stats_dto(CacheStatsDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_collection_detail_row(
-      CollectionDetailRow self, SseSerializer serializer);
+    CollectionDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_collection_page_result(
-      CollectionPageResult self, SseSerializer serializer);
+    CollectionPageResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_collection_ref(CollectionRef self, SseSerializer serializer);
@@ -961,11 +1044,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_connection_result(
-      ConnectionResult self, SseSerializer serializer);
+    ConnectionResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_continue_reading_row(
-      ContinueReadingRow self, SseSerializer serializer);
+    ContinueReadingRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_core_error(CoreError self, SseSerializer serializer);
@@ -975,31 +1062,45 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_device_profile_dto(
-      DeviceProfileDto self, SseSerializer serializer);
+    DeviceProfileDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_diagnostics_dto(
-      DiagnosticsDto self, SseSerializer serializer);
+    DiagnosticsDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_download_book_dto(
-      DownloadBookDto self, SseSerializer serializer);
+    DownloadBookDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_download_delete_dto(
-      DownloadDeleteDto self, SseSerializer serializer);
+    DownloadDeleteDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_download_pump_dto(
-      DownloadPumpDto self, SseSerializer serializer);
+    DownloadPumpDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_download_sweep_dto(
-      DownloadSweepDto self, SseSerializer serializer);
+    DownloadSweepDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_entity_sync_state(
-      EntitySyncState self, SseSerializer serializer);
+    EntitySyncState self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_error_code(ErrorCode self, SseSerializer serializer);
@@ -1012,7 +1113,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_full_sync_summary(
-      FullSyncSummary self, SseSerializer serializer);
+    FullSyncSummary self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_git_commit(GitCommit self, SseSerializer serializer);
@@ -1031,100 +1134,144 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_library_count_row(
-      LibraryCountRow self, SseSerializer serializer);
+    LibraryCountRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_author_row(
-      List<AuthorRow> self, SseSerializer serializer);
+    List<AuthorRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_book_row(List<BookRow> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_collection_ref(
-      List<CollectionRef> self, SseSerializer serializer);
+    List<CollectionRef> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_collection_row(
-      List<CollectionRow> self, SseSerializer serializer);
+    List<CollectionRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_continue_reading_row(
-      List<ContinueReadingRow> self, SseSerializer serializer);
+    List<ContinueReadingRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_download_book_dto(
-      List<DownloadBookDto> self, SseSerializer serializer);
+    List<DownloadBookDto> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_entity_sync_state(
-      List<EntitySyncState> self, SseSerializer serializer);
+    List<EntitySyncState> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_library(List<Library> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_library_count_row(
-      List<LibraryCountRow> self, SseSerializer serializer);
+    List<LibraryCountRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_list_prim_u_32_strict(
-      List<Uint32List> self, SseSerializer serializer);
+    List<Uint32List> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_log_record(
-      List<LogRecord> self, SseSerializer serializer);
+    List<LogRecord> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_outbox_entry_dto(
-      List<OutboxEntryDto> self, SseSerializer serializer);
+    List<OutboxEntryDto> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_u_32_strict(
-      Uint32List self, SseSerializer serializer);
+    Uint32List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-      Uint8List self, SseSerializer serializer);
+    Uint8List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_queue_state_count_dto(
-      List<QueueStateCountDto> self, SseSerializer serializer);
+    List<QueueStateCountDto> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_readlist_row(
-      List<ReadlistRow> self, SseSerializer serializer);
+    List<ReadlistRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_record_string_string(
-      List<(String, String)> self, SseSerializer serializer);
+    List<(String, String)> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_series_row(
-      List<SeriesRow> self, SseSerializer serializer);
+    List<SeriesRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_server_profile(
-      List<ServerProfile> self, SseSerializer serializer);
+    List<ServerProfile> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_storage_book_dto(
-      List<StorageBookDto> self, SseSerializer serializer);
+    List<StorageBookDto> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_table_rows(
-      List<TableRows> self, SseSerializer serializer);
+    List<TableRows> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_thumbnail_row(
-      List<ThumbnailRow> self, SseSerializer serializer);
+    List<ThumbnailRow> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_tombstone(
-      List<Tombstone> self, SseSerializer serializer);
+    List<Tombstone> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_log_record(LogRecord self, SseSerializer serializer);
@@ -1137,69 +1284,99 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_book_detail_row(
-      BookDetailRow? self, SseSerializer serializer);
+    BookDetailRow? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_build_info(
-      BuildInfo? self, SseSerializer serializer);
+    BuildInfo? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_collection_detail_row(
-      CollectionDetailRow? self, SseSerializer serializer);
+    CollectionDetailRow? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_download_pump_dto(
-      DownloadPumpDto? self, SseSerializer serializer);
+    DownloadPumpDto? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_git_commit(
-      GitCommit? self, SseSerializer serializer);
+    GitCommit? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_git_info(
-      GitInfo? self, SseSerializer serializer);
+    GitInfo? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_i_64(
-      PlatformInt64? self, SseSerializer serializer);
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_library_count_row(
-      LibraryCountRow? self, SseSerializer serializer);
+    LibraryCountRow? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_readlist_detail_row(
-      ReadlistDetailRow? self, SseSerializer serializer);
+    ReadlistDetailRow? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_series_detail_row(
-      SeriesDetailRow? self, SseSerializer serializer);
+    SeriesDetailRow? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_server_profile(
-      ServerProfile? self, SseSerializer serializer);
+    ServerProfile? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_sse_poll_result(
-      SsePollResult? self, SseSerializer serializer);
+    SsePollResult? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_outbox_entry_dto(
-      OutboxEntryDto self, SseSerializer serializer);
+    OutboxEntryDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_outbox_status_dto(
-      OutboxStatusDto self, SseSerializer serializer);
+    OutboxStatusDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_queue_state_count_dto(
-      QueueStateCountDto self, SseSerializer serializer);
+    QueueStateCountDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_read_target_row(ReadTargetRow self, SseSerializer serializer);
@@ -1209,45 +1386,63 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_reader_layout_dto(
-      ReaderLayoutDto self, SseSerializer serializer);
+    ReaderLayoutDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_reader_settings_dto(
-      ReaderSettingsDto self, SseSerializer serializer);
+    ReaderSettingsDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_reader_turn_dto(ReaderTurnDto self, SseSerializer serializer);
 
   @protected
   void sse_encode_reader_window_dto(
-      ReaderWindowDto self, SseSerializer serializer);
+    ReaderWindowDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_readlist_detail_row(
-      ReadlistDetailRow self, SseSerializer serializer);
+    ReadlistDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_readlist_page_result(
-      ReadlistPageResult self, SseSerializer serializer);
+    ReadlistPageResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_readlist_row(ReadlistRow self, SseSerializer serializer);
 
   @protected
   void sse_encode_reconcile_summary(
-      ReconcileSummary self, SseSerializer serializer);
+    ReconcileSummary self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_record_string_string(
-      (String, String) self, SseSerializer serializer);
+    (String, String) self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_series_detail_row(
-      SeriesDetailRow self, SseSerializer serializer);
+    SeriesDetailRow self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_series_page_result(
-      SeriesPageResult self, SseSerializer serializer);
+    SeriesPageResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_series_row(SeriesRow self, SseSerializer serializer);
@@ -1263,7 +1458,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_storage_book_dto(
-      StorageBookDto self, SseSerializer serializer);
+    StorageBookDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_storage_dto(StorageDto self, SseSerializer serializer);
@@ -1288,7 +1485,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_upload_outcome_dto(
-      UploadOutcomeDto self, SseSerializer serializer);
+    UploadOutcomeDto self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_usize(BigInt self, SseSerializer serializer);
@@ -1302,9 +1501,9 @@ class RustLibWire implements BaseWire {
 
   /// Holds the symbol lookup function.
   final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
-      _lookup;
+  _lookup;
 
   /// The symbols are looked up in [dynamicLibrary].
   RustLibWire(ffi.DynamicLibrary dynamicLibrary)
-      : _lookup = dynamicLibrary.lookup;
+    : _lookup = dynamicLibrary.lookup;
 }

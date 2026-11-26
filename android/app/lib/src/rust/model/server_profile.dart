@@ -7,11 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// How authentication credentials are presented to Komga.
-enum AuthType {
-  apiKey,
-  basic,
-  ;
-}
+enum AuthType { apiKey, basic }
 
 /// A saved Komga server profile.
 ///

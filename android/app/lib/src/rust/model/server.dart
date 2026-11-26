@@ -46,10 +46,7 @@ class GitCommit {
   final String? id;
   final String? time;
 
-  const GitCommit({
-    this.id,
-    this.time,
-  });
+  const GitCommit({this.id, this.time});
 
   @override
   int get hashCode => id.hashCode ^ time.hashCode;
@@ -68,10 +65,7 @@ class GitInfo {
   final String? branch;
   final GitCommit? commit;
 
-  const GitInfo({
-    this.branch,
-    this.commit,
-  });
+  const GitInfo({this.branch, this.commit});
 
   @override
   int get hashCode => branch.hashCode ^ commit.hashCode;
@@ -120,10 +114,7 @@ class ServerInfo {
   final BuildInfo? build;
   final GitInfo? git;
 
-  const ServerInfo({
-    this.build,
-    this.git,
-  });
+  const ServerInfo({this.build, this.git});
 
   @override
   int get hashCode => build.hashCode ^ git.hashCode;

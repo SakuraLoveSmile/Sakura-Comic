@@ -14,6 +14,9 @@ import 'rust/ffi/bridge.dart' as frb;
 /// a test can assert "pausing twice changes nothing" and "deleting never pauses
 /// first" against behaviour instead of against call tallies.
 abstract class DownloadsApi {
+  /// Queue a book. A book this device has never opened costs one manifest
+  /// request the first time; one that is already mirrored needs the network
+  /// not at all.
   Future<DownloadBookDto> enqueue(String bookId);
 
   Future<DownloadBookDto> pause(String bookId);
@@ -63,9 +66,17 @@ class FrbDownloadsApi implements DownloadsApi {
   final String baseUrl;
   final String apiKey;
 
+  /// Queuing asks the core to prepare the book first: a volume this device has
+  /// never opened needs one manifest request before there is anything to
+  /// download. Offline, an already-mirrored book still queues with no request.
   @override
-  Future<DownloadBookDto> enqueue(String bookId) =>
-      frb.downloadEnqueue(dbPath: dbPath, serverId: serverId, bookId: bookId);
+  Future<DownloadBookDto> enqueue(String bookId) => frb.downloadPrepare(
+        dbPath: dbPath,
+        serverId: serverId,
+        bookId: bookId,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+      );
 
   @override
   Future<DownloadBookDto> pause(String bookId) =>

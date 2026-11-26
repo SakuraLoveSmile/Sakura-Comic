@@ -26,77 +26,108 @@ import 'error.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// BootstrapSync (API Key auth) — mirrors the first page of series.
-Future<BootstrapSummary> bootstrap(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeBootstrap(
-        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+Future<BootstrapSummary> bootstrap({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeBootstrap(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Connection probe (acceptance chain): authenticate + verify Komga +
 /// fetch server info + libraries + version policy check.
-Future<ConnectionResult> testConnection(
-        {required String baseUrl, required String apiKey}) =>
-    RustLib.instance.api
-        .crateFfiBridgeTestConnection(baseUrl: baseUrl, apiKey: apiKey);
+Future<ConnectionResult> testConnection({
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeTestConnection(
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
-Future<void> saveServer(
-        {required String dbPath, required ServerProfile profile}) =>
-    RustLib.instance.api
-        .crateFfiBridgeSaveServer(dbPath: dbPath, profile: profile);
+Future<void> saveServer({
+  required String dbPath,
+  required ServerProfile profile,
+}) => RustLib.instance.api.crateFfiBridgeSaveServer(
+  dbPath: dbPath,
+  profile: profile,
+);
 
 Future<List<ServerProfile>> listServers({required String dbPath}) =>
     RustLib.instance.api.crateFfiBridgeListServers(dbPath: dbPath);
 
-Future<ServerProfile?> getServer(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeGetServer(dbPath: dbPath, serverId: serverId);
+Future<ServerProfile?> getServer({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeGetServer(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 Future<bool> deleteServer({required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeDeleteServer(dbPath: dbPath, serverId: serverId);
+    RustLib.instance.api.crateFfiBridgeDeleteServer(
+      dbPath: dbPath,
+      serverId: serverId,
+    );
 
 /// Persist libraries discovered during a successful connection.
-Future<void> saveLibraries(
-        {required String dbPath,
-        required String serverId,
-        required List<Library> libraries}) =>
-    RustLib.instance.api.crateFfiBridgeSaveLibraries(
-        dbPath: dbPath, serverId: serverId, libraries: libraries);
+Future<void> saveLibraries({
+  required String dbPath,
+  required String serverId,
+  required List<Library> libraries,
+}) => RustLib.instance.api.crateFfiBridgeSaveLibraries(
+  dbPath: dbPath,
+  serverId: serverId,
+  libraries: libraries,
+);
 
-Future<void> setActiveServer(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeSetActiveServer(dbPath: dbPath, serverId: serverId);
+Future<void> setActiveServer({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeSetActiveServer(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 Future<String?> getActiveServer({required String dbPath}) =>
     RustLib.instance.api.crateFfiBridgeGetActiveServer(dbPath: dbPath);
 
-Future<List<SeriesRow>> fetchSeries(
-        {required String dbPath,
-        required String serverId,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeFetchSeries(
-        dbPath: dbPath, serverId: serverId, limit: limit, offset: offset);
+Future<List<SeriesRow>> fetchSeries({
+  required String dbPath,
+  required String serverId,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeFetchSeries(
+  dbPath: dbPath,
+  serverId: serverId,
+  limit: limit,
+  offset: offset,
+);
 
 /// Cover file path for one series, resolved from SQLite only (None = cache
 /// miss; the UI shows a placeholder and triggers ensure_covers).
-Future<String?> coverPath(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId}) =>
-    RustLib.instance.api.crateFfiBridgeCoverPath(
-        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+Future<String?> coverPath({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+}) => RustLib.instance.api.crateFfiBridgeCoverPath(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+);
 
 /// All cover records for one server (dead files filtered out), so the grid
 /// maps remote_id → local path with a single call.
-Future<List<ThumbnailRow>> listThumbnails(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeListThumbnails(dbPath: dbPath, serverId: serverId);
+Future<List<ThumbnailRow>> listThumbnails({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeListThumbnails(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// Cover paths for a page of series or books.
 ///
@@ -104,472 +135,564 @@ Future<List<ThumbnailRow>> listThumbnails(
 /// should ask for the ids it is about to paint: at 20,000 books the whole-server
 /// answer cost 20,000 decoded rows plus a `stat()` each, on every screen load.
 /// `variant` is `"series"` or `"book"`.
-Future<Map<String, String>> coverPaths(
-        {required String dbPath,
-        required String serverId,
-        required String variant,
-        required List<String> remoteIds}) =>
-    RustLib.instance.api.crateFfiBridgeCoverPaths(
-        dbPath: dbPath,
-        serverId: serverId,
-        variant: variant,
-        remoteIds: remoteIds);
+Future<Map<String, String>> coverPaths({
+  required String dbPath,
+  required String serverId,
+  required String variant,
+  required List<String> remoteIds,
+}) => RustLib.instance.api.crateFfiBridgeCoverPaths(
+  dbPath: dbPath,
+  serverId: serverId,
+  variant: variant,
+  remoteIds: remoteIds,
+);
 
 /// Backfill one series cover (cache miss → download → disk → SQLite row),
 /// returning the local file path.
-Future<String> ensureCover(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeEnsureCover(
-        dbPath: dbPath,
-        serverId: serverId,
-        seriesId: seriesId,
-        baseUrl: baseUrl,
-        apiKey: apiKey);
+Future<String> ensureCover({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeEnsureCover(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Backfill every series cover without a usable record (缓存缺失自动补齐).
 /// Returns the number of covers written.
-Future<PlatformInt64> ensureCovers(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeEnsureCovers(
-        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+Future<PlatformInt64> ensureCovers({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeEnsureCovers(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Offline demo: seeds the store with the shared fixture series and
 /// generated covers — a demonstrable cover wall without a server.
-Future<BootstrapSummary> bootstrapDemo(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeBootstrapDemo(dbPath: dbPath, serverId: serverId);
+Future<BootstrapSummary> bootstrapDemo({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeBootstrapDemo(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// FullSync against a live server: series → books → collections →
 /// readlists → on-deck progress.
-Future<FullSyncSummary> fullSync(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeFullSync(
-        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+Future<FullSyncSummary> fullSync({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeFullSync(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Stage 5 Bootstrap Sync: ordered, paged, checkpointed. `resume = true`
 /// continues an interrupted run from its stored cursors.
-Future<FullSyncSummary> bootstrapSync(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey,
-        required bool resume}) =>
-    RustLib.instance.api.crateFfiBridgeBootstrapSync(
-        dbPath: dbPath,
-        serverId: serverId,
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        resume: resume);
+Future<FullSyncSummary> bootstrapSync({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+  required bool resume,
+}) => RustLib.instance.api.crateFfiBridgeBootstrapSync(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+  resume: resume,
+);
 
 /// Stage 5 Reconcile Sync: remote id sweep → Added / Changed / Deleted →
 /// local mirror. `trigger` is one of `app_launch`, `did_become_active`,
 /// `network_recovered`, `sse_reconnected`, `manual_refresh`.
-Future<ReconcileSummary> reconcile(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey,
-        required String trigger}) =>
-    RustLib.instance.api.crateFfiBridgeReconcile(
-        dbPath: dbPath,
-        serverId: serverId,
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        trigger: trigger);
+Future<ReconcileSummary> reconcile({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+  required String trigger,
+}) => RustLib.instance.api.crateFfiBridgeReconcile(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+  trigger: trigger,
+);
 
 /// Whether this trigger should sweep now (background triggers are throttled).
-Future<bool> shouldReconcile(
-        {required String dbPath,
-        required String serverId,
-        required String trigger}) =>
-    RustLib.instance.api.crateFfiBridgeShouldReconcile(
-        dbPath: dbPath, serverId: serverId, trigger: trigger);
+Future<bool> shouldReconcile({
+  required String dbPath,
+  required String serverId,
+  required String trigger,
+}) => RustLib.instance.api.crateFfiBridgeShouldReconcile(
+  dbPath: dbPath,
+  serverId: serverId,
+  trigger: trigger,
+);
 
 /// Per entity type sync state: entityType / lastSyncAt / syncCursor / syncStatus.
-Future<List<EntitySyncState>> syncStates(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeSyncStates(dbPath: dbPath, serverId: serverId);
+Future<List<EntitySyncState>> syncStates({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeSyncStates(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// Tombstones left by delete propagation for one entity type.
-Future<List<Tombstone>> tombstones(
-        {required String dbPath,
-        required String serverId,
-        required String entityType}) =>
-    RustLib.instance.api.crateFfiBridgeTombstones(
-        dbPath: dbPath, serverId: serverId, entityType: entityType);
+Future<List<Tombstone>> tombstones({
+  required String dbPath,
+  required String serverId,
+  required String entityType,
+}) => RustLib.instance.api.crateFfiBridgeTombstones(
+  dbPath: dbPath,
+  serverId: serverId,
+  entityType: entityType,
+);
 
 /// Paged series wall with search / filters / sort (本地查询).
-Future<SeriesPageResult> querySeries(
-        {required String dbPath,
-        required String serverId,
-        String? search,
-        String? libraryId,
-        String? status,
-        String? tag,
-        String? genre,
-        required String sort,
-        required bool ascending,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeQuerySeries(
-        dbPath: dbPath,
-        serverId: serverId,
-        search: search,
-        libraryId: libraryId,
-        status: status,
-        tag: tag,
-        genre: genre,
-        sort: sort,
-        ascending: ascending,
-        limit: limit,
-        offset: offset);
+Future<SeriesPageResult> querySeries({
+  required String dbPath,
+  required String serverId,
+  String? search,
+  String? libraryId,
+  String? status,
+  String? tag,
+  String? genre,
+  required String sort,
+  required bool ascending,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeQuerySeries(
+  dbPath: dbPath,
+  serverId: serverId,
+  search: search,
+  libraryId: libraryId,
+  status: status,
+  tag: tag,
+  genre: genre,
+  sort: sort,
+  ascending: ascending,
+  limit: limit,
+  offset: offset,
+);
 
 /// Paged book list of one series with read-status / tag filters (本地查询).
-Future<BookPageResult> queryBooks(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId,
-        String? search,
-        String? readStatus,
-        String? tag,
-        required String sort,
-        required bool ascending,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeQueryBooks(
-        dbPath: dbPath,
-        serverId: serverId,
-        seriesId: seriesId,
-        search: search,
-        readStatus: readStatus,
-        tag: tag,
-        sort: sort,
-        ascending: ascending,
-        limit: limit,
-        offset: offset);
+Future<BookPageResult> queryBooks({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+  String? search,
+  String? readStatus,
+  String? tag,
+  required String sort,
+  required bool ascending,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeQueryBooks(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+  search: search,
+  readStatus: readStatus,
+  tag: tag,
+  sort: sort,
+  ascending: ascending,
+  limit: limit,
+  offset: offset,
+);
 
 /// Which book a "start or continue reading" tap should open for this series
 /// (本地查询). `intent` is one of continue / start / reread / empty; an empty
 /// `book.remoteId` with intent "empty" means the series has nothing readable.
-Future<ReadTargetRow> seriesReadTarget(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId}) =>
-    RustLib.instance.api.crateFfiBridgeSeriesReadTarget(
-        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+Future<ReadTargetRow> seriesReadTarget({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+}) => RustLib.instance.api.crateFfiBridgeSeriesReadTarget(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+);
 
 /// Full series detail: row + metadata + genres + tags + authors +
 /// collection memberships (all local).
-Future<SeriesDetailRow?> seriesDetail(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId}) =>
-    RustLib.instance.api.crateFfiBridgeSeriesDetail(
-        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+Future<SeriesDetailRow?> seriesDetail({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+}) => RustLib.instance.api.crateFfiBridgeSeriesDetail(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+);
 
 /// Full book detail: row + metadata + tags + authors + progress (local).
-Future<BookDetailRow?> bookDetail(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeBookDetail(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<BookDetailRow?> bookDetail({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeBookDetail(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Collections searchable list (paged, local).
-Future<CollectionPageResult> listCollections(
-        {required String dbPath,
-        required String serverId,
-        String? search,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeListCollections(
-        dbPath: dbPath,
-        serverId: serverId,
-        search: search,
-        limit: limit,
-        offset: offset);
+Future<CollectionPageResult> listCollections({
+  required String dbPath,
+  required String serverId,
+  String? search,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeListCollections(
+  dbPath: dbPath,
+  serverId: serverId,
+  search: search,
+  limit: limit,
+  offset: offset,
+);
 
 /// Collection detail: the row + its member series (paged, local).
-Future<CollectionDetailRow?> collectionDetail(
-        {required String dbPath,
-        required String serverId,
-        required String collectionId,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeCollectionDetail(
-        dbPath: dbPath,
-        serverId: serverId,
-        collectionId: collectionId,
-        limit: limit,
-        offset: offset);
+Future<CollectionDetailRow?> collectionDetail({
+  required String dbPath,
+  required String serverId,
+  required String collectionId,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeCollectionDetail(
+  dbPath: dbPath,
+  serverId: serverId,
+  collectionId: collectionId,
+  limit: limit,
+  offset: offset,
+);
 
 /// Readlists searchable list (paged, local).
-Future<ReadlistPageResult> listReadlists(
-        {required String dbPath,
-        required String serverId,
-        String? search,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeListReadlists(
-        dbPath: dbPath,
-        serverId: serverId,
-        search: search,
-        limit: limit,
-        offset: offset);
+Future<ReadlistPageResult> listReadlists({
+  required String dbPath,
+  required String serverId,
+  String? search,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeListReadlists(
+  dbPath: dbPath,
+  serverId: serverId,
+  search: search,
+  limit: limit,
+  offset: offset,
+);
 
 /// Readlist detail: the row + its ordered books (paged, local).
-Future<ReadlistDetailRow?> readlistDetail(
-        {required String dbPath,
-        required String serverId,
-        required String readlistId,
-        required PlatformInt64 limit,
-        required PlatformInt64 offset}) =>
-    RustLib.instance.api.crateFfiBridgeReadlistDetail(
-        dbPath: dbPath,
-        serverId: serverId,
-        readlistId: readlistId,
-        limit: limit,
-        offset: offset);
+Future<ReadlistDetailRow?> readlistDetail({
+  required String dbPath,
+  required String serverId,
+  required String readlistId,
+  required PlatformInt64 limit,
+  required PlatformInt64 offset,
+}) => RustLib.instance.api.crateFfiBridgeReadlistDetail(
+  dbPath: dbPath,
+  serverId: serverId,
+  readlistId: readlistId,
+  limit: limit,
+  offset: offset,
+);
 
 /// Continue-reading shelf (books read partially, local only).
-Future<List<ContinueReadingRow>> continueReading(
-        {required String dbPath,
-        required String serverId,
-        required PlatformInt64 limit}) =>
-    RustLib.instance.api.crateFfiBridgeContinueReading(
-        dbPath: dbPath, serverId: serverId, limit: limit);
+Future<List<ContinueReadingRow>> continueReading({
+  required String dbPath,
+  required String serverId,
+  required PlatformInt64 limit,
+}) => RustLib.instance.api.crateFfiBridgeContinueReading(
+  dbPath: dbPath,
+  serverId: serverId,
+  limit: limit,
+);
 
 /// Filter-chip options derived from the local mirror (tags / genres /
 /// statuses), distinct + sorted.
-Future<FilterOptions> filterOptions(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeFilterOptions(dbPath: dbPath, serverId: serverId);
+Future<FilterOptions> filterOptions({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeFilterOptions(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// Library rows with their local series counts (Library 列表/切换).
-Future<List<LibraryCountRow>> libraryCounts(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeLibraryCounts(dbPath: dbPath, serverId: serverId);
+Future<List<LibraryCountRow>> libraryCounts({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeLibraryCounts(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// One library with counts + root + availability (Library 详情).
-Future<LibraryCountRow?> libraryDetail(
-        {required String dbPath,
-        required String serverId,
-        required String libraryId}) =>
-    RustLib.instance.api.crateFfiBridgeLibraryDetail(
-        dbPath: dbPath, serverId: serverId, libraryId: libraryId);
+Future<LibraryCountRow?> libraryDetail({
+  required String dbPath,
+  required String serverId,
+  required String libraryId,
+}) => RustLib.instance.api.crateFfiBridgeLibraryDetail(
+  dbPath: dbPath,
+  serverId: serverId,
+  libraryId: libraryId,
+);
 
 /// Local page update + outbox row (READ_PROGRESS).
-Future<void> setReadProgress(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required PlatformInt64 page,
-        required bool completed}) =>
-    RustLib.instance.api.crateFfiBridgeSetReadProgress(
-        dbPath: dbPath,
-        serverId: serverId,
-        bookId: bookId,
-        page: page,
-        completed: completed);
+Future<void> setReadProgress({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required PlatformInt64 page,
+  required bool completed,
+}) => RustLib.instance.api.crateFfiBridgeSetReadProgress(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  page: page,
+  completed: completed,
+);
 
 /// Explicit mark-read + outbox row (MARK_READ).
-Future<void> markRead(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeMarkRead(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<void> markRead({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeMarkRead(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Explicit mark-unread + outbox row (MARK_UNREAD).
-Future<void> markUnread(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeMarkUnread(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<void> markUnread({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeMarkUnread(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// One upload pass over the queued mutations, plus the queue it left behind.
 /// Safe to call after every local write, on foreground, on network recovery and
 /// on a timer — an eligible row is only ever dropped once the server confirms.
-Future<UploadOutcomeDto> uploadOutbox(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeUploadOutbox(
-        dbPath: dbPath, serverId: serverId, baseUrl: baseUrl, apiKey: apiKey);
+Future<UploadOutcomeDto> uploadOutbox({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeUploadOutbox(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// The Outbox badge plus the rows that gave up (UI lists those with a retry).
-Future<OutboxStatusDto> outboxStatus(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeOutboxStatus(dbPath: dbPath, serverId: serverId);
+Future<OutboxStatusDto> outboxStatus({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeOutboxStatus(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// Hand every given-up row back to the retry machine. Returns how many came
 /// back to `pending`.
-Future<PlatformInt64> retryFailedMutations(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeRetryFailedMutations(dbPath: dbPath, serverId: serverId);
+Future<PlatformInt64> retryFailedMutations({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeRetryFailedMutations(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// One bounded event-stream tick. `state_json` is the previous tick's state —
 /// opaque here, owned by the caller, which is what keeps start/stop (and so
 /// pause-on-background) on the app side. `None` means a tick is still running
 /// for this server: skip this beat.
-Future<SsePollResult?> ssePoll(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey,
-        required String stateJson}) =>
-    RustLib.instance.api.crateFfiBridgeSsePoll(
-        dbPath: dbPath,
-        serverId: serverId,
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        stateJson: stateJson);
+Future<SsePollResult?> ssePoll({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+  required String stateJson,
+}) => RustLib.instance.api.crateFfiBridgeSsePoll(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+  stateJson: stateJson,
+);
 
 /// The reconcile `sse_poll` asked for has run: release the events that arrived
 /// during it and hand the session back to the stream.
-Future<String> sseReconciled(
-        {required String dbPath, required String stateJson}) =>
-    RustLib.instance.api
-        .crateFfiBridgeSseReconciled(dbPath: dbPath, stateJson: stateJson);
+Future<String> sseReconciled({
+  required String dbPath,
+  required String stateJson,
+}) => RustLib.instance.api.crateFfiBridgeSseReconciled(
+  dbPath: dbPath,
+  stateJson: stateJson,
+);
 
 /// Make one server's event stream due now (network came back / foreground).
 Future<String> sseResume({required String dbPath, required String stateJson}) =>
-    RustLib.instance.api
-        .crateFfiBridgeSseResume(dbPath: dbPath, stateJson: stateJson);
+    RustLib.instance.api.crateFfiBridgeSseResume(
+      dbPath: dbPath,
+      stateJson: stateJson,
+    );
 
 /// Drop this server's parked stream (screen disposed / server switched).
 Future<void> sseStop({required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeSseStop(dbPath: dbPath, serverId: serverId);
+    RustLib.instance.api.crateFfiBridgeSseStop(
+      dbPath: dbPath,
+      serverId: serverId,
+    );
 
 /// Book cover file path resolved from SQLite only (None = cache miss).
-Future<String?> bookCoverPath(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeBookCoverPath(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<String?> bookCoverPath({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeBookCoverPath(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Backfill one book cover (cache miss → download → disk → SQLite row),
 /// returning the local file path.
-Future<String> ensureBookCover(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeEnsureBookCover(
-        dbPath: dbPath,
-        serverId: serverId,
-        bookId: bookId,
-        baseUrl: baseUrl,
-        apiKey: apiKey);
+Future<String> ensureBookCover({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeEnsureBookCover(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Backfill every book cover of one series (缓存缺失自动补齐, book variant).
 /// Returns the number of covers written.
-Future<PlatformInt64> ensureBookCovers(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeEnsureBookCovers(
-        dbPath: dbPath,
-        serverId: serverId,
-        seriesId: seriesId,
-        baseUrl: baseUrl,
-        apiKey: apiKey);
+Future<PlatformInt64> ensureBookCovers({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeEnsureBookCovers(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Open a book: mirror-or-read the page manifest, restore the position, and
 /// return the spread layout to draw. `mode` / `direction` / `firstPageSingle`
 /// may be empty / null to mean "use what is stored".
-Future<ReaderBookDto> readerOpen(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required String baseUrl,
-        required String apiKey,
-        required String mode,
-        required String direction,
-        bool? firstPageSingle}) =>
-    RustLib.instance.api.crateFfiBridgeReaderOpen(
-        dbPath: dbPath,
-        serverId: serverId,
-        bookId: bookId,
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        mode: mode,
-        direction: direction,
-        firstPageSingle: firstPageSingle);
+Future<ReaderBookDto> readerOpen({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required String baseUrl,
+  required String apiKey,
+  required String mode,
+  required String direction,
+  bool? firstPageSingle,
+}) => RustLib.instance.api.crateFfiBridgeReaderOpen(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+  mode: mode,
+  direction: direction,
+  firstPageSingle: firstPageSingle,
+);
 
 /// Where a page already is on disk, if anywhere. Never touches the network.
-Future<String?> readerPagePath(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required PlatformInt64 page}) =>
-    RustLib.instance.api.crateFfiBridgeReaderPagePath(
-        dbPath: dbPath, serverId: serverId, bookId: bookId, page: page);
+Future<String?> readerPagePath({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required PlatformInt64 page,
+}) => RustLib.instance.api.crateFfiBridgeReaderPagePath(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  page: page,
+);
 
 /// Resolve one page for display (cache first, then fetch).
-Future<String> readerPage(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required PlatformInt64 page,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeReaderPage(
-        dbPath: dbPath,
-        serverId: serverId,
-        bookId: bookId,
-        page: page,
-        baseUrl: baseUrl,
-        apiKey: apiKey);
+Future<String> readerPage({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required PlatformInt64 page,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeReaderPage(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  page: page,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Pull the pages around one spread into the cache; returns how many landed.
-Future<PlatformInt64> readerPrefetch(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required PlatformInt64 spread,
-        required String baseUrl,
-        required String apiKey}) =>
-    RustLib.instance.api.crateFfiBridgeReaderPrefetch(
-        dbPath: dbPath,
-        serverId: serverId,
-        bookId: bookId,
-        spread: spread,
-        baseUrl: baseUrl,
-        apiKey: apiKey);
+Future<PlatformInt64> readerPrefetch({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required PlatformInt64 spread,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeReaderPrefetch(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  spread: spread,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Report the device and link, and get back the window and cache numbers the
 /// core derived. Called on open and again when the network changes.
-Future<ReaderWindowDto> readerConfigureDevice(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required DeviceProfileDto device}) =>
-    RustLib.instance.api.crateFfiBridgeReaderConfigureDevice(
-        dbPath: dbPath, serverId: serverId, bookId: bookId, device: device);
+Future<ReaderWindowDto> readerConfigureDevice({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required DeviceProfileDto device,
+}) => RustLib.instance.api.crateFfiBridgeReaderConfigureDevice(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  device: device,
+);
 
 /// What the cache tiers and the memory tier hold right now.
 Future<CacheStatsDto> readerCacheStats({required String dbPath}) =>
@@ -592,186 +715,271 @@ Future<PlatformInt64> readerReleasePrefetch({required String dbPath}) =>
     RustLib.instance.api.crateFfiBridgeReaderReleasePrefetch(dbPath: dbPath);
 
 /// Turn to a page. Returns the resolved page/spread and whether an upload is due.
-Future<ReaderTurnDto> readerTurn(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required PlatformInt64 page}) =>
-    RustLib.instance.api.crateFfiBridgeReaderTurn(
-        dbPath: dbPath, serverId: serverId, bookId: bookId, page: page);
+Future<ReaderTurnDto> readerTurn({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required PlatformInt64 page,
+}) => RustLib.instance.api.crateFfiBridgeReaderTurn(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  page: page,
+);
 
 /// The reader mode / direction this series overrides, as JSON, or `None` when
 /// the series follows the global preference.
-Future<String?> seriesReadOverride(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId}) =>
-    RustLib.instance.api.crateFfiBridgeSeriesReadOverride(
-        dbPath: dbPath, serverId: serverId, seriesId: seriesId);
+Future<String?> seriesReadOverride({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+}) => RustLib.instance.api.crateFfiBridgeSeriesReadOverride(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+);
 
 /// Record what this series should read like, or clear it when neither dimension
 /// is set.
-Future<String?> setSeriesReadOverride(
-        {required String dbPath,
-        required String serverId,
-        required String seriesId,
-        String? mode,
-        String? direction}) =>
-    RustLib.instance.api.crateFfiBridgeSetSeriesReadOverride(
-        dbPath: dbPath,
-        serverId: serverId,
-        seriesId: seriesId,
-        mode: mode,
-        direction: direction);
+Future<String?> setSeriesReadOverride({
+  required String dbPath,
+  required String serverId,
+  required String seriesId,
+  String? mode,
+  String? direction,
+}) => RustLib.instance.api.crateFfiBridgeSetSeriesReadOverride(
+  dbPath: dbPath,
+  serverId: serverId,
+  seriesId: seriesId,
+  mode: mode,
+  direction: direction,
+);
 
 /// Report how far into the current page a webtoon reader has scrolled (0..1).
-Future<void> readerSetPageOffset(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        double? ratio}) =>
-    RustLib.instance.api.crateFfiBridgeReaderSetPageOffset(
-        dbPath: dbPath, serverId: serverId, bookId: bookId, ratio: ratio);
+Future<void> readerSetPageOffset({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  double? ratio,
+}) => RustLib.instance.api.crateFfiBridgeReaderSetPageOffset(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  ratio: ratio,
+);
 
 /// Move one spread forward (delta >= 0) or backward (delta < 0).
-Future<ReaderTurnDto> readerStep(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required PlatformInt64 delta}) =>
-    RustLib.instance.api.crateFfiBridgeReaderStep(
-        dbPath: dbPath, serverId: serverId, bookId: bookId, delta: delta);
+Future<ReaderTurnDto> readerStep({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required PlatformInt64 delta,
+}) => RustLib.instance.api.crateFfiBridgeReaderStep(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  delta: delta,
+);
 
 /// Change mode / direction mid-book without losing the place.
-Future<ReaderLayoutDto> readerSetLayout(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required String mode,
-        required String direction}) =>
-    RustLib.instance.api.crateFfiBridgeReaderSetLayout(
-        dbPath: dbPath,
-        serverId: serverId,
-        bookId: bookId,
-        mode: mode,
-        direction: direction);
+Future<ReaderLayoutDto> readerSetLayout({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required String mode,
+  required String direction,
+}) => RustLib.instance.api.crateFfiBridgeReaderSetLayout(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  mode: mode,
+  direction: direction,
+);
 
 /// Mark read / mark unread: explicit statements, so they are never throttled.
-Future<bool> readerMarkRead(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeReaderMarkRead(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<bool> readerMarkRead({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeReaderMarkRead(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
-Future<bool> readerMarkUnread(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeReaderMarkUnread(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<bool> readerMarkUnread({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeReaderMarkUnread(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// The UI's periodic beat. True means: run `upload_outbox` now.
-Future<bool> readerTick(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeReaderTick(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<bool> readerTick({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeReaderTick(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Backgrounding: flush-worthy now, reader stays open.
-Future<bool> readerBackground(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeReaderBackground(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<bool> readerBackground({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeReaderBackground(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Leaving the reader for good. True means one last upload should be attempted.
-Future<bool> readerClose(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeReaderClose(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<bool> readerClose({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeReaderClose(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 Future<ReaderSettingsDto> readerSettings({required String dbPath}) =>
     RustLib.instance.api.crateFfiBridgeReaderSettings(dbPath: dbPath);
 
-Future<ReaderSettingsDto> readerSetSettings(
-        {required String dbPath, required ReaderSettingsDto settings}) =>
-    RustLib.instance.api
-        .crateFfiBridgeReaderSetSettings(dbPath: dbPath, settings: settings);
+Future<ReaderSettingsDto> readerSetSettings({
+  required String dbPath,
+  required ReaderSettingsDto settings,
+}) => RustLib.instance.api.crateFfiBridgeReaderSetSettings(
+  dbPath: dbPath,
+  settings: settings,
+);
 
 /// Put a book in the download queue. Works offline: the mirrored manifest already
 /// says what the book contains, and a book that was never mirrored cannot be queued.
-Future<DownloadBookDto> downloadEnqueue(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadEnqueue(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<DownloadBookDto> downloadEnqueue({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadEnqueue(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
+
+/// Make a book downloadable: ask the server for its page manifest when this
+/// device has never opened it, mirror it, then queue the download.
+///
+/// This is the gesture the shelf's 下载 button means. `download_enqueue` alone
+/// can only queue a book whose pages are already mirrored, which made the button
+/// fail on every unread volume until the reader had been opened online once. A
+/// book that is already mirrored costs no request, so the offline path is
+/// unchanged.
+Future<DownloadBookDto> downloadPrepare({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required String baseUrl,
+  required String apiKey,
+}) => RustLib.instance.api.crateFfiBridgeDownloadPrepare(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+);
 
 /// Stop a download. Only the user may do this, and only the user may undo it.
-Future<DownloadBookDto> downloadPause(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadPause(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<DownloadBookDto> downloadPause({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadPause(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
-Future<DownloadBookDto> downloadResume(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadResume(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<DownloadBookDto> downloadResume({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadResume(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Re-queue a book's failed pages. Pages already on disk are not fetched again.
-Future<DownloadBookDto> downloadRetry(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadRetry(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<DownloadBookDto> downloadRetry({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadRetry(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// The explicit "spend my data" consent, per book.
-Future<DownloadBookDto> downloadSetAllowCellular(
-        {required String dbPath,
-        required String serverId,
-        required String bookId,
-        required bool allow}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadSetAllowCellular(
-        dbPath: dbPath, serverId: serverId, bookId: bookId, allow: allow);
+Future<DownloadBookDto> downloadSetAllowCellular({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+  required bool allow,
+}) => RustLib.instance.api.crateFfiBridgeDownloadSetAllowCellular(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+  allow: allow,
+);
 
 /// Delete a download: rows and files. The only way anything under `downloads/`
 /// leaves the disk on purpose.
-Future<DownloadDeleteDto> downloadDelete(
-        {required String dbPath,
-        required String serverId,
-        required String bookId}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadDelete(
-        dbPath: dbPath, serverId: serverId, bookId: bookId);
+Future<DownloadDeleteDto> downloadDelete({
+  required String dbPath,
+  required String serverId,
+  required String bookId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadDelete(
+  dbPath: dbPath,
+  serverId: serverId,
+  bookId: bookId,
+);
 
 /// Clear every download for one server, including directories the database has no
 /// row for.
-Future<DownloadDeleteDto> downloadDeleteAll(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeDownloadDeleteAll(dbPath: dbPath, serverId: serverId);
+Future<DownloadDeleteDto> downloadDeleteAll({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadDeleteAll(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// The queue, as SQLite knows it. No network and no filesystem walk.
-Future<List<DownloadBookDto>> downloadList(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeDownloadList(dbPath: dbPath, serverId: serverId);
+Future<List<DownloadBookDto>> downloadList({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeDownloadList(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// What the device holds and what it says it has left. `free_volume_bytes` comes
 /// from the platform; `0` means it would not say.
-Future<StorageDto> downloadStorage(
-        {required String dbPath, required PlatformInt64 freeVolumeBytes}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadStorage(
-        dbPath: dbPath, freeVolumeBytes: freeVolumeBytes);
+Future<StorageDto> downloadStorage({
+  required String dbPath,
+  required PlatformInt64 freeVolumeBytes,
+}) => RustLib.instance.api.crateFfiBridgeDownloadStorage(
+  dbPath: dbPath,
+  freeVolumeBytes: freeVolumeBytes,
+);
 
 /// Reconcile the download tree with its rows on demand. Also runs once per process
 /// on the first pump or list; this is the version whose report a harness reads.
@@ -780,49 +988,59 @@ Future<DownloadSweepDto> downloadSweep({required String dbPath}) =>
 
 /// Drive the queue one bounded step. `Ok(None)` means another pass holds this
 /// database — the same contract as `sse_poll`, for the same reason.
-Future<DownloadPumpDto?> downloadPump(
-        {required String dbPath,
-        required String serverId,
-        required String baseUrl,
-        required String apiKey,
-        required PlatformInt64 maxPages,
-        required PlatformInt64 maxBytes,
-        required PlatformInt64 freeVolumeBytes,
-        required String link}) =>
-    RustLib.instance.api.crateFfiBridgeDownloadPump(
-        dbPath: dbPath,
-        serverId: serverId,
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        maxPages: maxPages,
-        maxBytes: maxBytes,
-        freeVolumeBytes: freeVolumeBytes,
-        link: link);
+Future<DownloadPumpDto?> downloadPump({
+  required String dbPath,
+  required String serverId,
+  required String baseUrl,
+  required String apiKey,
+  required PlatformInt64 maxPages,
+  required PlatformInt64 maxBytes,
+  required PlatformInt64 freeVolumeBytes,
+  required String link,
+}) => RustLib.instance.api.crateFfiBridgeDownloadPump(
+  dbPath: dbPath,
+  serverId: serverId,
+  baseUrl: baseUrl,
+  apiKey: apiKey,
+  maxPages: maxPages,
+  maxBytes: maxBytes,
+  freeVolumeBytes: freeVolumeBytes,
+  link: link,
+);
 
 /// What the last credentialed contact proved about one server's key:
 /// `valid`, `expired` or `unknown`, and when it was proved. The shelf shows a
 /// re-authenticate entry off this and nothing else.
-Future<AuthStateDto> authState(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeAuthState(dbPath: dbPath, serverId: serverId);
+Future<AuthStateDto> authState({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeAuthState(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// Everything the client can say about itself in one read — schema and integrity,
 /// sync rows, the outbox, the three cache tiers, the queue, the API policy and
 /// the log ring. Reports only; no sweep or reconcile runs because somebody
 /// asked what the state was.
-Future<DiagnosticsDto> diagnosticsSnapshot(
-        {required String dbPath, required String serverId}) =>
-    RustLib.instance.api
-        .crateFfiBridgeDiagnosticsSnapshot(dbPath: dbPath, serverId: serverId);
+Future<DiagnosticsDto> diagnosticsSnapshot({
+  required String dbPath,
+  required String serverId,
+}) => RustLib.instance.api.crateFfiBridgeDiagnosticsSnapshot(
+  dbPath: dbPath,
+  serverId: serverId,
+);
 
 /// Recent core log lines, newest first. `min_level` is one of `error`, `warn`,
 /// `info`, `debug`, `trace`; anything else means no filter, so a typo in a
 /// filter box shows everything rather than pretending nothing happened.
-Future<List<LogRecord>> diagnosticsLogs(
-        {required PlatformInt64 limit, required String minLevel}) =>
-    RustLib.instance.api
-        .crateFfiBridgeDiagnosticsLogs(limit: limit, minLevel: minLevel);
+Future<List<LogRecord>> diagnosticsLogs({
+  required PlatformInt64 limit,
+  required String minLevel,
+}) => RustLib.instance.api.crateFfiBridgeDiagnosticsLogs(
+  limit: limit,
+  minLevel: minLevel,
+);
 
 /// The ring's own counters: whether it owns the log backend, what it holds, how
 /// much it has evicted, and the newest error line.

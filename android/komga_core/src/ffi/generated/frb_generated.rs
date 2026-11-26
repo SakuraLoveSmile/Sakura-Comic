@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1134374146;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -633688616;
 
 // Section: executor
 
@@ -762,6 +762,53 @@ fn wire__crate__ffi__bridge__download_pause_impl(
                     )?;
                     std::result::Result::Ok(output_ok)
                 })())
+            }
+        },
+    )
+}
+fn wire__crate__ffi__bridge__download_prepare_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "download_prepare",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_db_path = <String>::sse_decode(&mut deserializer);
+            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_book_id = <String>::sse_decode(&mut deserializer);
+            let api_base_url = <String>::sse_decode(&mut deserializer);
+            let api_api_key = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::ffi::error::CoreError>(
+                    (move || async move {
+                        let output_ok = crate::ffi::bridge::download_prepare(
+                            api_db_path,
+                            api_server_id,
+                            api_book_id,
+                            api_base_url,
+                            api_api_key,
+                        )
+                        .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
             }
         },
     )
@@ -5416,102 +5463,103 @@ fn pde_ffi_dispatcher_primary_impl(
         17 => wire__crate__ffi__bridge__download_enqueue_impl(port, ptr, rust_vec_len, data_len),
         18 => wire__crate__ffi__bridge__download_list_impl(port, ptr, rust_vec_len, data_len),
         19 => wire__crate__ffi__bridge__download_pause_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__ffi__bridge__download_pump_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__ffi__bridge__download_resume_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__ffi__bridge__download_retry_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__ffi__bridge__download_set_allow_cellular_impl(
+        20 => wire__crate__ffi__bridge__download_prepare_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__ffi__bridge__download_pump_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__ffi__bridge__download_resume_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__ffi__bridge__download_retry_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__ffi__bridge__download_set_allow_cellular_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        24 => wire__crate__ffi__bridge__download_storage_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__ffi__bridge__download_sweep_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__ffi__bridge__ensure_book_cover_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__ffi__bridge__ensure_book_covers_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__ffi__bridge__ensure_cover_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__ffi__bridge__ensure_covers_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__ffi__bridge__fetch_series_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__ffi__bridge__filter_options_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__ffi__bridge__full_sync_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__ffi__bridge__get_active_server_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__ffi__bridge__get_server_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__ffi__bridge__library_counts_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__ffi__bridge__library_detail_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__ffi__bridge__list_collections_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__ffi__bridge__list_readlists_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__ffi__bridge__list_servers_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__ffi__bridge__list_thumbnails_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__ffi__bridge__mark_read_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__ffi__bridge__mark_unread_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__ffi__bridge__outbox_status_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__ffi__bridge__query_books_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__ffi__bridge__query_series_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__ffi__bridge__reader_background_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__ffi__bridge__reader_cache_stats_impl(port, ptr, rust_vec_len, data_len),
-        48 => {
+        25 => wire__crate__ffi__bridge__download_storage_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__ffi__bridge__download_sweep_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__ffi__bridge__ensure_book_cover_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__ffi__bridge__ensure_book_covers_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__ffi__bridge__ensure_cover_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__ffi__bridge__ensure_covers_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__ffi__bridge__fetch_series_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__ffi__bridge__filter_options_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__ffi__bridge__full_sync_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__ffi__bridge__get_active_server_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__ffi__bridge__get_server_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__ffi__bridge__library_counts_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__ffi__bridge__library_detail_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__ffi__bridge__list_collections_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__ffi__bridge__list_readlists_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__ffi__bridge__list_servers_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__ffi__bridge__list_thumbnails_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__ffi__bridge__mark_read_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__ffi__bridge__mark_unread_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__ffi__bridge__outbox_status_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__ffi__bridge__query_books_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__ffi__bridge__query_series_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__ffi__bridge__reader_background_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__ffi__bridge__reader_cache_stats_impl(port, ptr, rust_vec_len, data_len),
+        49 => {
             wire__crate__ffi__bridge__reader_clear_prefetch_impl(port, ptr, rust_vec_len, data_len)
         }
-        49 => wire__crate__ffi__bridge__reader_close_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__ffi__bridge__reader_configure_device_impl(
+        50 => wire__crate__ffi__bridge__reader_close_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__ffi__bridge__reader_configure_device_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__ffi__bridge__reader_mark_read_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__ffi__bridge__reader_mark_unread_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__ffi__bridge__reader_open_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__ffi__bridge__reader_page_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__ffi__bridge__reader_page_path_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__ffi__bridge__reader_prefetch_impl(port, ptr, rust_vec_len, data_len),
-        57 => {
+        52 => wire__crate__ffi__bridge__reader_mark_read_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__ffi__bridge__reader_mark_unread_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__ffi__bridge__reader_open_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__ffi__bridge__reader_page_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__ffi__bridge__reader_page_path_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__ffi__bridge__reader_prefetch_impl(port, ptr, rust_vec_len, data_len),
+        58 => {
             wire__crate__ffi__bridge__reader_reconcile_cache_impl(port, ptr, rust_vec_len, data_len)
         }
-        58 => wire__crate__ffi__bridge__reader_release_prefetch_impl(
+        59 => wire__crate__ffi__bridge__reader_release_prefetch_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        59 => wire__crate__ffi__bridge__reader_set_layout_impl(port, ptr, rust_vec_len, data_len),
-        60 => {
+        60 => wire__crate__ffi__bridge__reader_set_layout_impl(port, ptr, rust_vec_len, data_len),
+        61 => {
             wire__crate__ffi__bridge__reader_set_page_offset_impl(port, ptr, rust_vec_len, data_len)
         }
-        61 => wire__crate__ffi__bridge__reader_set_settings_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__ffi__bridge__reader_settings_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__ffi__bridge__reader_step_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__ffi__bridge__reader_tick_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__ffi__bridge__reader_turn_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__ffi__bridge__readlist_detail_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__ffi__bridge__reconcile_impl(port, ptr, rust_vec_len, data_len),
-        68 => {
+        62 => wire__crate__ffi__bridge__reader_set_settings_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__ffi__bridge__reader_settings_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__ffi__bridge__reader_step_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__ffi__bridge__reader_tick_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__ffi__bridge__reader_turn_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__ffi__bridge__readlist_detail_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__ffi__bridge__reconcile_impl(port, ptr, rust_vec_len, data_len),
+        69 => {
             wire__crate__ffi__bridge__retry_failed_mutations_impl(port, ptr, rust_vec_len, data_len)
         }
-        69 => wire__crate__ffi__bridge__save_libraries_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__ffi__bridge__save_server_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__ffi__bridge__series_detail_impl(port, ptr, rust_vec_len, data_len),
-        72 => {
+        70 => wire__crate__ffi__bridge__save_libraries_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__ffi__bridge__save_server_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__ffi__bridge__series_detail_impl(port, ptr, rust_vec_len, data_len),
+        73 => {
             wire__crate__ffi__bridge__series_read_override_impl(port, ptr, rust_vec_len, data_len)
         }
-        73 => wire__crate__ffi__bridge__series_read_target_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__ffi__bridge__set_active_server_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__ffi__bridge__set_read_progress_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__ffi__bridge__set_series_read_override_impl(
+        74 => wire__crate__ffi__bridge__series_read_target_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__ffi__bridge__set_active_server_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__ffi__bridge__set_read_progress_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__ffi__bridge__set_series_read_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        77 => wire__crate__ffi__bridge__should_reconcile_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__ffi__bridge__sse_poll_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__ffi__bridge__sse_reconciled_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__ffi__bridge__sse_resume_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__ffi__bridge__sse_stop_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__ffi__bridge__sync_states_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__ffi__bridge__test_connection_impl(port, ptr, rust_vec_len, data_len),
-        84 => wire__crate__ffi__bridge__tombstones_impl(port, ptr, rust_vec_len, data_len),
-        85 => wire__crate__ffi__bridge__upload_outbox_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__ffi__bridge__should_reconcile_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__ffi__bridge__sse_poll_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__ffi__bridge__sse_reconciled_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__ffi__bridge__sse_resume_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__ffi__bridge__sse_stop_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__ffi__bridge__sync_states_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__ffi__bridge__test_connection_impl(port, ptr, rust_vec_len, data_len),
+        85 => wire__crate__ffi__bridge__tombstones_impl(port, ptr, rust_vec_len, data_len),
+        86 => wire__crate__ffi__bridge__upload_outbox_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

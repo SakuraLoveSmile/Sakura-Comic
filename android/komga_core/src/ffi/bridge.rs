@@ -856,6 +856,27 @@ pub fn download_enqueue(
         .map_err(CoreError::from)
 }
 
+/// Make a book downloadable: ask the server for its page manifest when this
+/// device has never opened it, mirror it, then queue the download.
+///
+/// This is the gesture the shelf's 下载 button means. `download_enqueue` alone
+/// can only queue a book whose pages are already mirrored, which made the button
+/// fail on every unread volume until the reader had been opened online once. A
+/// book that is already mirrored costs no request, so the offline path is
+/// unchanged.
+pub async fn download_prepare(
+    db_path: String,
+    server_id: String,
+    book_id: String,
+    base_url: String,
+    api_key: String,
+) -> Result<DownloadBookDto, CoreError> {
+    let app = crate::ffi::application::App::new(db_path);
+    app.download_prepare(server_id, book_id, base_url, api_key)
+        .await
+        .map_err(CoreError::from)
+}
+
 /// Stop a download. Only the user may do this, and only the user may undo it.
 pub fn download_pause(
     db_path: String,
