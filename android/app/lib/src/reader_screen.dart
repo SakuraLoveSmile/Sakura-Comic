@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 
+import 'error_presentation.dart';
 import 'feedback_access.dart';
 import 'reader_controller.dart';
 import 'reader_offset.dart';
@@ -43,6 +44,15 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   final _webtoonKey = GlobalKey<_WebtoonColumnState>();
   Future<void>? _exitCapture;
+
+  /// Whether the title bar and the progress bar are on screen.
+  ///
+  /// The reader opens immersive. Both bars used to be drawn over the picture
+  /// permanently, one across the top and one across the bottom, with no way to
+  /// move them: on a page that is meant to be the whole screen that is a
+  /// permanent crop. A tap in the middle band calls them back, and another puts
+  /// them away again.
+  bool _toolbarsVisible = false;
 
   /// 反馈作用域与登记状态：阅读中隐藏悬浮球。底部设置页等临时弹层
   /// 不经过这里，计数不受影响；退出阅读器（dispose）后恢复。
@@ -206,6 +216,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     });
   }
 
+  void _toggleToolbars() {
+    if (!mounted) return;
+    setState(() => _toolbarsVisible = !_toolbarsVisible);
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -214,25 +229,27 @@ class _ReaderScreenState extends State<ReaderScreen>
       child: Scaffold(
         backgroundColor: controller.background,
         extendBodyBehindAppBar: true,
-        appBar: AppBar(
-          backgroundColor: Colors.black.withValues(alpha: 0.45),
-          foregroundColor: Colors.white,
-          title: Text(
-            widget.title ?? controller.book?.bookId ?? '阅读',
-            style: const TextStyle(fontSize: 15),
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: [
-            IconButton(
-              tooltip: '阅读设置',
-              icon: const Icon(Icons.tune),
-              onPressed: () => _showSettings(context, controller),
-            ),
-          ],
-        ),
+        appBar: !_toolbarsVisible
+            ? null
+            : AppBar(
+                backgroundColor: Colors.black.withValues(alpha: 0.45),
+                foregroundColor: Colors.white,
+                title: Text(
+                  widget.title ?? controller.book?.bookId ?? '阅读',
+                  style: const TextStyle(fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                actions: [
+                  IconButton(
+                    tooltip: '阅读设置',
+                    icon: const Icon(Icons.tune),
+                    onPressed: () => _showSettings(context, controller),
+                  ),
+                ],
+              ),
         body: Stack(
           children: [
-            if (controller.error != null)
+            if (controller.failure != null || controller.error != null)
               Positioned(
                 left: 0,
                 right: 0,
@@ -242,9 +259,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Text(
-                      controller.error!,
+                      _failureHeadline(controller),
                       style:
-                          const TextStyle(color: Colors.white70, fontSize: 12),
+                          const TextStyle(color: Colors.white, fontSize: 13),
                     ),
                   ),
                 ),
@@ -254,16 +271,23 @@ class _ReaderScreenState extends State<ReaderScreen>
                 (true, _) => const CircularProgressIndicator(),
                 (false, 0) => const _EmptyState(),
                 _ => controller.isWebtoon
-                    ? _WebtoonColumn(key: _webtoonKey, controller: controller)
+                    ? _WebtoonColumn(
+                        key: _webtoonKey,
+                        controller: controller,
+                        onToggleToolbars: _toggleToolbars,
+                      )
                     : _PagedView(
                         controller: controller,
                         pageController: _paged ??= PageController(
                           initialPage: controller.spread,
                         ),
+                        onToggleToolbars: _toggleToolbars,
                       ),
               },
             ),
-            if (!controller.busy && controller.pageCount > 0)
+            if (_toolbarsVisible &&
+                !controller.busy &&
+                controller.pageCount > 0)
               Align(
                 alignment: Alignment.bottomCenter,
                 child: _BottomBar(controller: controller),
@@ -287,6 +311,19 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 }
 
+/// What to tell the reader about the last failure.
+///
+/// One sentence per core error code ([FailurePresentation]), and a neutral one
+/// for anything that was not a core error at all. The raw exception text stays
+/// in the log: it is the core's English, it names internals ("page 7
+/// unavailable"), and none of that tells the reader what to do next.
+String _failureHeadline(ReaderController controller) {
+  final failure = controller.failure;
+  return failure == null
+      ? FailurePresentation.unknown().headline
+      : FailurePresentation.from(failure).headline;
+}
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
@@ -306,12 +343,39 @@ class _EmptyState extends StatelessWidget {
       );
 }
 
+/// The band in the middle of the picture: the tap that shows and hides the
+/// bars, and the one place a tap never turns a page.
+///
+/// Which axis "middle" means follows the core's own tap contract — a layout
+/// that pages left and right has a vertical band, one that pages up and down
+/// has a horizontal one — so the band always sits *between* the two
+/// page-turning halves instead of cutting a dead strip through one of them.
+bool _isMiddleTap(ReaderController controller, Offset local, Size size) {
+  final layout = controller.layout;
+  final vertical = layout != null &&
+      (layout.tapNext == 'top' || layout.tapNext == 'bottom');
+  final extent = vertical ? size.height : size.width;
+  if (extent <= 0) return false;
+  final ratio = (vertical ? local.dy : local.dx) / extent;
+  return ratio > _middleBandStart && ratio < _middleBandEnd;
+}
+
+/// Wide enough to hit without aiming (a reader usually holds the phone in one
+/// hand) and narrow enough to leave both page-turning halves most of the screen.
+const double _middleBandStart = 0.3;
+const double _middleBandEnd = 0.7;
+
 /// Paged rendering: single page or double-page spread per screen.
 class _PagedView extends StatelessWidget {
-  const _PagedView({required this.controller, required this.pageController});
+  const _PagedView({
+    required this.controller,
+    required this.pageController,
+    required this.onToggleToolbars,
+  });
 
   final ReaderController controller;
   final PageController pageController;
+  final VoidCallback onToggleToolbars;
 
   @override
   Widget build(BuildContext context) {
@@ -359,11 +423,18 @@ class _PagedView extends StatelessWidget {
 
   /// The tap halves come from the contract (`tapNext` / `tapPrev`), so a
   /// right-to-left book advances by tapping the left half of the screen.
+  ///
+  /// The middle band is answered first and never falls through to those halves:
+  /// a tap meant to call the bars back must not also turn the page under them.
   void _handleTap(BuildContext context, TapUpDetails detail) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
     final size = box.size;
     final local = detail.localPosition;
+    if (_isMiddleTap(controller, local, size)) {
+      onToggleToolbars();
+      return;
+    }
     final layout = controller.layout!;
     final advance = switch (layout.tapNext) {
       'left' => local.dx < size.width / 2,
@@ -389,9 +460,14 @@ class _PagedView extends StatelessWidget {
 /// bounded number of decoded images alive. Tracks visible pages and syncs bi-directionally
 /// with the controller and slider.
 class _WebtoonColumn extends StatefulWidget {
-  const _WebtoonColumn({super.key, required this.controller});
+  const _WebtoonColumn({
+    super.key,
+    required this.controller,
+    required this.onToggleToolbars,
+  });
 
   final ReaderController controller;
+  final VoidCallback onToggleToolbars;
 
   @override
   State<_WebtoonColumn> createState() => _WebtoonColumnState();
@@ -743,36 +819,49 @@ class _WebtoonColumnState extends State<_WebtoonColumn>
     final controller = widget.controller;
     final pages = [for (final spread in controller.rawSpreads) ...spread];
     return Stack(children: [
-      NotificationListener<ScrollNotification>(
-        onNotification: _onScrollNotification,
-        child: ListView.builder(
-          key: const ValueKey('webtoon-scroll'),
-          controller: _scrollController,
-          itemCount: pages.length,
-          itemBuilder: (context, index) {
-            final page = pages[index];
-            final key = _pageKeys.putIfAbsent(page, () => GlobalKey());
-            return Column(children: [
-              KeyedSubtree(
-                  key: key,
-                  child: _PageImage(
-                    key: ValueKey((controller, page, _imageAttempt)),
-                    controller: controller,
-                    page: page,
-                    fit: BoxFit.fitWidth,
-                    placeholderHeight:
-                        _pageHeights[page] ?? MediaQuery.sizeOf(context).height,
-                    onReady: () => _onImageReady(page, controller),
-                    onFailed: () => _onImageFailed(page, controller),
-                    onDisposed: () {
-                      if (controller == widget.controller) {
-                        _readyPages.remove(page);
-                      }
-                    },
-                  )),
-              SizedBox(height: controller.pageGap),
-            ]);
-          },
+      // 条漫 has no page halves to protect, but it needs the same way to call
+      // the bars back: tapping the middle band is the only gesture that shows
+      // them, and without it a scrolling reader could never reach 设置 again.
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (detail) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box == null) return;
+          if (_isMiddleTap(widget.controller, detail.localPosition, box.size)) {
+            widget.onToggleToolbars();
+          }
+        },
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onScrollNotification,
+          child: ListView.builder(
+            key: const ValueKey('webtoon-scroll'),
+            controller: _scrollController,
+            itemCount: pages.length,
+            itemBuilder: (context, index) {
+              final page = pages[index];
+              final key = _pageKeys.putIfAbsent(page, () => GlobalKey());
+              return Column(children: [
+                KeyedSubtree(
+                    key: key,
+                    child: _PageImage(
+                      key: ValueKey((controller, page, _imageAttempt)),
+                      controller: controller,
+                      page: page,
+                      fit: BoxFit.fitWidth,
+                      placeholderHeight: _pageHeights[page] ??
+                          MediaQuery.sizeOf(context).height,
+                      onReady: () => _onImageReady(page, controller),
+                      onFailed: () => _onImageFailed(page, controller),
+                      onDisposed: () {
+                        if (controller == widget.controller) {
+                          _readyPages.remove(page);
+                        }
+                      },
+                    )),
+                SizedBox(height: controller.pageGap),
+              ]);
+            },
+          ),
         ),
       ),
       if (_restoreFailure != null)
@@ -1130,12 +1219,22 @@ class _GapTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
-      builder: (context, _) => Slider(
-        value: (controller.settings?.pageGap.toInt() ?? 8).toDouble(),
-        max: 64,
-        divisions: 16,
-        label: '页间距 ${controller.settings?.pageGap.toInt() ?? 8}',
-        onChanged: (value) => controller.setPageGap(value.round()),
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // A bare slider could only be identified by dragging it: the value
+          // bubble shows a number, and nothing said what the number was.
+          const Text('页间距',
+              style: TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w600)),
+          Slider(
+            value: (controller.settings?.pageGap.toInt() ?? 8).toDouble(),
+            max: 64,
+            divisions: 16,
+            label: '页间距 ${controller.settings?.pageGap.toInt() ?? 8}',
+            onChanged: (value) => controller.setPageGap(value.round()),
+          ),
+        ],
       ),
     );
   }
@@ -1150,12 +1249,20 @@ class _BrightnessTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
-      builder: (context, _) => Slider(
-        value: controller.brightness,
-        min: 0.05,
-        max: 1,
-        label: '亮度 ${(controller.brightness * 100).round()}%',
-        onChanged: controller.setBrightness,
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('亮度',
+              style: TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.w600)),
+          Slider(
+            value: controller.brightness,
+            min: 0.05,
+            max: 1,
+            label: '亮度 ${(controller.brightness * 100).round()}%',
+            onChanged: controller.setBrightness,
+          ),
+        ],
       ),
     );
   }

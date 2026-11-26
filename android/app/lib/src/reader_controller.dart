@@ -9,6 +9,7 @@ import 'reader_api.dart';
 import 'reader_device.dart';
 import 'reader_system_controls.dart';
 import 'rust/ffi/application.dart';
+import 'rust/ffi/error.dart';
 
 /// The reader screen's whole state: where the reader is, which pages are on
 /// disk, and when a progress write is owed.
@@ -64,6 +65,17 @@ class ReaderController extends ChangeNotifier {
 
   ReaderBookDto? book;
   ReaderSettingsDto? settings;
+
+  /// The last failure, kept as the object that was thrown rather than as text.
+  ///
+  /// Text was the whole problem: `'$exception'` is the core's own English and
+  /// it names internals ("page 7 unavailable"), so the screen had nothing to
+  /// paint except a string the reader cannot act on. Holding the object lets
+  /// the UI answer it by `CoreError.code`, the way every other screen does.
+  Object? failure;
+
+  /// The same failure as text, for the diagnostic log and the stress report.
+  /// Never rendered: see [failure].
   String? error;
   bool busy = true;
 
@@ -171,7 +183,7 @@ class ReaderController extends ChangeNotifier {
   Future<void> start() async {
     if (_isClosed) return;
     busy = true;
-    error = null;
+    _clearFailure();
     notifyListeners();
     try {
       final loadedSettings = await api.settings();
@@ -192,7 +204,7 @@ class ReaderController extends ChangeNotifier {
       await _warmWindow();
     } catch (exception) {
       if (_isClosed) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'open');
     } finally {
       if (!_isClosed) {
         busy = false;
@@ -272,6 +284,26 @@ class ReaderController extends ChangeNotifier {
     return (next - previous).abs() > 0.005;
   }
 
+  /// Remember a failure for both audiences: the screen presents [failure] by
+  /// code, the log keeps the raw text ([error]) for a bug report. `what` is the
+  /// context the log needs and the user must not see — which page, which step.
+  void _recordFailure(Object exception, {String? what}) {
+    failure = exception;
+    error = _describe(exception);
+    debugPrint('[Reader] ${what == null ? '' : '$what: '}$error');
+  }
+
+  /// A [CoreError] stringifies as "Instance of 'CoreError'", which a support
+  /// report can do nothing with; its code and message are what the log needs.
+  String _describe(Object exception) => exception is CoreError
+      ? '${exception.code.name}: ${exception.message}'
+      : '$exception';
+
+  void _clearFailure() {
+    failure = null;
+    error = null;
+  }
+
   Future<void> turnTo(int target) async {
     if (_isClosed || pageCount == 0) return;
     final generation = ++_turnGeneration;
@@ -299,7 +331,7 @@ class ReaderController extends ChangeNotifier {
       await _warmWindow();
     } catch (exception) {
       if (_isClosed || generation != _turnGeneration) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'turn');
       notifyListeners();
     }
   }
@@ -321,7 +353,7 @@ class ReaderController extends ChangeNotifier {
       await _warmWindow();
     } catch (exception) {
       if (_isClosed || generation != _turnGeneration) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'step');
       notifyListeners();
     }
   }
@@ -364,7 +396,7 @@ class ReaderController extends ChangeNotifier {
       await _warmWindow();
     } catch (exception) {
       if (_isClosed) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'layout');
       notifyListeners();
     }
   }
@@ -412,7 +444,7 @@ class ReaderController extends ChangeNotifier {
       notifyListeners();
     } catch (exception) {
       if (_isClosed) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'settings');
       notifyListeners();
     }
   }
@@ -469,7 +501,7 @@ class ReaderController extends ChangeNotifier {
       // that clears the banner. Leaving a stale error up after a successful turn is
       // what made a retry indistinguishable from a fresh failure.
       _recentFailures = 0;
-      error = null;
+      _clearFailure();
       _remember(number, path);
       notifyListeners();
       return path;
@@ -479,7 +511,7 @@ class ReaderController extends ChangeNotifier {
       _recentFailures += 1;
       // Offline over an uncached page: the surrounding spread still reads, and
       // the tile shows a retry affordance instead of a broken image.
-      error = 'page $number unavailable: $exception';
+      _recordFailure(exception, what: 'page $number');
       unawaited(_reReportIfLinkChanged());
       notifyListeners();
       return null;
@@ -710,7 +742,7 @@ class ReaderController extends ChangeNotifier {
       notifyListeners();
     } catch (exception) {
       if (_isClosed) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'mark read');
       notifyListeners();
     }
   }
@@ -726,7 +758,7 @@ class ReaderController extends ChangeNotifier {
       notifyListeners();
     } catch (exception) {
       if (_isClosed) return;
-      error = '$exception';
+      _recordFailure(exception, what: 'mark unread');
       notifyListeners();
     }
   }

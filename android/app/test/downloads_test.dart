@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:comic_app/src/download_controller.dart';
 import 'package:comic_app/src/downloads_api.dart';
 import 'package:comic_app/src/downloads_screen.dart';
+import 'package:comic_app/src/rust/ffi/application.dart';
 
 /// The facts the controller asks the platform for. Both answers are recorded, so a
 /// test can assert the core was told what the device said rather than a constant.
@@ -45,8 +46,55 @@ Future<void> _mount(WidgetTester tester, DownloadController controller) async {
   await tester.pumpAndSettle();
 }
 
-void main() {
-  group('泵：一个回合做有界的几步', () {
+/// The fake, plus the one count these screen tests need: emptying a whole server
+/// is the only call in this API that can wipe the device in one tap, so a test
+/// that cannot tell it from a single delete cannot pin the entry point.
+class _BulkAwareApi extends InMemoryDownloadsApi {
+  _BulkAwareApi({super.books});
+
+  int removeAllCalls = 0;
+
+  @override
+  Future<DownloadDeleteDto> removeAll() async {
+    removeAllCalls += 1;
+    return super.removeAll();
+  }
+}
+
+/// A local database that will not answer the first time and does the second.
+/// That is the shape of the failure the screen used to answer with 「还没有下载」.
+/// A pump that fails the way a bridge or a locked database would: the turn
+/// itself breaks, so there is no report to read a stop reason from.
+class _ThrowingPumpApi extends InMemoryDownloadsApi {
+  _ThrowingPumpApi({super.books});
+
+  @override
+  Future<DownloadPumpDto?> pump({
+    int maxPages = 0,
+    int maxBytes = 0,
+    int freeBytes = 0,
+    String link = 'unknown',
+  }) async =>
+      throw StateError('bridge closed');
+}
+
+class _FlakyListApi extends InMemoryDownloadsApi {
+  _FlakyListApi({super.books});
+
+  /// How many reads still fail before the database answers.
+  int failures = 1;
+
+  @override
+  Future<List<DownloadBookDto>> list() async {
+    if (failures > 0) {
+      failures -= 1;
+      throw StateError('database is locked');
+    }
+    return super.list();
+  }
+}
+
+void main() {  group('泵：一个回合做有界的几步', () {
     test('一个回合串起多个 pass，直到队列没有进展', () async {
       final api = InMemoryDownloadsApi(
         books: [
@@ -309,6 +357,183 @@ void main() {
       expect(api.deleteCalls, 1);
       expect(controller.books, isEmpty);
       expect(find.text('还没有下载'), findsOneWidget);
+    });
+  });
+
+  group('队列停摆时说清原因，也能一次清空', () {
+    testWidgets('停下来是因为空间不足，就说空间不足', (tester) async {
+      final api = InMemoryDownloadsApi(
+        books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 40)],
+      )..nextStop = 'lowSpace';
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await controller.refresh();
+      await controller.pumpTurn();
+      expect(controller.stopReason, 'lowSpace');
+
+      await _mount(tester, controller);
+
+      // The old screen showed this stop as a book '排队中 0/40 页' and nothing
+      // else, which is the same picture as a queue that is merely waiting.
+      expect(find.text('存储空间不足，清理后再继续'), findsOneWidget);
+      expect(find.byKey(const Key('downloads-status')), findsOneWidget);
+    });
+
+    testWidgets('停下来是因为服务器限流，就说限流', (tester) async {
+      final api = InMemoryDownloadsApi(
+        books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 40)],
+      )..nextStop = 'throttled';
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await controller.refresh();
+      await controller.pumpTurn();
+      expect(controller.stopReason, 'throttled');
+
+      await _mount(tester, controller);
+
+      expect(find.text('服务器限流，稍后自动重试'), findsOneWidget);
+    });
+
+    testWidgets('不认识的原因说中性的话，不把核心的标识印在屏幕上', (tester) async {
+      final api = InMemoryDownloadsApi(
+        books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 40)],
+      )..nextStop = 'somethingNew';
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await controller.refresh();
+      await controller.pumpTurn();
+      expect(controller.stopReason, 'somethingNew');
+
+      await _mount(tester, controller);
+
+      expect(find.textContaining('还不认识'), findsOneWidget);
+      expect(find.textContaining('somethingNew'), findsNothing,
+          reason: 'an identifier is a contract, not a sentence for a person');
+      expect(find.textContaining('lowSpace'), findsNothing);
+    });
+
+    testWidgets('一个回合自己失败时也说人话，不回显异常', (tester) async {
+      final api = _ThrowingPumpApi(
+        books: [FakeDownload(bookId: 'b1', title: 'Book', pagesTotal: 40)],
+      );
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await controller.refresh();
+      await controller.pumpTurn();
+      expect(controller.error, isNotNull,
+          reason: 'the turn failed, which is the only thing this field is for');
+
+      await _mount(tester, controller);
+
+      // No stop reason exists for this one: the failure is the turn's own, and
+      // it is the field the screen used to leave unread.
+      expect(find.textContaining('下载这一步没有完成'), findsOneWidget);
+      expect(find.textContaining('bridge closed'), findsNothing,
+          reason: 'an exception string is a log line, not a status line');
+    });
+
+    testWidgets('全部删除先问一次，取消就什么都没删', (tester) async {
+      final api = _BulkAwareApi(books: [
+        FakeDownload(
+            bookId: 'b1', title: 'One Piece #1', pagesTotal: 6, pagesDone: 4),
+        FakeDownload(
+            bookId: 'b2',
+            title: 'One Piece #2',
+            pagesTotal: 10,
+            pagesDone: 10,
+            state: 'completed'),
+      ]);
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await controller.refresh(withStorage: true);
+      await _mount(tester, controller);
+
+      await tester.tap(find.byKey(const Key('downloads-delete-all')));
+      await tester.pumpAndSettle();
+
+      final dialog = find.byType(AlertDialog);
+      expect(dialog, findsOneWidget,
+          reason: 'a gesture that empties a server needs one question first');
+      // The two numbers the question promises back are the storage card's own:
+      // two books, and 6666 + 10000 bytes.
+      expect(find.descendant(of: dialog, matching: find.textContaining('2 本')),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: dialog, matching: find.textContaining('16.3 KB')),
+          findsOneWidget);
+
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+
+      expect(api.removeAllCalls, 0);
+      expect(controller.books, hasLength(2));
+      expect(dialog, findsNothing);
+    });
+
+    testWidgets('确认之后删光，列表与占用一起清空', (tester) async {
+      final api = _BulkAwareApi(books: [
+        FakeDownload(
+            bookId: 'b1', title: 'One Piece #1', pagesTotal: 6, pagesDone: 4),
+        FakeDownload(
+            bookId: 'b2',
+            title: 'One Piece #2',
+            pagesTotal: 10,
+            pagesDone: 10,
+            state: 'completed'),
+      ]);
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await controller.refresh(withStorage: true);
+      await _mount(tester, controller);
+      expect(find.text('2 本 · 16.3 KB'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('downloads-delete-all')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-delete-all')));
+      await tester.pumpAndSettle();
+
+      expect(api.removeAllCalls, 1,
+          reason: 'the one call, not a loop of single deletes');
+      expect(controller.books, isEmpty);
+      expect(find.byKey(const Key('download-b1')), findsNothing);
+      expect(find.text('还没有下载'), findsOneWidget);
+      expect(find.text('0 本 · 0 B'), findsOneWidget,
+          reason: 'the storage figures are re-read, not left standing');
+      expect(find.textContaining('已删除 2 本离线书籍'), findsOneWidget);
+
+      // Let the snackbar's own timer expire, or the test ends holding it.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('第一次读不出来时是错误态和重试，不是「还没有下载」', (tester) async {
+      final api = _FlakyListApi(
+        books: [
+          FakeDownload(
+              bookId: 'b1',
+              title: 'One Piece #1',
+              pagesTotal: 6,
+              pagesDone: 6,
+              state: 'completed'),
+        ],
+      );
+      final controller =
+          _controller(api, _Facts(), interval: const Duration(hours: 1));
+      await _mount(tester, controller);
+
+      expect(find.byKey(const Key('downloads-load-failed')), findsOneWidget);
+      expect(find.text('还没有下载'), findsNothing,
+          reason: 'the list was never read: empty is not the same thing');
+      expect(find.textContaining('database is locked'), findsNothing,
+          reason: 'an exception string is not a sentence for a person');
+      expect(find.byKey(const Key('downloads-retry-load')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('downloads-retry-load')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('downloads-load-failed')), findsNothing);
+      expect(find.byKey(const Key('download-b1')), findsOneWidget);
     });
   });
 

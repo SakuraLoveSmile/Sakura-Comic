@@ -186,7 +186,7 @@ void main() {
     expect(find.byKey(const ValueKey('wall-error-headline')), findsNothing);
   });
 
-  testWidgets('a failed pagination page can be retried explicitly',
+  testWidgets('a failed append is reported at the bottom of the wall',
       (tester) async {
     final repo = ControlledShelfRepository();
     await tester.pumpWidget(_app(repo));
@@ -197,16 +197,102 @@ void main() {
     append.fail(StateError('page two failed'));
     await tester.pumpAndSettle();
 
-    expect(find.text('重试加载'), findsOneWidget);
-    await tester.tap(find.text('重试加载'));
+    // The retry used to live in the header: the user scrolled to the bottom,
+    // the append failed, and the button appeared far above their thumb.
+    expect(find.byKey(const ValueKey('wall-error-headline')), findsNothing);
+    expect(find.byKey(const ValueKey('wall-append-error')), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('wall-append-retry')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('wall-append-retry')));
     await tester.pump();
     final retry = repo.takeRequest();
     expect(retry.offset, 1);
-    retry.complete(_page('second'));
+    retry.complete(_page('second', total: 2));
     await tester.pumpAndSettle();
     expect(find.text('first'), findsOneWidget);
     expect(find.text('second'), findsOneWidget);
-    expect(find.text('重试加载'), findsNothing);
+    expect(find.text('重试'), findsNothing);
+    // Two loaded of two total: the wall is allowed to say it is over.
+    expect(find.byKey(const ValueKey('wall-end')), findsOneWidget);
+  });
+
+  testWidgets('the end of the wall says so instead of stopping silently',
+      (tester) async {
+    final repo = ControlledShelfRepository();
+    await tester.pumpWidget(_app(repo));
+    final first = repo.takeRequest();
+    first.complete(_page('only', total: 1));
+    await tester.pumpAndSettle();
+
+    // Past the last tile there used to be nothing at all: "还有" and "完了"
+    // looked identical, so the user kept scrolling at the end of the library.
+    expect(find.text('已经到底了'), findsOneWidget);
+    expect(repo.requests, hasLength(1),
+        reason: 'a finished wall must not ask for another page');
+  });
+
+  testWidgets('typing keeps the last batch on the wall until the new one lands',
+      (tester) async {
+    final repo = ControlledShelfRepository();
+    await tester.pumpWidget(_app(repo));
+    final initial = repo.takeRequest();
+    initial.complete(_page('initial'));
+    await tester.pumpAndSettle();
+    expect(find.text('initial'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'berserk');
+    await tester.pump(const Duration(milliseconds: 351));
+    final query = repo.takeRequest();
+
+    // The wall used to empty on the first keystroke and count "共 0 个
+    // Series" until the debounced query came back — which reads as "nothing
+    // matches" while the user is still typing.
+    expect(find.text('initial'), findsOneWidget);
+    expect(find.text('共 1 个 Series'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget,
+        reason: 'the bar is what says the new query is still running');
+
+    query.complete(_page('berserk-result'));
+    await tester.pumpAndSettle();
+    expect(find.text('berserk-result'), findsOneWidget);
+    expect(find.text('initial'), findsNothing);
+  });
+
+  testWidgets('the clear button empties the box and brings the shelf back at once',
+      (tester) async {
+    final repo = ControlledShelfRepository();
+    await tester.pumpWidget(_app(repo));
+    final initial = repo.takeRequest();
+    initial.complete(_page('whole-shelf', total: 1));
+    await tester.pumpAndSettle();
+
+    // There was no clear button at all: the only way out of a search was to
+    // long-press the field and delete the query by hand.
+    await tester.enterText(find.byType(TextField), 'berserk');
+    await tester.pump();
+    expect(find.byKey(const ValueKey('clear-search')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 351));
+    final search = repo.takeRequest();
+    expect(search.search, 'berserk');
+    search.complete(_page('berserk-result'));
+    await tester.pumpAndSettle();
+    expect(find.text('berserk-result'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('clear-search')));
+    // No debounce on the way out: the query is issued by the tap itself.
+    final cleared = repo.takeRequest();
+    expect(cleared.search, isNull);
+    cleared.complete(_page('whole-shelf'));
+    await tester.pumpAndSettle();
+
+    expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty);
+    expect(find.text('whole-shelf'), findsOneWidget);
+    expect(find.text('berserk-result'), findsNothing);
+    expect(find.byKey(const ValueKey('clear-search')), findsNothing);
   });
 
   testWidgets('a pending shelf request is harmless after disposal',

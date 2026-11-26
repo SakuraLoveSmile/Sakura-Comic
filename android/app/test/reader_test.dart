@@ -8,6 +8,7 @@ import 'package:comic_app/src/reader_controller.dart';
 import 'package:comic_app/src/reader_device.dart';
 import 'package:comic_app/src/reader_screen.dart';
 import 'package:comic_app/src/rust/ffi/application.dart';
+import 'package:comic_app/src/rust/ffi/error.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -24,6 +25,23 @@ class _GatedReaderApi extends InMemoryReaderApi {
     if (page == gatedPage) await gate.future;
     return super.pagePath(page);
   }
+}
+
+/// A reader whose page fetch fails the way the core does: a [CoreError] with a
+/// code, not a Dart exception. What the screen owes the user is the sentence
+/// that code maps to, so the test has to fail with the same shape.
+class _CoreErrorReaderApi extends InMemoryReaderApi {
+  _CoreErrorReaderApi() : super(pageCount: 1) {
+    pagesOnDisk = false;
+  }
+
+  @override
+  Future<String> page(int page) async => throw const CoreError(
+        code: ErrorCode.networkUnavailable,
+        message: 'connection refused after 3 attempts',
+        retryable: true,
+        needsUser: false,
+      );
 }
 
 /// Stage 7 reader behaviour on the Android side.
@@ -327,11 +345,17 @@ void main() {
 
     // 单页 LTR: the right half is 下一页.
     final view = tester.getSize(find.byType(PageView));
-    await tester.tapAt(Offset(view.width * 0.85, view.height * 0.4));
+    final origin = tester.getTopLeft(find.byType(PageView));
+    await tester.tapAt(origin + Offset(view.width * 0.85, view.height * 0.4));
     await settle();
     expect(controller.spread, 1);
     expect(pager().page?.round(), 1,
         reason: 'the picture has to follow the tap, not just the page number');
+
+    // 工具栏默认收起，底栏箭头和滑块都在里面：先点中间把它叫出来。
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await settle();
+    expect(controller.spread, 1, reason: '叫工具栏的那一下不翻页');
 
     // 底栏箭头走的是同一个模型。
     await tester.tap(find.byTooltip('下一页'));
@@ -347,6 +371,114 @@ void main() {
         reason: 'tapping the end of the track was supposed to jump forward');
     expect(pager().page?.round(), controller.spread,
         reason: 'after a jump the view and the page number must agree');
+  });
+
+  testWidgets('沉浸模式：打开只有画面，点中间才出现顶栏和底栏', (tester) async {
+    final api = InMemoryReaderApi(pageCount: 6);
+    final controller = ReaderController(api: api);
+    await tester.pumpWidget(MaterialApp(
+        home: ReaderScreen(title: '沉浸测试', controller: controller)));
+    await pumpUntil(tester,
+        () => find.byType(PageView).evaluate().isNotEmpty && !controller.busy);
+
+    expect(find.text('沉浸测试'), findsNothing,
+        reason: '进入阅读器默认沉浸：顶栏不该压在画面上');
+    expect(find.text('1 / 6'), findsNothing, reason: '底栏页码同样不该出现');
+
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await tester.pump();
+    expect(find.text('沉浸测试'), findsOneWidget, reason: '点中间要叫出顶栏');
+    expect(find.text('1 / 6'), findsOneWidget, reason: '以及底栏');
+    expect(controller.spread, 0, reason: '叫工具栏的那一下永远不翻页');
+
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await tester.pump();
+    expect(find.text('沉浸测试'), findsNothing, reason: '再点中间就收起来');
+    expect(find.text('1 / 6'), findsNothing);
+    expect(controller.spread, 0, reason: '收起工具栏同样不翻页');
+  });
+
+  testWidgets('沉浸模式：工具栏隐藏时右半屏点按仍然翻页', (tester) async {
+    final api = InMemoryReaderApi(pageCount: 6);
+    final controller = ReaderController(api: api);
+    await tester
+        .pumpWidget(MaterialApp(home: ReaderScreen(controller: controller)));
+    await pumpUntil(tester,
+        () => find.byType(PageView).evaluate().isNotEmpty && !controller.busy);
+
+    PageController pager() =>
+        tester.widget<PageView>(find.byType(PageView)).controller!;
+    Future<void> settle() async {
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    // 点两下中间：叫出来再收起来，回到沉浸。
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await settle();
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await settle();
+    expect(find.text('1 / 6'), findsNothing, reason: '此时工具栏是收起的');
+    expect(controller.spread, 0);
+
+    final view = tester.getSize(find.byType(PageView));
+    final origin = tester.getTopLeft(find.byType(PageView));
+    await tester.tapAt(origin + Offset(view.width * 0.85, view.height * 0.4));
+    await settle();
+    expect(controller.spread, 1, reason: '工具栏收起时右半屏照样翻页');
+    expect(pager().page?.round(), 1,
+        reason: '画面要跟着页码走，而不是只有数字变了');
+    expect(find.text('2 / 6'), findsNothing, reason: '翻页不该顺手把工具栏带出来');
+  });
+
+  testWidgets('阅读设置：页间距与亮度两条滑块都有标题', (tester) async {
+    final api = InMemoryReaderApi(pageCount: 4);
+    final controller = ReaderController(api: api);
+    await tester
+        .pumpWidget(MaterialApp(home: ReaderScreen(controller: controller)));
+    await pumpUntil(tester,
+        () => find.byType(PageView).evaluate().isNotEmpty && !controller.busy);
+
+    // 设置入口在顶栏上，顶栏默认收起：先点中间把它叫出来。
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pumpAndSettle();
+
+    expect(find.text('页间距'), findsOneWidget, reason: '这条滑块要有一行标题');
+    expect(find.text('亮度'), findsOneWidget, reason: '这条也要');
+  });
+
+  testWidgets('阅读失败：取页失败只说人话，内部异常串不上屏', (tester) async {
+    final api = InMemoryReaderApi(pageCount: 1)
+      ..pagesOnDisk = false
+      ..failPages = true;
+    final controller = ReaderController(api: api);
+    await tester
+        .pumpWidget(MaterialApp(home: ReaderScreen(controller: controller)));
+    await pumpUntil(tester, () => find.text('重试图片').evaluate().isNotEmpty);
+
+    expect(find.text('操作没有完成'), findsOneWidget,
+        reason: '不是 CoreError 的失败也要给一句人话');
+    expect(find.textContaining('unavailable'), findsNothing,
+        reason: '内部异常串不能贴到画面上');
+    expect(find.textContaining('Exception'), findsNothing);
+    expect(find.textContaining('connection refused'), findsNothing);
+    expect(find.text('重试图片'), findsOneWidget, reason: '页级失败仍然保留重试入口');
+  });
+
+  testWidgets('阅读失败：核心报网络不可用时说连不上服务器', (tester) async {
+    final controller = ReaderController(api: _CoreErrorReaderApi());
+    await tester
+        .pumpWidget(MaterialApp(home: ReaderScreen(controller: controller)));
+    await pumpUntil(tester, () => find.text('重试图片').evaluate().isNotEmpty);
+
+    expect(find.text('连不上服务器，本地内容仍然可以浏览'), findsOneWidget,
+        reason: 'CoreError 要按 code 说话，而不是倒出 message');
+    expect(find.textContaining('networkUnavailable'), findsNothing);
+    expect(find.textContaining('connection refused'), findsNothing);
+    expect(find.text('重试图片'), findsOneWidget);
   });
 
   testWidgets('条漫拖动后立即退出仍保存实际位置', (tester) async {
@@ -589,6 +721,10 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    // 沉浸默认：顶栏和底栏要点中间才出来。
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
     await tester.pumpAndSettle();
 
     expect(find.text('测试书'), findsOneWidget);

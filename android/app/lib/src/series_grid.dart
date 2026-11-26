@@ -118,7 +118,11 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
 
   bool _currentWall(int generation) => mounted && generation == _wallGeneration;
 
-  int _beginWallReset() {
+  /// [keepResults] leaves the last batch on the wall while the new query runs.
+  /// Typing in the search field is the case it exists for: clearing the wall on
+  /// every keystroke blanked the shelf and flashed "共 0 个 Series" for 350 ms,
+  /// which reads as "nothing matches" while the user is still typing.
+  int _beginWallReset({bool keepResults = false}) {
     final key = _queryKey;
     final changed = key != _wallQuery;
     _wallQuery = key;
@@ -127,7 +131,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     _loadingMore = false;
     _appendError = null;
     _error = null;
-    if (changed) {
+    if (changed && !keepResults) {
       _series = const [];
       _coverPaths = const {};
       _seriesTotal = 0;
@@ -168,6 +172,10 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     WidgetsBinding.instance.addObserver(this);
     _startLive();
     _initDownloads();
+    // Cold start: read the active server's name now rather than after the user
+    // opens a server screen. The title used to say 'Library' on every launch
+    // because this only ever ran on the way back from 服务器/设置.
+    _loadServerName();
     _load();
   }
 
@@ -429,11 +437,26 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
 
   void _onSearchChanged(String _) {
     _searchDebounce?.cancel();
-    setState(_beginWallReset);
+    // Invalidate what is in flight (the generation bump) but keep what is on
+    // screen: the top progress bar says "查着", an emptied wall says "没有".
+    setState(() => _beginWallReset(keepResults: true));
     final generation = _wallGeneration;
     _searchDebounce = Timer(const Duration(milliseconds: 350), () {
       if (_currentWall(generation)) _loadWall(reset: true);
     });
+  }
+
+  /// Back to the unfiltered-by-keyword shelf in one tap.
+  ///
+  /// No debounce: waiting 350 ms would leave an empty search box above the old
+  /// results, and the user just told us what they want to see.
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    setState(() {
+      _searchController.clear();
+      _beginWallReset(keepResults: true);
+    });
+    unawaited(_loadWall(reset: true));
   }
 
   /// First load with an FFI-backed repository: Bootstrap Sync when the server
@@ -691,7 +714,9 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_activeServerName ?? 'Library'),
+          // The server's own name, or a neutral label — never the English
+          // placeholder that shipped on every cold start.
+          title: Text(_activeServerName ?? '媒体库'),
           actions: [
             // Outbox badge (SQLite only, so it is truthful while offline).
             if ((_outbox?.total ?? 0) > 0 || _liveStatus != null)
@@ -897,28 +922,46 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         _selectedTag == null &&
         _selectedGenre == null) {
       final isStub = !widget.repository.demoSupported;
-      final noServer = widget.manager != null &&
-          (_activeServerName == null ||
-              _activeServerName == '未选择服务器' ||
-              _activeServerName == '未连接服务器');
+      // "There is no server" is a fact about the active profile, not about a
+      // title that has not been read yet. The old test was `_activeServerName
+      // == null`, so a cold start told a user who had just added a server that
+      // they had none — and hid 立即同步, the only button that would have
+      // filled the shelf.
+      final serverName = widget.manager == null ? null : _activeServerName;
+      final noServer = widget.manager != null && serverName == null;
+      final String message;
+      final IconData icon;
+      final bool canSync;
+      if (noServer) {
+        message = '还没有连接服务器 — 先添加并连接 Komga 服务器';
+        icon = Icons.cloud_off_outlined;
+        canSync = false;
+      } else if (serverName != null && _syncStatus.neverSynced) {
+        message = '已连接「$serverName」，本地还没同步过 — 点「立即同步」把书架搬下来';
+        icon = Icons.cloud_download_outlined;
+        canSync = true;
+      } else if (serverName != null) {
+        message = '本地库里还没有 Series — 在 Komga 上添加后点「立即同步」';
+        icon = Icons.menu_book_outlined;
+        canSync = true;
+      } else {
+        // No server manager on this build (stub core / demo): there is nothing
+        // to connect, so the empty wall must not claim a missing connection.
+        message = isStub ? '演示模式 — 未加载真实核心' : '本地媒体库还没有内容';
+        icon = Icons.menu_book_outlined;
+        canSync = !isStub;
+      }
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                noServer ? Icons.cloud_off_outlined : Icons.menu_book_outlined,
-                size: 48,
-                color: Colors.grey,
-              ),
+              Icon(icon, size: 48, color: Colors.grey),
               const SizedBox(height: 12),
               Text(
-                noServer
-                    ? '未连接服务器 — 请先添加并连接 Komga 服务器'
-                    : isStub
-                        ? '演示模式 — 未加载真实核心'
-                        : '媒体库暂无内容 — 已连接服务器，可手动同步或加载演示内容',
+                message,
+                key: const ValueKey('wall-empty-state'),
                 style:
                     const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                 textAlign: TextAlign.center,
@@ -929,22 +972,26 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
                 children: [
+                  // The next step for an empty shelf with a server behind it:
+                  // it has to be offered whether or not this build can also
+                  // seed the offline demo wall.
+                  if (canSync)
+                    FilledButton.icon(
+                      key: const ValueKey('wall-empty-sync'),
+                      onPressed:
+                          _syncing ? null : () => _reconcile('manual_refresh'),
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('立即同步'),
+                    ),
                   if (widget.manager != null)
                     FilledButton.tonal(
                       onPressed: _openServers,
                       child: const Text('管理服务器'),
                     ),
                   if (widget.repository.demoSupported)
-                    FilledButton(
+                    FilledButton.tonal(
                       onPressed: _syncing ? null : _loadDemo,
                       child: const Text('加载演示媒体库'),
-                    ),
-                  if (!noServer && !isStub)
-                    OutlinedButton.icon(
-                      onPressed:
-                          _syncing ? null : () => _reconcile('manual_refresh'),
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('立即同步'),
                     ),
                 ],
               ),
@@ -978,27 +1025,19 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
                 children: [
                   _searchField(),
                   if (_resettingWall) const LinearProgressIndicator(),
-                  if (_error != null || _appendError != null) ...[
+                  // Only a failed *first* page lives up here. A failed append
+                  // is reported at the bottom of the wall, where the user was
+                  // looking when they asked for it (see _wallFooter).
+                  if (_error != null) ...[
                     Text(
-                        FailurePresentation.from((_appendError ?? _error)!)
-                            .headline,
+                        FailurePresentation.from(_error!).headline,
                         key: const ValueKey('wall-error-headline')),
-                    if (FailurePresentation.from((_appendError ?? _error)!)
-                        .detail
-                        .isNotEmpty)
+                    if (FailurePresentation.from(_error!).detail.isNotEmpty)
                       Text(
-                          FailurePresentation.from((_appendError ?? _error)!)
-                              .detail,
+                          FailurePresentation.from(_error!).detail,
                           key: const ValueKey('wall-error-detail')),
                     TextButton(
-                      onPressed: () {
-                        if (_appendError != null) {
-                          setState(() => _appendError = null);
-                          _loadMore();
-                        } else {
-                          _loadWall(reset: true);
-                        }
-                      },
+                      onPressed: () => _loadWall(reset: true),
                       child: const Text('重试加载'),
                     ),
                   ],
@@ -1016,6 +1055,20 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
                     '共 $_seriesTotal 个 Series',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  // A zero-hit search used to end at "共 0 个 Series", which
+                  // says what happened but not what to do about it.
+                  if (_series.isEmpty &&
+                      _seriesTotal == 0 &&
+                      !_resettingWall &&
+                      _error == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '没有匹配的 Series，试试清除筛选或换个关键词',
+                        key: const ValueKey('wall-empty-hint'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
                   const SizedBox(height: 4),
                 ],
               ),
@@ -1025,6 +1078,7 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             sliver: _seriesGrid(),
           ),
+          SliverToBoxAdapter(child: _wallFooter()),
         ],
       ),
     );
@@ -1034,11 +1088,21 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
     return TextField(
       controller: _searchController,
       onChanged: _onSearchChanged,
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         hintText: '搜索 Series（本地 FTS）…',
-        prefixIcon: Icon(Icons.search),
+        prefixIcon: const Icon(Icons.search),
+        // One tap clears the query: the field used to be clearable only by
+        // long-pressing and deleting the text.
+        suffixIcon: _searchController.text.isEmpty
+            ? null
+            : IconButton(
+                key: const ValueKey('clear-search'),
+                tooltip: '清除搜索',
+                icon: const Icon(Icons.clear),
+                onPressed: _clearSearch,
+              ),
         isDense: true,
-        border: OutlineInputBorder(),
+        border: const OutlineInputBorder(),
       ),
     );
   }
@@ -1288,6 +1352,58 @@ class _SeriesGridScreenState extends State<SeriesGridScreen>
         addRepaintBoundaries: true,
       ),
     );
+  }
+
+  /// The end of the wall, which used to be silent: past the last loaded tile
+  /// there was nothing — no "还有", no "完了", and a failed append wrote its
+  /// error into the header, far above the bottom the user was looking at.
+  Widget _wallFooter() {
+    if (_series.isEmpty) return const SizedBox.shrink();
+    const padding = EdgeInsets.fromLTRB(12, 0, 12, 24);
+    if (_appendError != null) {
+      return Padding(
+        padding: padding,
+        child: Column(
+          children: [
+            Text(
+              '后面的 Series 没加载出来：${FailurePresentation.from(_appendError!).headline}',
+              key: const ValueKey('wall-append-error'),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            TextButton(
+              key: const ValueKey('wall-append-retry'),
+              onPressed: _retryAppend,
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_loadingMore) {
+      return const Padding(
+        padding: padding,
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    // The next page is pre-fetched as soon as the last row is built, so an idle
+    // footer with pages left over is a state the user never gets to see.
+    if (_series.length < _seriesTotal) return const SizedBox.shrink();
+    return const Padding(
+      padding: padding,
+      child: Center(child: Text('已经到底了', key: ValueKey('wall-end'))),
+    );
+  }
+
+  void _retryAppend() {
+    setState(() => _appendError = null);
+    _loadMore();
   }
 
   void _openSeries(String seriesId) {

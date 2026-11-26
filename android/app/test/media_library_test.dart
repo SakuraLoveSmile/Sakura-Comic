@@ -9,8 +9,12 @@ import 'package:comic_app/src/reader_screen.dart';
 import 'package:comic_app/src/models.dart';
 import 'package:comic_app/src/series.dart';
 import 'package:comic_app/src/series_detail.dart';
+import 'package:comic_app/src/rust/model/server_profile.dart';
 import 'package:comic_app/src/rust/sync/bootstrap.dart';
 import 'package:comic_app/src/series_grid.dart';
+import 'package:comic_app/src/server_manager.dart';
+
+import 'fakes.dart';
 
 void main() {
   testWidgets('search field queries the local FTS surface', (tester) async {
@@ -26,6 +30,61 @@ void main() {
     expect(repo.lastSearch, 'berserk');
     expect(find.text('Berserk'), findsOneWidget);
     expect(find.text('One Piece'), findsNothing);
+  });
+
+  testWidgets('a zero-hit search says what to do next', (tester) async {
+    final repo = _MediaFakeRepository();
+    await tester
+        .pumpWidget(MaterialApp(home: SeriesGridScreen(repository: repo)));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '这本不存在');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(repo.lastSearch, '这本不存在');
+    // "共 0 个 Series" alone said what happened but not what to do about it,
+    // so a search that matched nothing was a dead end.
+    expect(find.text('共 0 个 Series'), findsOneWidget);
+    expect(find.byKey(const ValueKey('wall-empty-hint')), findsOneWidget);
+    expect(find.text('没有匹配的 Series，试试清除筛选或换个关键词'), findsOneWidget);
+  });
+
+  testWidgets('cold start names the server and an empty shelf offers 立即同步',
+      (tester) async {
+    final api = MemoryRustCoreApi();
+    api.servers['srv-1'] = const ServerProfile(
+      id: 'srv-1',
+      displayName: '家里的 Komga',
+      baseUrl: 'http://home.local:25600',
+      authType: AuthType.apiKey,
+      capabilities: [],
+    );
+    api.activeId = 'srv-1';
+    final manager = ServerManager(
+      dbPath: '/tmp/shelf-empty-state.sqlite',
+      api: api,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: SeriesGridScreen(
+        repository: _EmptyShelfRepository(),
+        manager: manager,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // The title used to read 'Library' on every cold start: the server name was
+    // only loaded on the way back from 服务器/设置.
+    expect(find.text('家里的 Komga'), findsOneWidget);
+
+    // An empty shelf with a server behind it is "not synced yet", not "not
+    // connected" — and the old wording also hid the one button that fixes it.
+    expect(find.textContaining('未连接服务器'), findsNothing);
+    expect(find.byKey(const ValueKey('wall-empty-state')), findsOneWidget);
+    expect(find.textContaining('本地还没同步过'), findsOneWidget);
+    expect(find.byKey(const ValueKey('wall-empty-sync')), findsOneWidget);
+    expect(find.text('立即同步'), findsOneWidget);
   });
 
   testWidgets('official series title is consistent across shelf, search and detail',
@@ -376,6 +435,33 @@ void main() {
       expect(find.byKey(const Key('series-read-action')), findsNothing);
     });
   });
+}
+
+/// A repository with a server profile connected and nothing mirrored yet.
+///
+/// The empty-shelf state is the "just added a server" case: the store answers
+/// every shelf query, and every answer is empty.
+class _EmptyShelfRepository extends _MediaFakeRepository {
+  @override
+  Future<PagedSeries> querySeries({
+    String? search,
+    String? libraryId,
+    String? status,
+    String? tag,
+    String? genre,
+    String sort = 'name',
+    bool ascending = true,
+    int limit = 50,
+    int offset = 0,
+  }) async =>
+      const PagedSeries(items: [], total: 0);
+
+  @override
+  Future<List<LibraryCount>> fetchLibraryCounts() async => const [];
+
+  @override
+  Future<List<ContinueReadingItem>> continueReading({int limit = 10}) async =>
+      const [];
 }
 
 /// A repository whose read-target answer the test controls.

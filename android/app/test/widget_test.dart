@@ -21,7 +21,9 @@ import 'fakes.dart';
 void main() {
   testWidgets('scaffold renders', (tester) async {
     await tester.pumpWidget(const ComicApp());
-    expect(find.text('Library'), findsOneWidget);
+    // The shelf's fallback title is Chinese now; with no server to name it says
+    // 媒体库 rather than the English placeholder the app used to leak.
+    expect(find.text('媒体库'), findsOneWidget);
   });
 
   testWidgets('grid shows rows from repository', (tester) async {
@@ -116,6 +118,92 @@ void main() {
     expect(api.servers[savedProfile.id], isNotNull);
     expect(api.librariesByServer[savedProfile.id]!.length, 2);
     expect(api.activeId, savedProfile.id);
+  });
+
+  testWidgets('server form tells a first-time user where the API Key comes from',
+      (tester) async {
+    final manager = ServerManager(
+      dbPath: '/tmp/test.sqlite',
+      api: MemoryRustCoreApi(),
+      secrets: InMemorySecretStore(),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: ServerFormScreen(manager: manager, onSaved: (_) {}),
+    ));
+    await tester.pumpAndSettle();
+
+    // The one thing a new user cannot guess: the key is generated in Komga's
+    // own web UI, and it is not the login password.
+    expect(find.byKey(const ValueKey('api-key-help')), findsOneWidget);
+    expect(find.textContaining('API Keys'), findsOneWidget);
+    expect(find.textContaining('登录密码'), findsOneWidget);
+  });
+
+  testWidgets('an empty key is named as the problem, not sent to the server',
+      (tester) async {
+    final api = MemoryRustCoreApi();
+    final manager = ServerManager(
+      dbPath: '/tmp/test.sqlite',
+      api: api,
+      secrets: InMemorySecretStore(),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: ServerFormScreen(manager: manager, onSaved: (_) {}),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, '服务器地址'), 'http://a.local:25600');
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请先填写 API Key'), findsOneWidget);
+    expect(api.probedKey, isNull, reason: 'no request to make without a key');
+  });
+
+  testWidgets('editing keeps the saved key, and changing the address forces a retest',
+      (tester) async {
+    final api = MemoryRustCoreApi();
+    final manager = ServerManager(
+      dbPath: '/tmp/test.sqlite',
+      api: api,
+      secrets: InMemorySecretStore(),
+    );
+    final profile = await manager.add(
+        displayName: 'Home', baseUrl: 'http://a.local:25600', apiKey: 'k-saved');
+
+    await tester.pumpWidget(MaterialApp(
+      home: ServerFormScreen(
+        manager: manager,
+        existing: profile,
+        onSaved: (_) {},
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final save = find.widgetWithText(FilledButton, '保存');
+    expect(tester.widget<FilledButton>(save).onPressed, isNull);
+    expect(find.textContaining('留空表示继续使用'), findsOneWidget);
+
+    // Blank key: the stored secret is what gets probed.
+    api.probedKey = null;
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+    expect(api.probedKey, 'k-saved');
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+
+    // A rename is not a credentials change.
+    await tester.enterText(find.widgetWithText(TextField, '显示名称'), 'Home 2');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+
+    // A different address invalidates the proof; saving must be blocked again.
+    await tester.enterText(
+        find.widgetWithText(TextField, '服务器地址'), 'http://b.local:25600');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
   });
 
   testWidgets('servers screen lists, switches and removes profiles',

@@ -39,7 +39,58 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
   bool _testing = false;
   bool _saving = false;
 
+  /// What the successful test ran against (地址 + 用的是哪一个 Key).
+  ///
+  /// Editing either field afterwards has to send the user back through
+  /// 测试连接: saving a profile nobody proved works is how a server ends up in
+  /// the list that the app can never open.
+  String? _testedFingerprint;
+
+  /// The key already in the keystore, read once for an edit where the field is
+  /// left blank. Retyping a working key just to rename a server is not a step
+  /// worth asking for.
+  String? _storedKey;
+
+  /// Shown as the key field's error when 测试连接 / 保存 had no key at all.
+  bool _keyMissing = false;
+
   bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _url.addListener(_dropStaleTest);
+    _apiKey.addListener(_dropStaleTest);
+  }
+
+  /// The key a test or a save would use right now: what is typed, or the one
+  /// already saved when an existing profile's field is left blank.
+  Future<String> _resolveKey() async {
+    if (_apiKey.text.isNotEmpty) return _apiKey.text;
+    if (!_isEdit) return '';
+    final ref = widget.existing?.credentialRef;
+    if (ref == null) return '';
+    _storedKey ??= await widget.manager.readSecret(ref);
+    return _storedKey ?? '';
+  }
+
+  /// Cheap identity of "which URL, which key" — the saved key is one identity
+  /// of its own so a blank field can be compared without reading the keystore.
+  String _fingerprint() {
+    final key = _apiKey.text.isEmpty && _isEdit ? 'saved' : 'typed:${_apiKey.text}';
+    return '${_url.text.trim()}\u0000$key';
+  }
+
+  void _dropStaleTest() {
+    if (_tested == null && _testError == null && !_keyMissing) return;
+    if (_testedFingerprint == _fingerprint()) return;
+    setState(() {
+      _tested = null;
+      _testError = null;
+      _testedFingerprint = null;
+      _keyMissing = false;
+    });
+  }
 
   @override
   void dispose() {
@@ -54,14 +105,24 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
       _testing = true;
       _testError = null;
       _tested = null;
+      _testedFingerprint = null;
+      _keyMissing = false;
     });
     try {
+      final key = await _resolveKey();
+      if (key.trim().isEmpty) {
+        if (mounted) setState(() => _keyMissing = true);
+        return;
+      }
       final result = await widget.manager.testConnection(
         baseUrl: _url.text.trim(),
-        apiKey: _apiKey.text,
+        apiKey: key,
       );
       if (!mounted) return;
-      setState(() => _tested = result);
+      setState(() {
+        _tested = result;
+        _testedFingerprint = _fingerprint();
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _testError = e);
@@ -74,17 +135,29 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
     setState(() => _saving = true);
     try {
       final existing = widget.existing;
+      // Same key the successful test used: on an edit where the field was left
+      // blank that is the one already in the keystore.
+      final key = await _resolveKey();
+      if (key.trim().isEmpty) {
+        if (mounted) {
+          setState(() {
+            _keyMissing = true;
+            _saving = false;
+          });
+        }
+        return;
+      }
       final profile = existing == null
           ? await widget.manager.add(
               displayName: _name.text.trim(),
               baseUrl: _url.text.trim(),
-              apiKey: _apiKey.text,
+              apiKey: key,
             )
           : await widget.manager.update(
               existing: existing,
               displayName: _name.text.trim(),
               baseUrl: _url.text.trim(),
-              apiKey: _apiKey.text,
+              apiKey: key,
             );
       if (!mounted) return;
       setState(() => _saving = false);
@@ -130,7 +203,7 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
               autocorrect: false,
               decoration: const InputDecoration(
                 labelText: '服务器地址',
-                hintText: 'http://komga.example.com:25600',
+                hintText: '例如 http://komga.example.com:25600',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -177,10 +250,25 @@ class _ServerFormScreenState extends State<ServerFormScreen> {
             child: TextField(
               controller: _apiKey,
               obscureText: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'API Key（X-API-Key）',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                errorText: _keyMissing ? '请先填写 API Key' : null,
               ),
+            ),
+          ),
+          // Where the key comes from is the one thing a first-time user cannot
+          // guess, and it is not the password they log into Komga with.
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              _isEdit
+                  ? '留空表示继续使用已保存的 API Key；换 Key 时直接粘贴新的。'
+                  : '在 Komga 网页版点右上角头像 → 我的账户 → API Keys 生成一个 Key 粘贴到这里；它不是你的登录密码。',
+              key: const ValueKey('api-key-help'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
             ),
           ),
           const SizedBox(height: 16),

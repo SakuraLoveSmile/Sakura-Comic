@@ -155,6 +155,9 @@ class DownloadController extends ChangeNotifier {
       // five seconds of a timer that outlives the thing that started it.
       books = await _api.list();
       if (!hasWork) {
+        // Nothing is waiting, so nothing is stuck: a failure from an earlier turn
+        // would only make the status line apologise for an empty queue.
+        _forgetFailure();
         _notifyIfChanged();
         return;
       }
@@ -171,11 +174,14 @@ class DownloadController extends ChangeNotifier {
         if (report.served == 0) break;
       }
       await refresh();
+      // This turn got this far, so the last one's failure is no longer news.
+      _forgetFailure();
     } catch (error) {
       // A pump that threw leaves the queue exactly as it was: the rows are the
       // state, and nothing here has to unwind.
       lastPump = null;
       _error = '$error';
+      _failure = error;
     } finally {
       _busy = false;
       _notifyIfChanged();
@@ -187,10 +193,22 @@ class DownloadController extends ChangeNotifier {
   }
 
   String? _error;
+  Object? _failure;
 
   /// What went wrong on the last turn, if anything. The core keeps its own reasons
   /// per book; this is only for a failure of the turn itself.
   String? get error => _error;
+
+  /// The same failure as [error], before it was turned into text. The screen
+  /// words a failure by its code (`FailurePresentation`) and a string cannot
+  /// carry one: `${error}` is the core's own English diagnostic, which is for
+  /// a log and never for a status line.
+  Object? get failure => _failure;
+
+  void _forgetFailure() {
+    _error = null;
+    _failure = null;
+  }
 
   /// Re-read the queue (and the storage figures) from SQLite.
   Future<void> refresh({bool withStorage = false}) async {

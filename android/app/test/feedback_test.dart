@@ -163,6 +163,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
+    // 阅读器默认沉浸：先点中间把顶栏叫出来，设置入口在顶栏上。
+    // 这条用例测的是反馈截图流程，与工具栏显隐无关，所以补这一步而不是改断言。
+    await tester.tapAt(tester.getCenter(find.byType(PageView)));
+    await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.tune));
     await tester.pumpAndSettle();
     expect(find.text('反馈当前页面'), findsOneWidget);
