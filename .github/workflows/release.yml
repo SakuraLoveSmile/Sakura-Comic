@@ -75,7 +75,10 @@ jobs:
             REQ_TAG="v$PUB_VERSION"
           fi
           CLEAN_TAG="${REQ_TAG#v}"
-          if [[ "$CLEAN_TAG" != "$PUB_VERSION" ]]; then
+          # A pre-release tag (v0.3.0-preview.1) builds the same app as its core
+          # version; only the channel differs. Compare on the core so a preview
+          # tag validates, and keep the whole tag for the release name.
+          if [[ "${CLEAN_TAG%%-*}" != "$PUB_VERSION" ]]; then
             echo "::error::Release tag '$REQ_TAG' does not match pubspec.yaml version '$PUB_VERSION'!" >&2
             exit 1
           fi
@@ -176,6 +179,10 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           draft: ${{ inputs.draft || false }}
+          # "-preview" in the tag is what lets the app's 预览版 channel see this
+          # release: GitHub's prerelease flag is the only field the checker reads
+          # to tell a preview from a release, and the 正式版 channel never sees one.
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
           generate_release_notes: true
           files: |
             android/app/build/app/outputs/flutter-apk/*-release.apk
@@ -215,7 +222,10 @@ jobs:
             REQ_TAG="v$PUB_VERSION"
           fi
           CLEAN_TAG="${REQ_TAG#v}"
-          if [[ "$CLEAN_TAG" != "$PUB_VERSION" ]]; then
+          # A pre-release tag (v0.3.0-preview.1) builds the same app as its core
+          # version; only the channel differs. Compare on the core so a preview
+          # tag validates, and keep the whole tag for the release name.
+          if [[ "${CLEAN_TAG%%-*}" != "$PUB_VERSION" ]]; then
             echo "::error::Release tag '$REQ_TAG' does not match pubspec.yaml version '$PUB_VERSION'!" >&2
             exit 1
           fi
@@ -306,6 +316,10 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           draft: ${{ inputs.draft || false }}
+          # "-preview" in the tag is what lets the app's 预览版 channel see this
+          # release: GitHub's prerelease flag is the only field the checker reads
+          # to tell a preview from a release, and the 正式版 channel never sees one.
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
           generate_release_notes: true
           files: apple/ComicApp/dist/*.zip
         env:

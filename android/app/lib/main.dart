@@ -11,6 +11,7 @@ import 'src/app_settings.dart';
 import 'src/diagnostics_screen.dart' show buildRedactedDiagnosticsExport;
 import 'src/download_stress.dart';
 import 'src/feedback_access.dart';
+import 'src/feedback_appearance.dart';
 import 'src/library_repository.dart';
 import 'src/reader_stress.dart';
 import 'src/rust_core_frb.dart';
@@ -130,7 +131,11 @@ class ComicApp extends StatefulWidget {
 }
 
 class _ComicAppState extends State<ComicApp> {
-  AppSettings _settings = const AppSettings();
+  /// 设置快照。反馈外观要送进组件外壳，而外壳挂在 MaterialApp 外侧、只建
+  /// 一次（见 [buildFeedbackShell]），所以设置走可监听快照：设置页保存后
+  /// 通知，外壳按新值重建组件。
+  final ValueNotifier<AppSettings> _settings =
+      ValueNotifier<AppSettings>(const AppSettings());
 
   /// 反馈控制器由应用根持有，只在根 dispose 时释放：任何路由都共用同一个实例。
   final FeedbackController _feedback = FeedbackController();
@@ -152,18 +157,17 @@ class _ComicAppState extends State<ComicApp> {
   void initState() {
     super.initState();
     _feedbackBackGuard.attach();
-    WidgetsBinding.instance.addObserver(_feedbackBackGuard);
     _loadSettings();
     unawaited(_loadAppVersion());
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(_feedbackBackGuard);
     _feedbackBackGuard.dispose();
     _feedback.dispose();
     _appVersion.dispose();
     _readerDepth.dispose();
+    _settings.dispose();
     super.dispose();
   }
 
@@ -197,7 +201,7 @@ class _ComicAppState extends State<ComicApp> {
       try {
         final loaded = await repo.loadAppSettings();
         if (mounted && generation == _settingsGeneration) {
-          setState(() => _settings = loaded);
+          _settings.value = loaded;
         }
       } catch (error) {
         debugPrint('[Settings] load failed: $error');
@@ -208,10 +212,26 @@ class _ComicAppState extends State<ComicApp> {
   void _onSettingsChanged(AppSettings next) {
     _settingsGeneration++;
     if (!mounted) return;
-    setState(() => _settings = next);
+    _settings.value = next;
   }
 
-  Widget get _home {
+  /// 反馈面板里改选外观后回传：先让新值生效，再落盘。
+  /// 写盘失败只记日志——本次会话继续按新值显示（组件对宿主托管值不做回读）。
+  /// 面板传了 `hideSettings: true`，这条路径平时不会触发，留着是为了让
+  /// 「面板改 → 宿主保存 → 重建组件」这条回传链路保持完整。
+  Future<void> _onFeedbackAppearanceChanged(AppSettings next) async {
+    if (!mounted) return;
+    _settings.value = next;
+    final repo = widget.repository;
+    if (repo == null) return;
+    try {
+      await repo.saveAppSettings(next);
+    } catch (error) {
+      debugPrint('[Settings] feedback appearance save failed: $error');
+    }
+  }
+
+  Widget _homeFor(AppSettings settings) {
     if (ComicApp.enableStressHarness) {
       final stress = ReaderStressParams.parse(widget.initialRoute);
       if (stress != null) return ReaderStressScreen(params: stress);
@@ -225,48 +245,55 @@ class _ComicAppState extends State<ComicApp> {
       repository: widget.repository!,
       manager: widget.serverManager,
       rustStatus: widget.rustStatus,
-      initialSettings: _settings,
+      initialSettings: settings,
       onSettingsChanged: _onSettingsChanged,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Comic',
-      themeMode: switch (_settings.appearance) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
+    return ValueListenableBuilder<AppSettings>(
+      valueListenable: _settings,
+      builder: (BuildContext context, AppSettings settings, Widget? _) {
+        final Widget app = MaterialApp(
+          title: 'Comic',
+          themeMode: switch (settings.appearance) {
+            'light' => ThemeMode.light,
+            'dark' => ThemeMode.dark,
+            _ => ThemeMode.system,
+          },
+          theme: ThemeData(
+            colorSchemeSeed: Colors.indigo,
+            brightness: Brightness.light,
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            colorSchemeSeed: Colors.indigo,
+            brightness: Brightness.dark,
+            useMaterial3: true,
+          ),
+          home: _homeFor(settings),
+          // 返回键守卫挂在应用 Navigator 上：面板开着时各宿主路由拒绝 pop，
+          // 关面板与「放弃这次反馈？」确认由组件自己的返回处理完成。
+          navigatorObservers: [_feedbackBackGuard],
+        );
+        // 反馈组件包在 MaterialApp 外侧（上游 v12 推荐挂载）：push/pop 路由
+        // 不会重建它；组件自己先于 WidgetsApp 收到安卓返回，关闭前能弹出
+        // 「放弃这次反馈？」确认。未配置 dart-define 时组件完全不挂载。
+        if (!ComicApp.feedbackConfigured) return app;
+        return buildFeedbackShell(
+          apiBase: ComicApp.feedbackApiBase,
+          appId: ComicApp.feedbackAppId,
+          appName: 'Comic',
+          controller: _feedback,
+          appVersion: _appVersion,
+          readerDepth: _readerDepth,
+          settings: _settings,
+          onFeedbackAppearanceChanged: _onFeedbackAppearanceChanged,
+          logProvider: _collectFeedbackLogs,
+          child: app,
+        );
       },
-      theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.light,
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
-        useMaterial3: true,
-      ),
-      home: _home,
-      // 返回键守卫挂在内层 Navigator：面板开着时各宿主路由拒绝 pop，
-      // 由守卫的 didPopRoute 关面板并消费本次返回。
-      navigatorObservers: [_feedbackBackGuard],
-      // 反馈组件包在应用 Navigator 子树之外，因此 push/pop 路由不会重建它。
-      // 未配置 dart-define 时 builder 为 null，宿主行为与接入前一致。
-      builder: ComicApp.feedbackConfigured
-          ? (context, child) => buildFeedbackShell(
-                apiBase: ComicApp.feedbackApiBase,
-                appId: ComicApp.feedbackAppId,
-                appName: 'Comic',
-                controller: _feedback,
-                appVersion: _appVersion,
-                readerDepth: _readerDepth,
-                logProvider: _collectFeedbackLogs,
-                child: child,
-              )
-          : null,
     );
   }
 }
@@ -274,78 +301,110 @@ class _ComicAppState extends State<ComicApp> {
 /// 反馈组件外壳。抽成顶层函数以便宿主测试用测试配置复用同一套接线。
 ///
 /// 结构（由内到外）：
-/// - 外层 Navigator：组件需要 Navigator/Overlay 祖先（面板输入框的选择浮层、
-///   截图放大的 showDialog），而应用自己的 Navigator 在组件之下、祖先查找
-///   只向上走，故补一个只承载组件、不做页面跳转的外层 Navigator。
-/// - ListenableBuilder：外层路由的 onGenerateRoute/pageBuilder 闭包只在
-///   首次构建时求值，appVersion 异步到达、阅读中隐藏悬浮球这类随状态变化
-///   的输入必须经可监听来源注入，否则不会生效。
+/// - ListenableBuilder：随 appVersion（异步到达）、阅读中隐藏入口、设置页改
+///   反馈外观这些输入重建组件——组件外壳只挂一次，实例上的可变输入必须经
+///   可监听来源注入，否则改了也不生效。
+/// - FeedbackWidget：包在宿主 [child]（本应用是 `MaterialApp`）**外侧**
+///   （上游 v12 推荐挂载）。好处有两个：push/pop 路由永远不会重建它，面板
+///   打开时的安卓返回先到组件而不是宿主 —— 有正文 / 手加图片 / 手动日志时
+///   组件先弹「放弃这次反馈？」，确认后才关；截图边界也落在应用 Navigator
+///   之上，根弹窗与页面同样入图。组件在 MaterialApp 外侧会自备
+///   Directionality / MediaQuery / Theme / Localizations / Overlay。
 /// - FeedbackAccess：把控制器与阅读计数暴露给组件子树内的任意路由
 ///   （设置页入口、阅读器菜单），避免跨层构造函数传参。
 ///
-/// Android 返回键由 [FeedbackBackGuard] 处理（挂在 MaterialApp 的
-/// navigatorObservers 与 WidgetsBinding 观察者上），不在此外壳内。
+/// 反馈外观五项由宿主托管（feedback_widget 0.14.0 的接入要求）：值来自
+/// [settings] 快照，改选回传给 [onFeedbackAppearanceChanged] 由宿主保存；
+/// 面板传 `hideSettings: true`，里面的设置页只留服务器设置。
+///
+/// [FeedbackBackGuard] 挂在宿主 MaterialApp 的 navigatorObservers 上，只负责
+/// 「面板开着时别把宿主页面 pop 掉」，不在这里。
 Widget buildFeedbackShell({
   required String apiBase,
   required String appId,
   required FeedbackController controller,
   required ValueListenable<String?> appVersion,
   required ValueNotifier<int> readerDepth,
+  required ValueListenable<AppSettings> settings,
   String? appName,
+  ValueChanged<AppSettings>? onFeedbackAppearanceChanged,
   FeedbackLogProvider? logProvider,
-  // 测试注入点：默认构造 FeedbackWidget；测试可换 builder 注入
-  // 上游的 @visibleForTesting 参数（内存令牌/偏好仓库），避免
-  // 未注册插件通道挂起导致面板卡在加载态。生产路径不引用它们。
+  // 测试注入点：默认构造 FeedbackWidget；测试可换 builder 注入上游的
+  // @visibleForTesting 参数（内存令牌 / 偏好仓库），避免未注册插件通道挂起
+  // 导致面板卡在加载态。生产路径不引用它们。
   @visibleForTesting
   Widget Function({
     required BuildContext context,
     required FeedbackConfig config,
     required FeedbackController controller,
+    required FeedbackHostAppearance appearance,
+    required ValueChanged<FeedbackHostAppearance> onAppearanceChanged,
     required Widget child,
   })? feedbackWidgetBuilder,
-  Widget? child,
+  required Widget child,
 }) {
-  return Navigator(
-    onGenerateRoute: (RouteSettings settings) => PageRouteBuilder<void>(
-      settings: settings,
-      transitionDuration: Duration.zero,
-      reverseTransitionDuration: Duration.zero,
-      pageBuilder: (BuildContext context, Animation<double> animation,
-              Animation<double> secondaryAnimation) =>
-          ListenableBuilder(
-        listenable: Listenable.merge([appVersion, readerDepth]),
-        builder: (BuildContext context, _) {
-          final config = FeedbackConfig(
-            apiBase,
-            appId,
-            appName: appName,
-            appVersion: appVersion.value,
-            side: FeedbackSide.right,
-            showLauncher: readerDepth.value == 0,
-            // 显式声明：灵感球（可拖拽落点）+ 呼出时截取当前应用视口。
-            launcherMode: FeedbackLauncherMode.orb,
-            captureMode: FeedbackCaptureMode.viewport,
-            logProvider: logProvider,
-          );
-          final accessChild = FeedbackAccess(
+  return ListenableBuilder(
+    listenable: Listenable.merge([appVersion, readerDepth, settings]),
+    builder: (BuildContext context, _) {
+      final config = FeedbackConfig(
+        apiBase,
+        appId,
+        appName: appName,
+        appVersion: appVersion.value,
+        side: FeedbackSide.right,
+        showLauncher: readerDepth.value == 0,
+        // 入口形态不在这里写死：由下面宿主托管的 `launcherStyle` 决定
+        // （FeedbackConfig.launcherMode 在托管后不参与）；截图仍是
+        // 「呼出时截取当前应用视口」。
+        captureMode: FeedbackCaptureMode.viewport,
+        // 唤醒快捷键沿用组件默认（Ctrl/⌘ + Shift + F），不在宿主设置页另开
+        // 一项：Android 触屏设备没有硬件键盘，五项已经覆盖手势与入口。
+        wakeShortcut: const FeedbackWakeShortcut(),
+        logProvider: logProvider,
+      );
+      final FeedbackHostAppearance appearance =
+          FeedbackHostAppearance.fromSettings(settings.value);
+      void onAppearanceChanged(FeedbackHostAppearance next) =>
+          onFeedbackAppearanceChanged?.call(next.applyTo(settings.value));
+      final accessChild = FeedbackAccess(
+        controller: controller,
+        readerDepth: readerDepth,
+        child: child,
+      );
+      return feedbackWidgetBuilder?.call(
+            context: context,
+            config: config,
             controller: controller,
-            readerDepth: readerDepth,
-            child: child ?? const SizedBox.shrink(),
+            appearance: appearance,
+            onAppearanceChanged: onAppearanceChanged,
+            child: accessChild,
+          ) ??
+          FeedbackWidget(
+            config: config,
+            controller: controller,
+            // 宿主托管：入口样式、待机样式、唤醒方式、入场动画与光束动效。
+            launcherStyle: appearance.launcherStyle,
+            onLauncherStyleChanged: (FeedbackLauncherStyle style) =>
+                onAppearanceChanged(appearance.copyWith(launcherStyle: style)),
+            orbIdleStyle: appearance.orbIdleStyle,
+            onOrbIdleStyleChanged: (FeedbackOrbIdleStyle style) =>
+                onAppearanceChanged(appearance.copyWith(orbIdleStyle: style)),
+            wakeGestures: appearance.wakeGestures,
+            onWakeGesturesChanged: (Set<FeedbackWakeGesture> gestures) =>
+                onAppearanceChanged(
+                    appearance.copyWith(wakeGestures: gestures)),
+            orbEntrance: appearance.orbEntrance,
+            onOrbEntranceChanged: (FeedbackOrbEntrance entrance) =>
+                onAppearanceChanged(
+                    appearance.copyWith(orbEntrance: entrance)),
+            wakeVisual: appearance.wakeVisual,
+            onWakeVisualChanged: (FeedbackWakeVisual visual) =>
+                onAppearanceChanged(appearance.copyWith(wakeVisual: visual)),
+            // 五项都在本应用设置页，面板只留服务器设置。
+            hideSettings: true,
+            child: accessChild,
           );
-          return feedbackWidgetBuilder?.call(
-                context: context,
-                config: config,
-                controller: controller,
-                child: accessChild,
-              ) ??
-              FeedbackWidget(
-                config: config,
-                controller: controller,
-                child: accessChild,
-              );
-        },
-      ),
-    ),
+    },
   );
 }
 

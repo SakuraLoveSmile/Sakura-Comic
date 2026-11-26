@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:feedback_widget/feedback_widget.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:comic_app/main.dart' show buildFeedbackShell;
+import 'package:comic_app/src/app_settings.dart';
 import 'package:comic_app/src/auth_store.dart';
 import 'package:comic_app/src/diagnostics_screen.dart'
     show buildRedactedDiagnosticsExport;
@@ -50,54 +52,86 @@ void main() {
   }
 
   /// 按真实接线整树挂起：MaterialApp + 返回键守卫 + 反馈外壳。
-  Future<({FeedbackController feedback, ValueNotifier<int> readerDepth})>
-      pumpFeedbackApp(
+  ///
+  /// [injectTestStores] 为 true 时换掉上游的 @visibleForTesting 仓库（内存
+  /// 令牌 / 偏好仓库），让打开面板的用例不必等插件通道超时；为 false 时走
+  /// 生产路径的组件构造——断言宿主托管值这类接线必须用生产路径。
+  Future<
+      ({
+        FeedbackController feedback,
+        ValueNotifier<int> readerDepth,
+        ValueNotifier<AppSettings> settings,
+        List<AppSettings> appearanceChanges,
+      })> pumpFeedbackApp(
     WidgetTester tester, {
     required Widget child,
     String? appVersion,
+    AppSettings initialSettings = const AppSettings(),
     FeedbackLogProvider? logProvider,
+    bool injectTestStores = true,
   }) async {
     final feedback = FeedbackController();
     final readerDepth = ValueNotifier<int>(0);
+    final settings = ValueNotifier<AppSettings>(initialSettings);
     final version = ValueNotifier<String?>(appVersion);
+    final appearanceChanges = <AppSettings>[];
     final guard = FeedbackBackGuard(controller: feedback)..attach();
-    WidgetsBinding.instance.addObserver(guard);
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
-      WidgetsBinding.instance.removeObserver(guard);
       guard.dispose();
       feedback.dispose();
       readerDepth.dispose();
+      settings.dispose();
       version.dispose();
     });
-    await tester.pumpWidget(MaterialApp(
-      navigatorObservers: [guard],
-      builder: (context, child) => buildFeedbackShell(
-        apiBase: 'https://feedback.example.com',
-        appId: 'comic',
-        appName: 'Comic',
-        controller: feedback,
-        appVersion: version,
-        readerDepth: readerDepth,
-        logProvider: logProvider,
-        feedbackWidgetBuilder: ({
-          required context,
-          required config,
-          required controller,
-          required child,
-        }) =>
-            FeedbackWidget(
-          config: config,
-          controller: controller,
-          tokenStoreFactory: (_) => MemoryTokenStore(),
-          serverPrefStore: MemoryServerPrefStore(),
-          child: child,
-        ),
-        child: child,
+    // 组件挂在 MaterialApp 外侧（与生产接线一致），组件外壳的返回处理先于
+    // WidgetsApp，面板打开时的返回因此会先问「放弃这次反馈？」。
+    await tester.pumpWidget(buildFeedbackShell(
+      apiBase: 'https://feedback.example.com',
+      appId: 'comic',
+      appName: 'Comic',
+      controller: feedback,
+      appVersion: version,
+      readerDepth: readerDepth,
+      settings: settings,
+      onFeedbackAppearanceChanged: appearanceChanges.add,
+      logProvider: logProvider,
+      feedbackWidgetBuilder: injectTestStores
+          ? ({
+              required context,
+              required config,
+              required controller,
+              required appearance,
+              required onAppearanceChanged,
+              required child,
+            }) =>
+              FeedbackWidget(
+                config: config,
+                controller: controller,
+                launcherStyle: appearance.launcherStyle,
+                orbIdleStyle: appearance.orbIdleStyle,
+                wakeGestures: appearance.wakeGestures,
+                orbEntrance: appearance.orbEntrance,
+                wakeVisual: appearance.wakeVisual,
+                onLauncherStyleChanged: (style) => onAppearanceChanged(
+                    appearance.copyWith(launcherStyle: style)),
+                hideSettings: true,
+                tokenStoreFactory: (_) => MemoryTokenStore(),
+                serverPrefStore: MemoryServerPrefStore(),
+                child: child,
+              )
+          : null,
+      child: MaterialApp(
+        navigatorObservers: [guard],
+        home: child,
       ),
-      home: child,
     ));
-    return (feedback: feedback, readerDepth: readerDepth);
+    return (
+      feedback: feedback,
+      readerDepth: readerDepth,
+      settings: settings,
+      appearanceChanges: appearanceChanges,
+    );
   }
 
   testWidgets('问题反馈入口只存在于已接入的作用域内', (tester) async {
@@ -107,7 +141,9 @@ void main() {
     await tester
         .pumpWidget(MaterialApp(home: SettingsScreen(repository: repo)));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('客户端版本'), 200);
+    // 版本号那一行已经挪进「更新」小节，滚到本节末尾的小标题即可；
+    // 反馈外观小节在它上面，同一屏内。
+    await tester.scrollUntilVisible(find.text('系统支持与关于'), 200);
     expect(find.text('问题反馈'), findsNothing);
 
     final env = await pumpWithAccess(
@@ -242,18 +278,7 @@ void main() {
   testWidgets('路由跳转不重建反馈会话：草稿跨页面保留', (tester) async {
     final env = await pumpFeedbackApp(
       tester,
-      child: Scaffold(
-        body: Builder(
-          builder: (context) => TextButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const Scaffold(body: Text('page-2')),
-              ),
-            ),
-            child: const Text('open-page-2'),
-          ),
-        ),
-      ),
+      child: const Scaffold(body: Text('home')),
     );
     await tester.pump();
 
@@ -268,22 +293,161 @@ void main() {
     await tester.enterText(field, '跨页面草稿');
     await tester.pump();
 
-    // 面板遮罩会挡住页面按钮，先关面板再导航。
-    env.feedback.close();
+    // 0.14.0 起「关闭面板 = 放弃未提交的草稿」（破坏性变更），所以这里不再
+    // 用「关面板 → 导航 → 再打开」来验证草稿，那是旧版本的行为。改在面板
+    // 保持打开的状态下推入 / 退出宿主页面：组件挂在应用 Navigator 之上，
+    // 草稿与面板状态都不该受影响。检查强度比原来更强（中间没有关闭重置）。
+    final hostNavigator =
+        tester.state<NavigatorState>(find.byType(Navigator).last);
+    hostNavigator.push(MaterialPageRoute<void>(
+      builder: (_) => const Scaffold(body: Text('page-2')),
+    ));
     await tester.pump();
-    await tester.tap(find.text('open-page-2'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('page-2'), findsOneWidget);
+    expect(env.feedback.isOpen, isTrue);
 
-    tester
-        .state<NavigatorState>(find.byType(Navigator).last)
-        .pop();
-    await tester.pumpAndSettle();
+    hostNavigator.pop();
+    await tester.pump();
+    // 退场动画（约 300ms）结束后还要几帧才把路由子树摘掉。
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('page-2'), findsNothing);
+    expect(env.feedback.isOpen, isTrue);
+    expect(find.text('跨页面草稿'), findsOneWidget);
+  });
+
+  testWidgets('返回键先弹放弃确认：继续编辑保留草稿，确认后才关面板', (tester) async {
+    final env = await pumpFeedbackApp(
+      tester,
+      child: const Scaffold(body: Text('home')),
+    );
+    await tester.pump();
 
     env.feedback.open();
     await tester.pump();
     await tester.pump(const Duration(seconds: 3));
-    expect(find.text('跨页面草稿'), findsOneWidget);
+    final field = find.byKey(const Key('feedback-input'));
+    expect(field, findsOneWidget);
+    await tester.enterText(field, '写了一半');
+    await tester.pump();
+
+    // 面板里有用户写的内容：返回先问「放弃这次反馈？」，既不直接关面板，
+    // 也不把底下的宿主页面 pop 掉（守卫的 PopEntry 让宿主路由拒绝 pop）。
+    // handlePopRoute 会一直等到确认框出结果，所以不能 await（会卡住测试）。
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('feedback-discard-confirm')), findsOneWidget);
+    expect(env.feedback.isOpen, isTrue);
+    expect(find.text('home'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('feedback-discard-cancel')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('feedback-discard-confirm')), findsNothing);
+    expect(env.feedback.isOpen, isTrue);
+    expect(find.text('写了一半'), findsOneWidget);
+
+    // 再来一次并确认放弃：面板关闭，宿主页面仍在。
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('feedback-discard-ok')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(env.feedback.isOpen, isFalse);
+    expect(find.text('home'), findsOneWidget);
+  });
+
+  testWidgets('宿主托管的五项外观原样交给组件，设置快照变了组件跟着变',
+      (tester) async {
+    const initial = AppSettings(
+      feedbackLauncherStyle: 'beam',
+      feedbackOrbIdleStyle: 'edge',
+      feedbackWakeGestures: <String>[
+        'two-finger-hold',
+        'two-finger-double-tap',
+      ],
+      feedbackOrbEntrance: 'turn',
+      feedbackWakeVisual: 'aurora',
+    );
+    final env = await pumpFeedbackApp(
+      tester,
+      child: const Scaffold(body: Text('home')),
+      initialSettings: initial,
+      // 生产路径：不做记忆仓库注入，断言的就是组件真正收到的参数。
+      injectTestStores: false,
+    );
+    await tester.pump();
+
+    FeedbackWidget hosted() =>
+        tester.widget<FeedbackWidget>(find.byType(FeedbackWidget));
+
+    expect(hosted().launcherStyle, FeedbackLauncherStyle.beam);
+    expect(hosted().orbIdleStyle, FeedbackOrbIdleStyle.edge);
+    expect(hosted().wakeGestures, <FeedbackWakeGesture>{
+      FeedbackWakeGesture.twoFingerHold,
+      FeedbackWakeGesture.twoFingerDoubleTap,
+    });
+    expect(hosted().orbEntrance, FeedbackOrbEntrance.turn);
+    expect(hosted().wakeVisual, FeedbackWakeVisual.aurora);
+    // 面板只留服务器设置。
+    expect(hosted().hideSettings, isTrue);
+
+    // 设置页保存后的新快照走同一条可监听路径重建组件。
+    env.settings.value = const AppSettings(
+      feedbackLauncherStyle: 'orb',
+      feedbackOrbIdleStyle: 'hidden',
+      feedbackWakeGestures: <String>[],
+      feedbackOrbEntrance: 'drop',
+      feedbackWakeVisual: 'ripple',
+    );
+    await tester.pump();
+    expect(hosted().launcherStyle, FeedbackLauncherStyle.orb);
+    expect(hosted().orbIdleStyle, FeedbackOrbIdleStyle.hidden);
+    expect(hosted().wakeGestures, isEmpty);
+    expect(hosted().orbEntrance, FeedbackOrbEntrance.drop);
+    expect(hosted().wakeVisual, FeedbackWakeVisual.ripple);
+
+    // 面板里的改选（hideSettings 之后不再出现，回调链仍然接通）回到宿主。
+    hosted().onWakeVisualChanged!(FeedbackWakeVisual.aurora);
+    hosted().onWakeGesturesChanged!(<FeedbackWakeGesture>{
+      FeedbackWakeGesture.threeFingerSwipeUp,
+    });
+    expect(env.appearanceChanges, hasLength(2));
+    expect(env.appearanceChanges.first.feedbackWakeVisual, 'aurora');
+    expect(env.appearanceChanges.first.feedbackLauncherStyle, 'orb');
+    expect(env.appearanceChanges.last.feedbackWakeGestures,
+        <String>['three-finger-swipe-up']);
+  });
+
+  testWidgets('面板设置页只剩服务器设置：五项外观不再出现', (tester) async {
+    final env = await pumpFeedbackApp(
+      tester,
+      child: const Scaffold(body: Text('home')),
+    );
+    await tester.pump();
+
+    env.feedback.open();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.tap(find.byKey(const Key('feedback-settings')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // 停在设置页：服务器设置还在，宿主托管的五项一个都不该出现。
+    expect(find.byKey(const Key('feedback-settings-view')), findsOneWidget);
+    expect(find.text('Feedback 服务器'), findsOneWidget);
+    expect(find.text('入口样式'), findsNothing);
+    expect(find.text('唤醒方式'), findsNothing);
+    expect(find.text('唤醒效果'), findsNothing);
+    expect(find.text('唤醒动效'), findsNothing);
+    expect(find.byKey(const Key('feedback-launcher-style-orb')), findsNothing);
+    expect(find.byKey(const Key('feedback-orb-idle-handle')), findsNothing);
+    expect(find.byKey(const Key('feedback-orb-entrance')), findsNothing);
+    expect(find.byKey(const Key('feedback-wake-two-finger-hold')),
+        findsNothing);
   });
 
   testWidgets('服务器表单遮挡：名称、地址、API Key 与错误详情', (tester) async {

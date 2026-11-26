@@ -1,7 +1,7 @@
 name: comic_app
 description: "Komga media library client — Android shell (Flutter UI on top of Rust Core)."
 publish_to: "none"
-version: 0.2.0+3
+version: 0.3.0+4
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -16,13 +16,17 @@ dependencies:
   # 反馈组件（仓库子目录 flutter/feedback）。ref 固定到真实提交 SHA：
   # 不用分支或可变标签；升级时显式改 SHA 并提交本目录 pubspec.lock。
   # 上游仓库公开，走 https 让开发机与 CI 都无需凭据，URL 内不写访问令牌。
+  # 当前固定：v0.17.0（9b8ddcdeac85b105587bd1052bbe758d8a8a130e）。
   feedback_widget:
     git:
       url: https://github.com/SakuraLoveSmile/Sakura-Feedback.git
       path: flutter/feedback
-      ref: 60a9b22eb85904a023dcb60852f3d6be1792f684
+      ref: 9b8ddcdeac85b105587bd1052bbe758d8a8a130e
   # 反馈上报随附真实安装包版本与构建号（package_info_plus）。
   package_info_plus: ^8.3.0
+  # 检查更新时把用户送到下载页：更新只做"告诉你去哪拿"，不在应用内静默装包。
+  # 它本来就在依赖树里（feedback_widget 依赖），这里显式声明以便直接 import。
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:

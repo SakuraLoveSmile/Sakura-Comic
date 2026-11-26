@@ -1,6 +1,10 @@
+import 'package:feedback_widget/feedback_widget.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'app_settings.dart';
+import 'app_update.dart';
 import 'diagnostics_screen.dart';
 import 'feedback_access.dart';
 import 'library_repository.dart';
@@ -10,6 +14,7 @@ import 'outbox_sheet.dart';
 import 'rust_core_api.dart';
 import 'server_manager.dart';
 import 'servers_screen.dart';
+import 'update_section.dart';
 
 /// App settings screen: server connection, offline Outbox queue, cache cleanup,
 /// appearance/density controls, and diagnostics dashboard entry point.
@@ -53,6 +58,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Object? _cacheError;
   bool _statsLoading = true;
 
+  /// The version actually installed (`0.3.0+4`). Read from the package, never
+  /// written down: the screen used to print a hard-coded `1.0.0 (Release)`
+  /// that no build ever shipped.
+  String? _installedVersion;
+
+  /// 设置类控件的统一门控：读取 / 保存中或读取失败时不给改，避免写回旧值。
+  bool get _settingsEditable =>
+      !_isSavingSettings && !_isLoadingSettings && _settingsError == null;
+
   bool get _canRestoreCorrupt {
     final error = _settingsReadError;
     final cause = error is AppSettingsLoadException ? error.cause : error;
@@ -65,6 +79,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadSettings();
     _loadStats();
+    _loadInstalledVersion();
+  }
+
+  Future<void> _loadInstalledVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _installedVersion = '${info.version}+${info.buildNumber}');
+    } catch (error) {
+      // A build whose package metadata cannot be read still runs; the update
+      // section says so instead of guessing a version.
+      debugPrint('[Settings] package info unavailable: $error');
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -291,6 +318,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final manager = widget.manager;
+    // 反馈作用域：只有接了 dart-define 的构建才有；未接入时「反馈外观」整节
+    // 与「问题反馈」入口都不出现（用户没有可改的反馈组件，就不该看到这些开关）。
+    final FeedbackAccess? feedbackAccess = FeedbackAccess.maybeOf(context);
     final totalCache = _cacheStats?.diskBytes.toInt() ?? 0;
     final queued = (_outbox?.pending.toInt() ?? 0) +
         (_outbox?.waiting.toInt() ?? 0) +
@@ -528,16 +558,198 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Divider(),
 
+          // 反馈外观：feedback_widget 0.14.0 起由宿主托管——入口样式、灵感球
+          // 待机样式、唤醒方式、唤醒效果与光束动效都在这里改，组件面板里不再
+          // 出现这几项（面板只留服务器设置）。未接入反馈（缺 dart-define）时
+          // 作用域不存在，整节隐藏。
+          if (feedbackAccess != null) ...[
+            const _SectionHeader(title: '反馈外观'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '反馈入口与动效只在这里改，反馈面板里只保留服务器设置。',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.secondary,
+                    ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.ads_click),
+              title: const Text('入口样式'),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SegmentedButton<String>(
+                  key: const Key('feedback-appearance-launcher-style'),
+                  segments: const [
+                    ButtonSegment(value: 'orb', label: Text('灵感球')),
+                    ButtonSegment(value: 'beam', label: Text('光束唤醒')),
+                  ],
+                  selected: {_settings.feedbackLauncherStyle},
+                  onSelectionChanged: _settingsEditable
+                      ? (selected) {
+                          if (selected.isNotEmpty) {
+                            _updateSettings(_settings.copyWith(
+                                feedbackLauncherStyle: selected.first));
+                          }
+                        }
+                      : null,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '灵感球常驻屏幕边缘：点一下反馈，拖到问题处松手圈选。'
+                '光束唤醒没有常驻入口，靠下面的唤醒手势呼出。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.blur_on),
+              title: const Text('灵感球待机样式'),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SegmentedButton<String>(
+                  key: const Key('feedback-appearance-orb-idle'),
+                  segments: const [
+                    ButtonSegment(value: 'handle', label: Text('小把手')),
+                    ButtonSegment(value: 'edge', label: Text('球体贴边')),
+                    ButtonSegment(value: 'hidden', label: Text('隐藏')),
+                  ],
+                  selected: {_settings.feedbackOrbIdleStyle},
+                  onSelectionChanged: _settingsEditable
+                      ? (selected) {
+                          if (selected.isNotEmpty) {
+                            _updateSettings(_settings.copyWith(
+                                feedbackOrbIdleStyle: selected.first));
+                          }
+                        }
+                      : null,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '待机时的样子不影响唤醒：都用下面的手势呼出；选「隐藏」则平时不占屏幕。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            const ListTile(
+              leading: Icon(Icons.gesture),
+              title: Text('唤醒方式'),
+              subtitle: Text('可多选，也可以全关；只在当前应用内生效'),
+            ),
+            for (final FeedbackWakeGesture gesture
+                in FeedbackWakeGesture.values)
+              CheckboxListTile(
+                key: Key('feedback-appearance-wake-${gesture.id}'),
+                secondary: const Icon(Icons.touch_app_outlined),
+                title: Text(gesture.title),
+                subtitle: Text(gesture.description),
+                value: _settings.feedbackWakeGestures.contains(gesture.id),
+                onChanged: _settingsEditable
+                    ? (checked) {
+                        final next = <String>[
+                          for (final FeedbackWakeGesture item
+                              in FeedbackWakeGesture.values)
+                            if (item == gesture
+                                ? checked == true
+                                : _settings.feedbackWakeGestures
+                                    .contains(item.id))
+                              item.id,
+                        ];
+                        _updateSettings(_settings.copyWith(
+                            feedbackWakeGestures: next));
+                      }
+                    : null,
+              ),
+            ListTile(
+              leading: const Icon(Icons.blur_circular),
+              title: const Text('唤醒效果'),
+              subtitle: const Text('灵感球出现时播放的入场动画'),
+              trailing: DropdownButton<String>(
+                key: const Key('feedback-appearance-orb-entrance'),
+                underline: const SizedBox.shrink(),
+                value: _settings.feedbackOrbEntrance,
+                items: [
+                  for (final FeedbackOrbEntrance entrance
+                      in FeedbackOrbEntrance.values)
+                    DropdownMenuItem(
+                        value: entrance.name, child: Text(entrance.label)),
+                ],
+                onChanged: _settingsEditable
+                    ? (value) {
+                        if (value != null) {
+                          _updateSettings(_settings.copyWith(
+                              feedbackOrbEntrance: value));
+                        }
+                      }
+                    : null,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.waves),
+              title: const Text('唤醒动效'),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SegmentedButton<String>(
+                  key: const Key('feedback-appearance-wake-visual'),
+                  segments: const [
+                    ButtonSegment(value: 'ripple', label: Text('水波纹')),
+                    ButtonSegment(value: 'aurora', label: Text('波光')),
+                  ],
+                  selected: {_settings.feedbackWakeVisual},
+                  onSelectionChanged: _settingsEditable
+                      ? (selected) {
+                          if (selected.isNotEmpty) {
+                            _updateSettings(_settings.copyWith(
+                                feedbackWakeVisual: selected.first));
+                          }
+                        }
+                      : null,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '水波纹与波光只在光束唤醒时出现，用灵感球时看不到。',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ],
+
+          const Divider(),
+
+          // Section: updates. The channel lives in the settings file, so the
+          // section is gated by the same "do not write over an older snapshot"
+          // rule as the controls above it.
+          const _SectionHeader(title: '更新'),
+          UpdateSection(
+            currentVersion: _installedVersion ?? '',
+            channel: UpdateChannel.fromStorage(_settings.updateChannel),
+            enabled: _settingsEditable,
+            onChannelChanged: (channel) => _updateSettings(
+              _settings.copyWith(updateChannel: channel.name),
+            ),
+            // The release page is a browser's job: downloading an APK and
+            // installing it silently is not something this app asks for.
+            openUrl: (uri) => launchUrl(uri, mode: LaunchMode.externalApplication),
+          ),
+
+          const Divider(),
+
           // Section: Diagnostics & About
           const _SectionHeader(title: '系统支持与关于'),
           // 反馈组件未接入（缺 dart-define）时作用域不存在，入口整体隐藏。
-          if (FeedbackAccess.maybeOf(context) case final access?)
+          if (feedbackAccess != null)
             ListTile(
               leading: const Icon(Icons.feedback_outlined),
               title: const Text('问题反馈'),
               subtitle: const Text('截图并附脱敏诊断日志，向开发者反馈问题'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => access.controller.captureAndOpen(),
+              onTap: () => feedbackAccess.controller.captureAndOpen(),
             ),
           ListTile(
             leading: const Icon(Icons.monitor_heart_outlined),
@@ -553,16 +765,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               );
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('客户端版本'),
-            trailing: Text(
-              '1.0.0 (Release)',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-            ),
-          ),
+          // The version itself is stated once, at the top of the 更新 section:
+          // a second, hand-written copy is exactly the lie this tile used to
+          // tell (it always read `1.0.0 (Release)`).
         ],
       ),
     );

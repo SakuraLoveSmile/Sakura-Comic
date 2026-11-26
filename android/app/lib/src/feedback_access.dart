@@ -2,18 +2,21 @@ import 'package:feedback_widget/feedback_widget.dart';
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/widgets.dart';
 
-/// Android 返回键守卫：反馈面板打开时优先关面板、不执行页面返回。
+/// Android 返回键守卫：面板打开时宿主页面不响应 pop，关面板那一步交给
+/// 反馈组件自己的返回处理（有内容时先弹「放弃这次反馈？」，确认后才关）。
 ///
-/// 机制：普通 MaterialApp 没有 Router，BackButtonListener 不可用；返回键经
-/// `handlePopRoute` 按注册顺序遍历 [WidgetsBindingObserver.didPopRoute]。
-/// 本守卫在应用根 initState 注册，早于 WidgetsApp 自身的观察者，因此面板
-/// 打开时直接消费返回事件，内层 Navigator 根本收不到本次返回。
+/// 分工（feedback_widget 0.14/0.15 起）：
+/// - 组件挂在宿主 `MaterialApp` **外侧**，它的 [WidgetsBindingObserver]
+///   比 `WidgetsApp` 先注册，所以返回键先到组件：组件关面板前会确认，
+///   然后返回 true，宿主页面不会被 pop。
+/// - 本守卫作为 [NavigatorObserver] 给每条 ModalRoute 挂 [PopEntry] 哨兵：
+///   面板打开期间 `canPopNotifier` 为 false，这些路由的 popDisposition 是
+///   doNotPop——预测返回手势、以及任何绕过组件直接走 `Navigator.maybePop`
+///   的返回路径都不会把面板底下的宿主页面 pop 掉。
 ///
-/// 同时作为 [NavigatorObserver] 给每条 ModalRoute 挂 [PopEntry] 哨兵：
-/// 面板打开期间 `canPopNotifier` 为 false，让路由的 popDisposition 拒绝
-/// pop——预测返回手势因此留在框架内处理（回到 didPopRoute 路径），而不是
-/// 由系统直接把应用退到后台。
-class FeedbackBackGuard extends NavigatorObserver with WidgetsBindingObserver {
+/// 这里**不消费返回键**：0.5.2 时代本守卫直接 `controller.close()`，那会跳过
+/// 组件 0.15.0 新增的关闭确认，把用户刚写的正文和手加图片静默丢掉。
+class FeedbackBackGuard extends NavigatorObserver {
   FeedbackBackGuard({required this.controller});
 
   final FeedbackController controller;
@@ -43,17 +46,6 @@ class FeedbackBackGuard extends NavigatorObserver with WidgetsBindingObserver {
   }
 
   void _syncPanelClosed() => panelClosed.value = !controller.isOpen;
-
-  /// 系统返回键：面板打开时关面板并消费；否则放行给后续观察者
-  /// （WidgetsApp → 内层 Navigator.maybePop → 正常页面返回）。
-  @override
-  Future<bool> didPopRoute() async {
-    if (controller.isOpen) {
-      controller.close();
-      return true;
-    }
-    return false;
-  }
 
   void _attach(Route<dynamic>? route) {
     if (route is! ModalRoute<dynamic> || _entries.containsKey(route)) return;

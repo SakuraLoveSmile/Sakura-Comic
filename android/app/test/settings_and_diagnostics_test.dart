@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:comic_app/src/diagnostics_screen.dart';
 import 'package:comic_app/src/app_settings.dart';
+import 'package:comic_app/src/app_update.dart';
 import 'package:comic_app/src/library_repository.dart';
 import 'package:comic_app/src/models.dart';
 import 'package:comic_app/src/outbox_sheet.dart';
@@ -747,5 +748,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(repo.savedSettings.autoSyncMetadata, isFalse);
     expect(repo.loadCalls, 1);
+  });
+
+  testWidgets('「更新」小节把渠道写进设置文件，重进还是那一档', (tester) async {
+    final repo = _FakeSettingsRepository();
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsScreen(repository: repo, activeServerName: 'Server'),
+    ));
+    await tester.pumpAndSettle();
+
+    // 版本号读不出来时（widget 测试没有插件通道）不给检查，而不是拿
+    // 一个猜的版本去比：那样每次都会"发现新版本"。
+    await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('update-channel')), 250);
+    expect(find.text('版本号读取失败'), findsOneWidget);
+    expect(
+      tester
+          .widget<SegmentedButton<UpdateChannel>>(
+              find.byKey(const ValueKey('update-channel')))
+          .onSelectionChanged,
+      isNotNull,
+      reason: '设置可编辑时渠道必须能改',
+    );
+
+    // 视口只有 800x600：滚到这一节之后按钮仍可能贴在下边缘，先让它进屏。
+    await tester.ensureVisible(find.text('预览版'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('预览版'));
+    await tester.pumpAndSettle();
+    expect(repo.savedSettings.updateChannel, 'preview');
+
+    // 重新建页面 = 退出重进：值从设置文件读回，不是留在内存里。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsScreen(repository: repo, activeServerName: 'Server'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('update-channel')), 250);
+    final segmented = tester.widget<SegmentedButton<UpdateChannel>>(
+      find.byKey(const ValueKey('update-channel')),
+    );
+    expect(segmented.selected, {UpdateChannel.preview});
   });
 }
